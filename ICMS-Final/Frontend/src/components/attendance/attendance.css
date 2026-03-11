@@ -1,0 +1,109 @@
+/* Attendance Cards Styles */
+.attendance-card {
+  transition: all 0.3s ease;
+}
+
+.attendance-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* Excel-like table styles */
+.attendance-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.attendance-table th,
+.attendance-table td {
+  border: 1px solid #e5e7eb;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.attendance-table th:last-child,
+.attendance-table td:last-child {
+  border-right: 1px solid #e5e7eb;
+}
+
+.attendance-table tr:last-child td {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Sticky column styles */
+.sticky-column {
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 10;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+/* Status indicators */
+.status-present {
+  background-color: #10b981;
+}
+
+.status-absent {
+  background-color: #ef4444;
+}
+
+.status-late {
+  background-color: #f59e0b;
+}
+
+.status-na {
+  background-color: #6b7280;
+}
+
+/* Loading animation */
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive table */
+@media (max-width: 768px) {
+  .attendance-table {
+    font-size: 0.875rem;
+  }
+  
+  .attendance-table th,
+  .attendance-table td {
+    padding: 0.5rem 0.25rem;
+  }
+}
+
+/* Chart container */
+.chart-container {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
+/* Export button animation */
+.export-button {
+  transition: all 0.2s ease;
+}
+
+.export-button:hover {
+  transform: scale(1.05);
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
