@@ -89,6 +89,59 @@ class DepartmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    def update(self, request, *args, **kwargs):
+        if is_department_scoped_admin(request.user):
+            return Response({'error': 'Forbidden: Department admins cannot update departments.'}, status=status.HTTP_403_FORBIDDEN)
+        instance = self.get_object()
+        prev_num = instance.num_semesters
+        partial = kwargs.pop('partial', False)
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            with transaction.atomic():
+                department = serializer.save()
+                new_num = department.num_semesters
+
+                if new_num > prev_num:
+                    for i in range(prev_num + 1, new_num + 1):
+                        semester_name = f"Semester {i}"
+                        if not Semester.objects.filter(department=department, name=semester_name).exists():
+                            semester_code = _build_unique_semester_code(department.code, i)
+                            Semester.objects.create(
+                                name=semester_name,
+                                semester_code=semester_code,
+                                program=department.name,
+                                capacity=30,
+                                department=department
+                            )
+                elif new_num < prev_num:
+                    semesters = Semester.objects.filter(department=department)
+                    for sem in semesters:
+                        match = re.search(r"(\\d+)$", sem.name or "")
+                        sem_num = int(match.group(1)) if match else None
+                        if sem_num and sem_num > new_num:
+                            if Course.objects.filter(semester=sem).exists():
+                                return Response(
+                                    {'error': f'Cannot reduce semesters. {sem.name} has courses.'},
+                                    status=status.HTTP_400_BAD_REQUEST
+                                )
+                            sem.delete()
+
+                return Response(serializer.data, status=status.HTTP_200_OK)
+        except IntegrityError as e:
+            logger.error(f"Database integrity error updating department: {str(e)}")
+            return Response(
+                {'error': 'Department with this name or code already exists.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Error updating department: {str(e)}")
+            return Response(
+                {'error': f'Failed to update department: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     @action(detail=True, methods=['get'])
     def semesters(self, request, pk=None):
         department = self.get_object()
@@ -133,6 +186,12 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Course.objects.select_related('semester', 'semester__department').all()
+        semester_id = self.request.query_params.get('semester')
+        department_id = self.request.query_params.get('department')
+        if semester_id is not None:
+            queryset = queryset.filter(semester_id=semester_id)
+        if department_id is not None:
+            queryset = queryset.filter(semester__department_id=department_id)
         if is_department_scoped_admin(self.request.user):
             assigned_department_id = get_user_assigned_department_id(self.request.user)
             queryset = queryset.filter(semester__department_id=assigned_department_id)

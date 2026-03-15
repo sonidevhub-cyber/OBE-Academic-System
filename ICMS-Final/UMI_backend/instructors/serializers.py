@@ -17,7 +17,7 @@ class InstructorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Instructor
-        fields = ['id', 'user', 'employee_id', 'name', 'phone', 'password', 'department', 'department_id', 'designation', 'hire_date', 'date_of_birth', 'gender', 'blood_group', 'salary', 'specialization', 'address', 'experience_years', 'image', 'ai_profile_notes', 'ai_last_generated', 'user_email', 'department_name']
+        fields = ['id', 'user', 'employee_id', 'name', 'phone', 'password', 'department', 'department_id', 'employment_type', 'designation', 'hire_date', 'date_of_birth', 'gender', 'blood_group', 'salary', 'specialization', 'address', 'experience_years', 'image', 'ai_profile_notes', 'ai_last_generated', 'user_email', 'department_name']
         read_only_fields = ['user', 'user_email', 'department_name']
 
     def create(self, validated_data):

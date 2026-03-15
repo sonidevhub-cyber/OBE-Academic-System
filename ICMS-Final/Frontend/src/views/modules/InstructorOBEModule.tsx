@@ -47,9 +47,9 @@ const InstructorOBEModule: React.FC<Props> = ({ instructorId }) => {
 
   const CLODefinitionForm = () => {
     const [newCLO, setNewCLO] = useState({
-      code: '',
+      clo_number: 1,
       description: '',
-      bloom_level: 1
+      bloom_level: 'Remember'
     });
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -61,7 +61,7 @@ const InstructorOBEModule: React.FC<Props> = ({ instructorId }) => {
           ...newCLO,
           course: selectedCourse
         });
-        setNewCLO({ code: '', description: '', bloom_level: 1 });
+        setNewCLO({ clo_number: 1, description: '', bloom_level: 'Remember' });
         loadCLOs();
       } catch (error) {
         console.error('Failed to create CLO:', error);
@@ -74,24 +74,25 @@ const InstructorOBEModule: React.FC<Props> = ({ instructorId }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <input
-              type="text"
-              placeholder="CLO Code (e.g., CLO1)"
-              value={newCLO.code}
-              onChange={(e) => setNewCLO({...newCLO, code: e.target.value})}
+              type="number"
+              min="1"
+              placeholder="CLO # (e.g., 1)"
+              value={newCLO.clo_number}
+              onChange={(e) => setNewCLO({...newCLO, clo_number: Number(e.target.value)})}
               className="px-3 py-2 border rounded-md"
               required
             />
             <select
               value={newCLO.bloom_level}
-              onChange={(e) => setNewCLO({...newCLO, bloom_level: Number(e.target.value)})}
+              onChange={(e) => setNewCLO({...newCLO, bloom_level: e.target.value})}
               className="px-3 py-2 border rounded-md"
             >
-              <option value={1}>Remember</option>
-              <option value={2}>Understand</option>
-              <option value={3}>Apply</option>
-              <option value={4}>Analyze</option>
-              <option value={5}>Evaluate</option>
-              <option value={6}>Create</option>
+              <option value="Remember">Remember</option>
+              <option value="Understand">Understand</option>
+              <option value="Apply">Apply</option>
+              <option value="Analyze">Analyze</option>
+              <option value="Evaluate">Evaluate</option>
+              <option value="Create">Create</option>
             </select>
             <button
               type="submit"
@@ -117,7 +118,7 @@ const InstructorOBEModule: React.FC<Props> = ({ instructorId }) => {
               <div key={clo.id} className="p-3 bg-gray-50 rounded-md">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="font-medium">{clo.code}</span>
+                    <span className="font-medium">CLO {clo.clo_number}</span>
                     <span className="ml-2 text-sm text-gray-600">
                       (Bloom Level: {clo.bloom_level})
                     </span>

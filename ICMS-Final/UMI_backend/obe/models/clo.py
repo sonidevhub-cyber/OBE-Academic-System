@@ -9,3 +9,11 @@ class CLO(models.Model):
 
     def __str__(self):
         return f"{self.course.name} - CLO {self.clo_number}"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "clo_number"],
+                name="unique_clo_number_per_course",
+            )
+        ]

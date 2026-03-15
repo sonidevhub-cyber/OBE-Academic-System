@@ -3,8 +3,8 @@ from .models import Instructor
 
 @admin.register(Instructor)
 class InstructorAdmin(admin.ModelAdmin):
-    list_display = ['employee_id', 'name', 'get_email', 'department', 'designation', 'phone']
-    list_filter = ['department', 'designation', 'hire_date']
+    list_display = ['employee_id', 'name', 'get_email', 'department', 'employment_type', 'designation', 'phone']
+    list_filter = ['department', 'employment_type', 'designation', 'hire_date']
     search_fields = ['employee_id', 'name', 'phone', 'user__email']
     raw_id_fields = ['user']
     

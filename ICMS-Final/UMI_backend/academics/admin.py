@@ -14,8 +14,8 @@ class SemesterAdmin(admin.ModelAdmin):
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ['name', 'code', 'credits', 'semester']
-    list_filter = ['semester__department', 'credits']
+    list_display = ['name', 'code', 'course_type', 'parent_course', 'credits', 'semester']
+    list_filter = ['course_type', 'semester__department', 'credits']
     search_fields = ['name', 'code']
 
 @admin.register(Timetable)

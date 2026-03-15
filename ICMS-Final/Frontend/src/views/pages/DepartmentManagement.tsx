@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { departmentService, courseService, semesterService } from '../../api/apiService';
+import obeService from '../../api/obeService';
 import DepartmentModal from '../../components/ui/modals/DepartmentModal';
-import StudentModal from '../../components/ui/modals/StudentModal';
 import CourseModal from '../../components/ui/modals/CourseModal';
 import { useAuth } from '../../context/AuthContext';
 
@@ -19,6 +19,15 @@ interface Course {
   code: string;
   description: string;
   credits: number;
+  course_type?: string;
+  parent_course?: number | null;
+  parent_course_details?: {
+    course_id: number;
+    name: string;
+    code: string;
+    credits: number;
+    course_type?: string;
+  };
   semester_details?: {
     semester_id: number;
     name: string;
@@ -29,34 +38,57 @@ interface Course {
   };
 }
 
+interface Semester {
+  semester_id: number;
+  id?: number;
+  name: string;
+  semester_code: string;
+  capacity: number;
+  department: number;
+}
+
 interface DepartmentManagementProps {
   activeTab: string;
 }
 
 const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, hasPermission } = useAuth();
   // Always show add department button for now - simplified for testing
   const canModifyDepartment = true;
+  const canDefineCLO =
+    currentUser?.rbac_role === 'SAC' ||
+    currentUser?.rbac_role === 'JSC' ||
+    currentUser?.role === 'super_admin' ||
+    currentUser?.is_superuser ||
+    hasPermission('manage_clo');
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [semesters, setSemesters] = useState<Semester[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showDepartmentModal, setShowDepartmentModal] = useState<boolean>(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
-  const [showStudentModal, setShowStudentModal] = useState<boolean>(false);
-  const [preSelectedDepartment, setPreSelectedDepartment] = useState<number | undefined>(undefined);
-  const [preSelectedSemester, setPreSelectedSemester] = useState<number | undefined>(undefined);
-  const [expandedDepartments, setExpandedDepartments] = useState<Set<number>>(new Set());
   const [showCourseModal, setShowCourseModal] = useState<boolean>(false);
   const [selectedSemesterForCourse, setSelectedSemesterForCourse] = useState<{departmentId: number, semesterNumber: number} | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [selectedDepartments, setSelectedDepartments] = useState<Set<number>>(new Set());
-  const [showBulkActions, setShowBulkActions] = useState<boolean>(false);
-  const [generatingCourses, setGeneratingCourses] = useState<boolean>(false);
-  const [semesterFilter, setSemesterFilter] = useState<number | 'all'>('all');
-  const [departmentFilter, setDepartmentFilter] = useState<number | 'all'>('all');
+  const [activeSubTab, setActiveSubTab] = useState<'structure' | 'clo' | 'settings'>('structure');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<number | null>(null);
+  const [selectedSemesterId, setSelectedSemesterId] = useState<number | null>(null);
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+  const [clos, setClos] = useState<any[]>([]);
+  const [gaOptions, setGaOptions] = useState<any[]>([]);
+  const [cloGaMappings, setCloGaMappings] = useState<any[]>([]);
+  const [newMapping, setNewMapping] = useState<{ cloId: number; gaId: number; weightage: number }>({
+    cloId: 0,
+    gaId: 0,
+    weightage: 1
+  });
+  const [showCloModal, setShowCloModal] = useState(false);
+  const [editingClo, setEditingClo] = useState<any | null>(null);
+  const [cloForm, setCloForm] = useState({ clo_number: 1, description: '', bloom_level: 'Remember' });
+  const [cloGaSelections, setCloGaSelections] = useState<Array<{ gaId: number; weightage: number }>>([]);
+  const [semesterEdits, setSemesterEdits] = useState<Record<number, number>>({});
 
   const fetchDepartments = useCallback(async () => {
     setLoading(true);
@@ -88,10 +120,46 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
     }
   }, [activeTab, fetchDepartments, fetchCourses]);
 
+  useEffect(() => {
+    if (departments.length > 0 && selectedDepartmentId === null) {
+      setSelectedDepartmentId(departments[0].id);
+    }
+  }, [departments, selectedDepartmentId]);
+
+  useEffect(() => {
+    if (selectedDepartmentId) {
+      loadSemesters(selectedDepartmentId);
+    }
+  }, [selectedDepartmentId]);
+
+  useEffect(() => {
+    if (selectedDepartmentId && semesters.length > 0 && selectedSemesterId === null) {
+      const first = semesters.find((s) => s.department === selectedDepartmentId);
+      setSelectedSemesterId(first?.semester_id ?? null);
+    }
+  }, [selectedDepartmentId, semesters, selectedSemesterId]);
+
+  useEffect(() => {
+    if (selectedCourseId) {
+      loadCLOs(selectedCourseId);
+      loadCLOGAMappings(selectedCourseId);
+    } else {
+      setClos([]);
+      setCloGaMappings([]);
+    }
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    loadGraduateAttributes();
+  }, []);
+
   const handleSubmit = async (formData: any) => {
     try {
       if (editingDepartment) {
         await departmentService.updateDepartment(editingDepartment.id, formData);
+        if (selectedDepartmentId === editingDepartment.id) {
+          loadSemesters(editingDepartment.id);
+        }
       } else {
         await departmentService.createDepartment(formData);
       }
@@ -127,63 +195,45 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
     }
   };
 
-  const getCoursesForSemester = (semesterNumber: number, departmentId: number) => {
-    return courses.filter(course =>
-      course.semester_details?.name === `Semester ${semesterNumber}` &&
-      course.semester_details?.department === departmentId
-    );
+  const getCourseDepartmentId = (course: Course) => {
+    const dept = course.semester_details?.department;
+    if (typeof dept === 'number') return dept;
+    if (typeof (dept as any)?.department_id === 'number') return (dept as any).department_id;
+    if (typeof (dept as any)?.id === 'number') return (dept as any).id;
+    return null;
   };
 
-  const handleAddStudent = (departmentId: number, semesterNumber: number) => {
-    setPreSelectedDepartment(departmentId);
-    setPreSelectedSemester(semesterNumber);
-    setShowStudentModal(true);
+  const getCourseSemesterId = (course: Course) => {
+    const sem = course.semester_details;
+    if (!sem) return null;
+    if (typeof (sem as any)?.semester_id === 'number') return (sem as any).semester_id;
+    if (typeof (sem as any)?.id === 'number') return (sem as any).id;
+    return null;
   };
 
-  const getDepartmentStats = (department: Department) => {
-    const departmentCourses = courses.filter(course =>
-      course.semester_details?.department === department.id
-    );
-
-    const totalCourses = departmentCourses.length;
-    const totalCredits = departmentCourses.reduce((sum, course) => sum + course.credits, 0);
-    const semesterCount = department.num_semesters;
-
-    return {
-      totalCourses,
-      totalCredits,
-      semesterCount
-    };
-  };
-
-  const toggleDepartmentExpansion = (departmentId: number) => {
-    setExpandedDepartments(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(departmentId)) {
-        newSet.delete(departmentId);
-      } else {
-        newSet.add(departmentId);
-      }
-      return newSet;
+  const getCoursesForSemester = (semesterId: number, departmentId: number) => {
+    return courses.filter((course) => {
+      const courseSemesterId = getCourseSemesterId(course);
+      const courseDeptId = getCourseDepartmentId(course);
+      return courseSemesterId === semesterId && courseDeptId === departmentId;
     });
   };
 
-  const handleAddCourse = (departmentId: number, semesterNumber: number) => {
-    setSelectedSemesterForCourse({ departmentId, semesterNumber });
+
+  const handleAddCourse = (departmentId: number, semesterId: number) => {
+    setSelectedSemesterForCourse({ departmentId, semesterNumber: semesterId });
     setShowCourseModal(true);
   };
 
   const handleCourseSubmit = async (courseData: any) => {
     try {
       if (editingCourse) {
-        await courseService.updateCourse(editingCourse.course_id, courseData);
+        const response = await courseService.updateCourse(editingCourse.course_id, courseData);
+        return response;
       } else {
-        await courseService.createCourse(courseData);
+        const response = await courseService.createCourse(courseData);
+        return response;
       }
-      fetchCourses(); // Refresh courses
-      setShowCourseModal(false);
-      setSelectedSemesterForCourse(null);
-      setEditingCourse(null);
     } catch (error: any) {
       console.error('Error saving course:', error);
       throw error;
@@ -211,168 +261,189 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
     }
   };
 
-  const handleDeleteSemester = async (semesterId: number, semesterName: string) => {
-    if (window.confirm(`Are you sure you want to delete ${semesterName}? This will also delete all courses in this semester.`)) {
-      try {
-        await semesterService.deleteSemester(semesterId);
-        fetchDepartments(); // Refresh to get updated semester data
-        fetchCourses(); // Refresh courses as they might be affected
-      } catch (error: any) {
-        console.error('Error deleting semester:', error);
-        setError(error.message || 'Failed to delete semester');
-      }
-    }
-  };
-
-  const generateDummyCourses = async (departmentId: number, semesterNumber: number) => {
-    setGeneratingCourses(true);
+  const loadCLOs = async (courseId: number) => {
     try {
-      // Get department info for course codes
-      const department = departments.find(d => d.id === departmentId);
-      if (!department) return;
-
-      // Course templates based on department type
-      const courseTemplates = {
-        'CS': [
-          { name: 'Programming Fundamentals', code: 'CS101', credits: 3, description: 'Introduction to programming concepts' },
-          { name: 'Data Structures', code: 'CS201', credits: 3, description: 'Basic data structures and algorithms' },
-          { name: 'Database Systems', code: 'CS301', credits: 3, description: 'Database design and management' },
-          { name: 'Software Engineering', code: 'CS401', credits: 3, description: 'Software development methodologies' },
-          { name: 'Computer Networks', code: 'CS501', credits: 3, description: 'Network protocols and architecture' }
-        ],
-        'EE': [
-          { name: 'Circuit Analysis', code: 'EE101', credits: 3, description: 'Basic electrical circuits' },
-          { name: 'Electronics', code: 'EE201', credits: 3, description: 'Electronic devices and circuits' },
-          { name: 'Power Systems', code: 'EE301', credits: 3, description: 'Electrical power generation and distribution' },
-          { name: 'Control Systems', code: 'EE401', credits: 3, description: 'Automatic control systems' },
-          { name: 'Digital Signal Processing', code: 'EE501', credits: 3, description: 'Signal processing techniques' }
-        ],
-        'ME': [
-          { name: 'Engineering Drawing', code: 'ME101', credits: 2, description: 'Technical drawing and CAD' },
-          { name: 'Thermodynamics', code: 'ME201', credits: 3, description: 'Heat and energy systems' },
-          { name: 'Fluid Mechanics', code: 'ME301', credits: 3, description: 'Fluid dynamics and applications' },
-          { name: 'Machine Design', code: 'ME401', credits: 3, description: 'Mechanical design principles' },
-          { name: 'Manufacturing Processes', code: 'ME501', credits: 3, description: 'Industrial manufacturing techniques' }
-        ],
-        'CE': [
-          { name: 'Engineering Mechanics', code: 'CE101', credits: 3, description: 'Statics and dynamics' },
-          { name: 'Structural Analysis', code: 'CE201', credits: 3, description: 'Analysis of structures' },
-          { name: 'Concrete Technology', code: 'CE301', credits: 3, description: 'Concrete materials and design' },
-          { name: 'Transportation Engineering', code: 'CE401', credits: 3, description: 'Highway and traffic engineering' },
-          { name: 'Environmental Engineering', code: 'CE501', credits: 3, description: 'Environmental systems' }
-        ],
-        'BA': [
-          { name: 'Business Mathematics', code: 'BA101', credits: 3, description: 'Mathematical concepts in business' },
-          { name: 'Financial Accounting', code: 'BA201', credits: 3, description: 'Accounting principles' },
-          { name: 'Marketing Management', code: 'BA301', credits: 3, description: 'Marketing strategies' },
-          { name: 'Human Resource Management', code: 'BA401', credits: 3, description: 'HR practices and policies' },
-          { name: 'Business Ethics', code: 'BA501', credits: 3, description: 'Ethical business practices' }
-        ]
-      };
-
-      // Get courses for this department type or use default
-      const templates = courseTemplates[department.code as keyof typeof courseTemplates] || [
-        { name: 'Introduction to Subject', code: `${department.code}101`, credits: 3, description: 'Basic concepts' },
-        { name: 'Advanced Topics', code: `${department.code}201`, credits: 3, description: 'Advanced concepts' },
-        { name: 'Specialized Course', code: `${department.code}301`, credits: 3, description: 'Specialized topics' },
-        { name: 'Research Methods', code: `${department.code}401`, credits: 3, description: 'Research methodology' },
-        { name: 'Capstone Project', code: `${department.code}501`, credits: 3, description: 'Final project' }
-      ];
-
-      // Create courses for this semester
-      for (const template of templates) {
-        const courseData = {
-          name: template.name,
-          code: template.code,
-          description: template.description,
-          credits: template.credits,
-          department: departmentId,
-          semester: semesterNumber
-        };
-
-        await courseService.createCourse(courseData);
-      }
-
-      fetchCourses(); // Refresh courses
+      const data = await obeService.getCourseOutcomes(courseId);
+      setClos(Array.isArray(data) ? data : data?.results || []);
     } catch (error: any) {
-      console.error('Error generating dummy courses:', error);
-      setError(error.message || 'Failed to generate dummy courses');
-    } finally {
-      setGeneratingCourses(false);
+      console.error('Error loading CLOs:', error);
+      setError(error.message || 'Failed to load CLOs');
     }
   };
 
-  const filteredDepartments = departments.filter(dept => {
-    const matchesSearch = dept.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      dept.code.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDepartmentFilter = departmentFilter === 'all' || dept.id === departmentFilter;
-    return matchesSearch && matchesDepartmentFilter;
-  });
-
-  const getFilteredSemesters = (departmentId: number, totalSemesters: number) => {
-    const allSemesters = Array.from({ length: totalSemesters }, (_, i) => i + 1);
-    if (semesterFilter === 'all') {
-      return allSemesters;
+  const loadGraduateAttributes = async () => {
+    try {
+      const data = await obeService.getGraduateAttributes();
+      setGaOptions(Array.isArray(data) ? data : data?.results || []);
+    } catch (error: any) {
+      console.error('Error loading graduate attributes:', error);
     }
-    return allSemesters.filter(sem => sem === semesterFilter);
   };
 
-  const clearFilters = () => {
-    setSemesterFilter('all');
-    setDepartmentFilter('all');
-    setSearchTerm('');
-  };
-
-  const getActiveFiltersCount = () => {
-    let count = 0;
-    if (semesterFilter !== 'all') count++;
-    if (departmentFilter !== 'all') count++;
-    if (searchTerm.trim()) count++;
-    return count;
-  };
-
-  const handleSelectDepartment = (departmentId: number) => {
-    setSelectedDepartments(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(departmentId)) {
-        newSet.delete(departmentId);
-      } else {
-        newSet.add(departmentId);
+  const loadSemesters = async (departmentId: number) => {
+    try {
+      const response = await departmentService.getSemestersByDepartment(departmentId);
+      const data = Array.isArray(response.data) ? response.data : response.data?.results || [];
+      const normalized = data.map((sem: any) => ({
+        ...sem,
+        semester_id: sem.semester_id ?? sem.id
+      }));
+      setSemesters(normalized);
+      if (!selectedSemesterId) {
+        setSelectedSemesterId(normalized[0]?.semester_id ?? null);
       }
-      return newSet;
+    } catch (error: any) {
+      console.error('Error loading semesters:', error);
+    }
+  };
+
+  const loadCLOGAMappings = async (courseId: number) => {
+    try {
+      const data = await obeService.getCLOGAMappings(courseId);
+      setCloGaMappings(Array.isArray(data) ? data : data?.results || []);
+    } catch (error: any) {
+      console.error('Error loading CLO-GA mappings:', error);
+    }
+  };
+
+  const openCreateClo = () => {
+    setEditingClo(null);
+    setCloForm({ clo_number: 1, description: '', bloom_level: 'Remember' });
+    setCloGaSelections([]);
+    setShowCloModal(true);
+  };
+
+  const openEditClo = (clo: any) => {
+    setEditingClo(clo);
+    setCloForm({
+      clo_number: clo.clo_number || 1,
+      description: clo.description || '',
+      bloom_level: clo.bloom_level || 'Remember'
     });
+    const existingMappings = cloGaMappings.filter((m) => m.clo === clo.id);
+    setCloGaSelections(
+      existingMappings.map((m) => ({
+        gaId: m.ga,
+        weightage: m.weightage ?? 1
+      }))
+    );
+    setShowCloModal(true);
   };
 
-  const handleSelectAllDepartments = () => {
-    if (selectedDepartments.size === departments.length) {
-      setSelectedDepartments(new Set());
-    } else {
-      setSelectedDepartments(new Set(departments.map(d => d.id)));
-    }
-  };
-
-  const handleBulkGenerateCourses = async () => {
-    if (selectedDepartments.size === 0) return;
-
-    setGeneratingCourses(true);
+  const saveClo = async () => {
+    if (!selectedCourseId) return;
     try {
-      for (const departmentId of Array.from(selectedDepartments)) {
-        const department = departments.find(d => d.id === departmentId);
-        if (!department) continue;
-
-        for (let semesterNumber = 1; semesterNumber <= department.num_semesters; semesterNumber++) {
-          await generateDummyCourses(departmentId, semesterNumber);
-        }
+      let cloId = editingClo?.id;
+      if (editingClo) {
+        const updated = await obeService.updateCLO(editingClo.id, {
+          ...cloForm,
+          course: selectedCourseId
+        });
+        cloId = updated?.id ?? cloId;
+      } else {
+        const created = await obeService.createCLO({
+          ...cloForm,
+          course: selectedCourseId
+        });
+        cloId = created?.id ?? cloId;
       }
-      setSelectedDepartments(new Set());
-      setShowBulkActions(false);
+      const mappings = cloGaSelections
+        .filter((m) => m.gaId)
+        .map((m) => ({
+          clo: cloId,
+          ga: m.gaId,
+          weightage: m.weightage || 1
+        }));
+      if (cloId && mappings.length > 0) {
+        await obeService.bulkCreateCLOGAMappings({ mappings });
+        loadCLOGAMappings(selectedCourseId);
+      }
+      setShowCloModal(false);
+      setEditingClo(null);
+      loadCLOs(selectedCourseId);
     } catch (error: any) {
-      console.error('Error in bulk course generation:', error);
-      setError(error.message || 'Failed to generate courses');
-    } finally {
-      setGeneratingCourses(false);
+      setError(error.message || 'Failed to save CLO');
     }
   };
+
+  const deleteClo = async (cloId: number) => {
+    if (!window.confirm('Delete this CLO?')) return;
+    try {
+      await obeService.deleteCLO(cloId);
+      if (selectedCourseId) {
+        loadCLOs(selectedCourseId);
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to delete CLO');
+    }
+  };
+
+  const handleSemesterCapacityChange = (semesterId: number, value: number) => {
+    setSemesterEdits((prev) => ({ ...prev, [semesterId]: value }));
+  };
+
+  const saveSemesterCapacity = async (semesterId: number) => {
+    const capacity = semesterEdits[semesterId];
+    if (capacity === undefined) return;
+    try {
+      await semesterService.updateSemester(semesterId, { capacity });
+      if (selectedDepartmentId) {
+        loadSemesters(selectedDepartmentId);
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to update semester capacity');
+    }
+  };
+
+  const deleteSemester = async (semesterId: number) => {
+    const hasCourses =
+      selectedDepartmentId &&
+      getCoursesForSemester(semesterId, selectedDepartmentId).length > 0;
+    if (hasCourses) return;
+    if (!window.confirm('Delete this semester?')) return;
+    try {
+      await semesterService.deleteSemester(semesterId);
+      if (selectedDepartmentId) {
+        loadSemesters(selectedDepartmentId);
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to delete semester');
+    }
+  };
+
+  const addCloGaMapping = async () => {
+    if (!newMapping.cloId || !newMapping.gaId) return;
+    try {
+      await obeService.bulkCreateCLOGAMappings({
+        mappings: [
+          {
+            clo: newMapping.cloId,
+            ga: newMapping.gaId,
+            weightage: newMapping.weightage || 1
+          }
+        ]
+      });
+      if (selectedCourseId) {
+        loadCLOGAMappings(selectedCourseId);
+      }
+      setNewMapping({ cloId: 0, gaId: 0, weightage: 1 });
+    } catch (error: any) {
+      setError(error.message || 'Failed to add CLO-GA mapping');
+    }
+  };
+
+  const deleteCloGaMapping = async (mappingId: number) => {
+    if (!window.confirm('Delete this CLO-GA mapping?')) return;
+    try {
+      await obeService.deleteCLOGAMapping(mappingId);
+      if (selectedCourseId) {
+        loadCLOGAMappings(selectedCourseId);
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to delete CLO-GA mapping');
+    }
+  };
+
 
   if (activeTab !== 'departments') {
     return null;
@@ -384,95 +455,44 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold mb-2">Department Management</h2>
-            <p className="text-indigo-100">Organize and manage academic departments, semesters, and courses</p>
-          </div>
-          {canModifyDepartment && (
+          <h2 className="text-3xl font-bold mb-2">Academic Units</h2>
+          <p className="text-indigo-100">Manage departments, semesters, courses, and outcomes</p>
+        </div>
+        {canModifyDepartment && (
+          <button
+            onClick={() => setShowDepartmentModal(true)}
+            className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-lg transition-all backdrop-blur-sm"
+          >
+            <span>Add Department</span>
+          </button>
+        )}
+      </div>
+      </div>
+
+      {/* Sub Tabs */}
+      <div className="bg-white rounded-xl shadow-lg p-4">
+        <div className="flex items-center space-x-6 border-b border-gray-200">
+          {[
+            { id: 'structure', label: 'Structure' },
+            { id: 'clo', label: 'CLO Management' },
+            { id: 'settings', label: 'Settings' }
+          ].map((tab) => (
             <button
-              onClick={() => setShowDepartmentModal(true)}
-              className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-lg transition-all flex items-center space-x-2 backdrop-blur-sm"
+              key={tab.id}
+              onClick={() => setActiveSubTab(tab.id as 'structure' | 'clo' | 'settings')}
+              className={`py-2 px-1 border-b-2 text-sm font-semibold ${
+                activeSubTab === tab.id
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              <span>Add Department</span>
+              {tab.label}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* Filter Controls */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-          <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 flex-1">
-            {/* Search Input */}
-            <div className="relative flex-1 max-w-md">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                placeholder="Search departments..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
-
-            {/* Department Filter */}
-            <div className="min-w-[200px]">
-              <select
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="all">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept.id} value={dept.id}>{dept.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Semester Filter */}
-            <div className="min-w-[180px]">
-              <select
-                value={semesterFilter}
-                onChange={(e) => setSemesterFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="all">All Semesters</option>
-                {Array.from({ length: 8 }, (_, i) => i + 1).map(sem => (
-                  <option key={sem} value={sem}>Semester {sem}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Filter Actions */}
-          <div className="flex items-center space-x-3">
-            {getActiveFiltersCount() > 0 && (
-              <>
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                  {getActiveFiltersCount()} filter{getActiveFiltersCount() > 1 ? 's' : ''} active
-                </span>
-                <button
-                  onClick={clearFilters}
-                  className="text-gray-500 hover:text-gray-700 text-sm font-medium flex items-center space-x-1"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  <span>Clear all</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {error && (
+      {activeSubTab === 'structure' && error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <div className="flex items-center">
             <svg className="h-6 w-6 text-red-400 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -483,263 +503,481 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
         </div>
       )}
 
-      {/* Results Summary */}
-      {!loading && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H9z" />
-              </svg>
-              <span className="text-blue-800 font-medium">
-                Showing {filteredDepartments.length} of {departments.length} departments
-                {semesterFilter !== 'all' && ` • Filtered to Semester ${semesterFilter}`}
-                {departmentFilter !== 'all' && ` • ${departments.find(d => d.id === departmentFilter)?.name || 'Selected Department'}`}
-              </span>
-            </div>
-            {getActiveFiltersCount() > 0 && (
-              <button
-                onClick={clearFilters}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                View All
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {loading ? (
+      {activeSubTab === 'structure' && loading ? (
         <div className="flex justify-center items-center py-16">
           <div className="text-center">
             <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-500 mx-auto"></div>
             <p className="mt-4 text-gray-600">Loading departments...</p>
           </div>
         </div>
-      ) : (
-        <div className="grid gap-8">
-          {/* Add Department Card */}
-          {canModifyDepartment && (
-            <div
-              className="bg-white rounded-xl shadow-lg overflow-hidden border-2 border-dashed border-gray-300 hover:border-indigo-400 transition-all duration-200 cursor-pointer group"
-              onClick={() => setShowDepartmentModal(true)}
-            >
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:from-indigo-200 group-hover:to-purple-200 transition-colors">
-                  <svg className="w-8 h-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Add New Department</h3>
-                <p className="text-gray-600">Create a new academic department</p>
+      ) : activeSubTab === 'structure' ? (
+        <div className="bg-white rounded-xl shadow-lg p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-1">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Departments</h3>
+              <div className="space-y-2">
+                {departments.map((dept) => (
+                  <button
+                    key={dept.id}
+                    onClick={() => {
+                      setSelectedDepartmentId(dept.id);
+                      setSelectedSemesterId(null);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-lg border ${
+                      selectedDepartmentId === dept.id
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="font-medium">{dept.name}</div>
+                    <div className="text-xs text-gray-500">{dept.code}</div>
+                  </button>
+                ))}
               </div>
             </div>
+
+            <div className="lg:col-span-3">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Semester Flow</h3>
+                  <p className="text-sm text-gray-500">Select a semester to view courses</p>
+                </div>
+                {selectedDepartmentId && selectedSemesterId && (
+                  <button
+                    onClick={() => handleAddCourse(selectedDepartmentId, selectedSemesterId)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
+                  >
+                    Add Course
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                {selectedDepartmentId &&
+                  semesters
+                    .filter((s) => s.department === selectedDepartmentId)
+                    .map((sem) => (
+                    <button
+                      key={sem.semester_id}
+                      onClick={() => setSelectedSemesterId(sem.semester_id)}
+                      className={`px-3 py-1.5 rounded-full text-sm border ${
+                        selectedSemesterId === sem.semester_id
+                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {sem.name}
+                    </button>
+                  ))}
+              </div>
+
+              <div className="overflow-x-auto">
+                {selectedDepartmentId && selectedSemesterId ? (
+                  (() => {
+                    const semesterCourses = getCoursesForSemester(selectedSemesterId, selectedDepartmentId);
+                    const lectureCourses = semesterCourses.filter((course) => (course.course_type || 'LECTURE') === 'LECTURE');
+                    const labCourses = semesterCourses.filter((course) => (course.course_type || 'LECTURE') === 'LAB');
+
+                    const renderTable = (items: Course[], label: string) => (
+                      <div className="mb-6 last:mb-0">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{label}</h4>
+                          <span className="text-xs text-gray-500">{items.length} course{items.length === 1 ? '' : 's'}</span>
+                        </div>
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Course</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Credits</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {items.map((course) => (
+                              <tr key={course.course_id}>
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                                  {course.name}
+                                  {course.course_type === 'LAB' && course.parent_course_details && (
+                                    <span className="ml-2 text-xs text-gray-500">
+                                      (Lab of {course.parent_course_details.code})
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{course.code}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{course.credits}</td>
+                                <td className="px-4 py-3 text-sm">
+                                  <div className="flex items-center space-x-2">
+                                    <button
+                                      onClick={() => handleEditCourse(course)}
+                                      className="text-indigo-600 hover:text-indigo-800"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteCourse(course.course_id)}
+                                      className="text-red-600 hover:text-red-800"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {items.length === 0 && (
+                          <div className="text-center text-sm text-gray-500 py-6">No courses in this category.</div>
+                        )}
+                      </div>
+                    );
+
+                    if (semesterCourses.length === 0) {
+                      return <div className="text-center text-sm text-gray-500 py-6">No courses yet.</div>;
+                    }
+
+                    return (
+                      <div className="space-y-8">
+                        {renderTable(lectureCourses, 'Theory Courses')}
+                        {renderTable(labCourses, 'Lab Courses')}
+                      </div>
+                    );
+                  })()
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {activeSubTab === 'clo' && (
+        <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+          {!canDefineCLO && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+              CLO management is restricted to SAC or authorized JSC users.
+            </div>
           )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+              <select
+                value={selectedDepartmentId ?? ''}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  setSelectedDepartmentId(value);
+                  setSelectedSemesterId(null);
+                  setSelectedCourseId(null);
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">Select Department</option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
+              <select
+                value={selectedSemesterId ?? ''}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  setSelectedSemesterId(value);
+                  setSelectedCourseId(null);
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">Select Semester</option>
+                {selectedDepartmentId &&
+                  semesters
+                    .filter((s) => s.department === selectedDepartmentId)
+                    .map((sem) => (
+                      <option key={sem.semester_id} value={sem.semester_id}>
+                        {sem.name}
+                      </option>
+                    ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Course</label>
+              <select
+                value={selectedCourseId ?? ''}
+                onChange={(e) => setSelectedCourseId(Number(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              >
+                <option value="">Select Course</option>
+                {selectedDepartmentId && selectedSemesterId &&
+                  getCoursesForSemester(selectedSemesterId, selectedDepartmentId).map((course) => (
+                    <option key={course.course_id} value={course.course_id}>
+                      {course.code} - {course.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
 
-          {departments.map((dept) => {
-            const stats = getDepartmentStats(dept);
-            const isExpanded = expandedDepartments.has(dept.id);
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">CLOs</h3>
+              <p className="text-sm text-gray-500">Create, update, or remove CLOs for the selected course.</p>
+            </div>
+            <button
+              onClick={openCreateClo}
+              disabled={!selectedCourseId || !canDefineCLO}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
+            >
+              Add CLO
+            </button>
+          </div>
 
-            return (
-              <div key={dept.id} className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
-                {/* Department Header */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-gray-200">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-4 mb-3">
-                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                          <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                          </svg>
-                        </div>
-                        <div>
-                          <h3 className="text-2xl font-bold text-gray-900">{dept.name}</h3>
-                          <p className="text-indigo-600 font-medium">{dept.code}</p>
-                        </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CLO #</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bloom Level</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {clos.map((clo) => (
+                  <tr key={clo.id}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">CLO {clo.clo_number}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{clo.description}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{clo.bloom_level}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={() => openEditClo(clo)}
+                          className={`text-indigo-600 hover:text-indigo-800 ${!canDefineCLO ? 'opacity-50 pointer-events-none' : ''}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteClo(clo.id)}
+                          className={`text-red-600 hover:text-red-800 ${!canDefineCLO ? 'opacity-50 pointer-events-none' : ''}`}
+                        >
+                          Delete
+                        </button>
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {selectedCourseId && clos.length === 0 && (
+              <div className="text-center text-sm text-gray-500 py-6">No CLOs found for this course.</div>
+            )}
+          </div>
 
-                      {dept.description && (
-                        <p className="text-gray-600 mb-4">{dept.description}</p>
-                      )}
+          <div className="border-t border-gray-200 pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">CLO-GA Mapping</h3>
+                <p className="text-sm text-gray-500">Map CLOs to Graduate Attributes with weightage.</p>
+              </div>
+            </div>
 
-                      {/* Department Statistics */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-white rounded-lg p-4 shadow-sm">
-                          <div className="flex items-center">
-                            <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center mr-3">
-                              <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500">Total Courses</p>
-                              <p className="text-xl font-bold text-gray-900">{stats.totalCourses}</p>
-                            </div>
-                          </div>
-                        </div>
+            {!canDefineCLO && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 mb-4">
+                CLO-GA mapping is restricted to SAC or authorized JSC users.
+              </div>
+            )}
 
-                        <div className="bg-white rounded-lg p-4 shadow-sm">
-                          <div className="flex items-center">
-                            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-                              <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                              </svg>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500">Semesters</p>
-                              <p className="text-xl font-bold text-gray-900">{stats.semesterCount}</p>
-                            </div>
-                          </div>
-                        </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">CLO</label>
+                <select
+                  value={newMapping.cloId}
+                  onChange={(e) => setNewMapping({ ...newMapping, cloId: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!canDefineCLO || !selectedCourseId}
+                >
+                  <option value={0}>Select CLO</option>
+                  {clos.map((clo) => (
+                    <option key={`clo-map-${clo.id}`} value={clo.id}>
+                      CLO {clo.clo_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Graduate Attribute</label>
+                <select
+                  value={newMapping.gaId}
+                  onChange={(e) => setNewMapping({ ...newMapping, gaId: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!canDefineCLO || !selectedCourseId}
+                >
+                  <option value={0}>Select GA</option>
+                  {gaOptions.map((ga) => (
+                    <option key={`ga-map-${ga.id}`} value={ga.id}>
+                      {ga.code}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Weightage</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.1"
+                  value={newMapping.weightage}
+                  onChange={(e) => setNewMapping({ ...newMapping, weightage: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  disabled={!canDefineCLO || !selectedCourseId}
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={addCloGaMapping}
+                  disabled={!canDefineCLO || !selectedCourseId}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
+                >
+                  Add Mapping
+                </button>
+              </div>
+            </div>
 
-                        <div className="bg-white rounded-lg p-4 shadow-sm">
-                          <div className="flex items-center">
-                            <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-                              <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500">Total Credits</p>
-                              <p className="text-xl font-bold text-gray-900">{stats.totalCredits}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CLO</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">GA</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Weightage</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {cloGaMappings.map((mapping) => (
+                    <tr key={mapping.id}>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {(() => {
+                          const clo = clos.find((c) => c.id === mapping.clo);
+                          return clo ? `CLO ${clo.clo_number}` : `CLO ${mapping.clo}`;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {(() => {
+                          const ga = gaOptions.find((g) => g.id === mapping.ga);
+                          return ga ? `${ga.code} - ${ga.description}` : mapping.ga;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{mapping.weightage}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <button
+                          onClick={() => deleteCloGaMapping(mapping.id)}
+                          className={`text-red-600 hover:text-red-800 ${!canDefineCLO ? 'opacity-50 pointer-events-none' : ''}`}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {selectedCourseId && cloGaMappings.length === 0 && (
+                <div className="text-center text-sm text-gray-500 py-6">No mappings yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'settings' && (
+        <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="border border-gray-200 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Department Actions</h3>
+              <div className="space-y-2">
+                {departments.map((dept) => (
+                  <div key={dept.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-3">
+                    <div>
+                      <div className="font-medium text-gray-800">{dept.name}</div>
+                      <div className="text-xs text-gray-500">{dept.code}</div>
                     </div>
-
-                    <div className="flex items-center space-x-3 ml-6">
+                    <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => toggleDepartmentExpansion(dept.id)}
-                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                        onClick={() => handleEditDepartment(dept)}
+                        className="px-3 py-1.5 text-sm border border-indigo-200 text-indigo-700 rounded-md hover:bg-indigo-50"
                       >
-                        <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                        <span>{isExpanded ? 'Collapse' : 'Expand'}</span>
+                        Edit
                       </button>
-
-                      {canModifyDepartment && (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleEditDepartment(dept)}
-                            className="text-indigo-600 hover:text-indigo-900 p-2 rounded-lg hover:bg-indigo-50 transition-colors"
-                            title="Edit Department"
-                          >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDepartment(dept.id)}
-                            className="text-red-600 hover:text-red-900 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                            title="Delete Department"
-                          >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
+                      <button
+                        onClick={() => handleDeleteDepartment(dept.id)}
+                        className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
-                </div>
+                ))}
+              </div>
+            </div>
 
-                {/* Display semesters based on department's num_semesters and filters */}
-                {isExpanded && (
-                  <div className="space-y-4">
-                    {getFilteredSemesters(dept.id, dept.num_semesters).map((semesterNumber) => {
-                      const semesterCourses = getCoursesForSemester(semesterNumber, dept.id);
-                      const totalCredits = semesterCourses.reduce((sum, course) => sum + course.credits, 0);
-
+            <div className="border border-gray-200 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Semester Settings</h3>
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
+                <select
+                  value={selectedDepartmentId ?? ''}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setSelectedDepartmentId(value);
+                    setSelectedSemesterId(null);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Select Department</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-3">
+                {selectedDepartmentId &&
+                  semesters
+                    .filter((s) => s.department === selectedDepartmentId)
+                    .map((sem) => {
+                      const hasCourses =
+                        !!selectedDepartmentId &&
+                        getCoursesForSemester(sem.semester_id, selectedDepartmentId).length > 0;
                       return (
-                        <div key={semesterNumber} className="bg-white rounded-lg border border-gray-200 p-4">
-                          <div className="flex justify-between items-center mb-3">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-                                <span className="text-white text-sm font-bold">{semesterNumber}</span>
-                              </div>
-                              <div>
-                                <h5 className="font-semibold text-gray-900">Semester {semesterNumber}</h5>
-                                <p className="text-sm text-gray-500">{semesterCourses.length} courses • {totalCredits} credits</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-<button
-                                onClick={() => handleAddCourse(dept.id, semesterNumber)}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                </svg>
-                                <span>Add Course</span>
-                              </button>
-                              {canModifyDepartment && (
-                                <button
-                                  onClick={() => handleDeleteSemester(semesterNumber, `Semester ${semesterNumber}`)}
-                                  className="text-red-600 hover:text-red-900 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                                  title="Delete Semester"
-                                >
-                                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              )}
-                            </div>
+                        <div key={sem.semester_id} className="flex items-center justify-between border border-gray-100 rounded-lg p-3">
+                          <div>
+                            <div className="font-medium text-gray-800">{sem.name}</div>
+                            <div className="text-xs text-gray-500">{sem.semester_code}</div>
                           </div>
-
-                          {semesterCourses.length > 0 ? (
-                            <div className="space-y-2">
-                              {semesterCourses.map((course) => (
-                                <div key={course.course_id} className="flex justify-between items-center bg-gray-50 rounded-lg p-3">
-                                  <div className="flex-1">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-6 h-6 bg-blue-100 rounded flex items-center justify-center">
-                                        <svg className="w-3 h-3 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                        </svg>
-                                      </div>
-                                      <div>
-                                        <p className="font-medium text-gray-900">{course.name}</p>
-                                        <p className="text-sm text-gray-500">{course.code}</p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center space-x-3">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                      {course.credits} credits
-                                    </span>
-                                    {canModifyDepartment && (
-                                      <button
-                                        onClick={() => handleDeleteCourse(course.course_id)}
-                                        className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50 transition-colors"
-                                        title="Delete Course"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-center py-6">
-                              <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                              </svg>
-                              <p className="text-gray-500 text-sm">No courses added yet</p>
-                            </div>
-                          )}
+                          <div className="flex items-center space-x-3">
+                            <input
+                              type="number"
+                              min="1"
+                              value={semesterEdits[sem.semester_id] ?? sem.capacity}
+                              onChange={(e) => handleSemesterCapacityChange(sem.semester_id, Number(e.target.value))}
+                              className="w-24 px-2 py-1 border border-gray-300 rounded-md"
+                            />
+                            <button
+                              onClick={() => saveSemesterCapacity(sem.semester_id)}
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => deleteSemester(sem.semester_id)}
+                              disabled={hasCourses}
+                              className="px-3 py-1.5 text-sm rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
-                  </div>
-                )}
               </div>
-            );
-          })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -756,31 +994,145 @@ const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ activeTab }
         />
       )}
 
-      {showStudentModal && (
-        <StudentModal
-          isOpen={showStudentModal}
-          onClose={() => setShowStudentModal(false)}
-          onSuccess={() => {
-            setShowStudentModal(false);
-            setPreSelectedDepartment(undefined);
-            setPreSelectedSemester(undefined);
-          }}
-          preSelectedDepartment={preSelectedDepartment}
-          preSelectedSemester={preSelectedSemester}
-        />
-      )}
-
       {showCourseModal && selectedSemesterForCourse && (
         <CourseModal
           isOpen={showCourseModal}
           onClose={() => {
             setShowCourseModal(false);
             setSelectedSemesterForCourse(null);
+            fetchCourses();
+            setEditingCourse(null);
           }}
           onSubmit={handleCourseSubmit}
           preSelectedDepartment={selectedSemesterForCourse?.departmentId}
           preSelectedSemester={selectedSemesterForCourse?.semesterNumber}
+          canDefineCLO={canDefineCLO}
         />
+      )}
+
+      {showCloModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">{editingClo ? 'Edit CLO' : 'Add CLO'}</h3>
+              <button onClick={() => setShowCloModal(false)} className="text-gray-400 hover:text-gray-600">x</button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">CLO Number</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={cloForm.clo_number}
+                  onChange={(e) => setCloForm({ ...cloForm, clo_number: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bloom Level</label>
+                <select
+                  value={cloForm.bloom_level}
+                  onChange={(e) => setCloForm({ ...cloForm, bloom_level: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="Remember">Remember</option>
+                  <option value="Understand">Understand</option>
+                  <option value="Apply">Apply</option>
+                  <option value="Analyze">Analyze</option>
+                  <option value="Evaluate">Evaluate</option>
+                  <option value="Create">Create</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={cloForm.description}
+                  onChange={(e) => setCloForm({ ...cloForm, description: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Graduate Attributes</label>
+                  <button
+                    type="button"
+                    onClick={() => setCloGaSelections((prev) => [...prev, { gaId: 0, weightage: 1 }])}
+                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    Add GA
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {cloGaSelections.map((sel, idx) => (
+                    <div key={`ga-sel-${idx}`} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                      <select
+                        value={sel.gaId}
+                        onChange={(e) => {
+                          const gaId = Number(e.target.value);
+                          setCloGaSelections((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], gaId };
+                            return next;
+                          });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      >
+                        <option value={0}>Select GA</option>
+                        {gaOptions.map((ga) => (
+                          <option key={`ga-opt-${ga.id}`} value={ga.id}>
+                            {ga.code} - {ga.description}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="1"
+                        step="0.1"
+                        value={sel.weightage}
+                        onChange={(e) => {
+                          const weightage = Number(e.target.value);
+                          setCloGaSelections((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], weightage };
+                            return next;
+                          });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCloGaSelections((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="text-sm text-red-600 hover:text-red-800 justify-self-start"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {cloGaSelections.length === 0 && (
+                    <div className="text-sm text-gray-500">No GA mappings added.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowCloModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveClo}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

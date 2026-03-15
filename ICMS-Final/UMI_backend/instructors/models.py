@@ -18,6 +18,12 @@ class Instructor(models.Model):
         ('O+', 'O+'),
         ('O-', 'O-'),
     )
+
+    EMPLOYMENT_TYPE_CHOICES = (
+        ('PERMANENT', 'Permanent'),
+        ('VISITING', 'Visiting'),
+        ('INTERNEE', 'Internee'),
+    )
     
     user = models.OneToOneField(
         User,
@@ -28,6 +34,7 @@ class Instructor(models.Model):
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=20)
     department = models.ForeignKey("academics.Department", on_delete=models.SET_NULL, null=True, blank=True)
+    employment_type = models.CharField(max_length=10, choices=EMPLOYMENT_TYPE_CHOICES, default='PERMANENT')
     designation = models.CharField(max_length=100, null=True, blank=True)
     hire_date = models.DateField(null=True, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
