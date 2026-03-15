@@ -65,12 +65,17 @@ class CourseSerializer(serializers.ModelSerializer):
     semester = serializers.PrimaryKeyRelatedField(
         queryset=Semester.objects.all(), write_only=True, required=False
     )
+    parent_course = serializers.PrimaryKeyRelatedField(
+        queryset=Course.objects.all(), required=False, allow_null=True
+    )
     semester_details = SemesterSerializer(source='semester', read_only=True)
+    parent_course_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
         fields = [
-            'course_id', 'name', 'code', 'description', 'credits',
+            'course_id', 'name', 'code', 'description', 'credits', 'course_type',
+            'parent_course', 'parent_course_details',
             'department_id', 'semester_number', 'semester', 'semester_details'
         ]
 
@@ -137,6 +142,32 @@ class CourseSerializer(serializers.ModelSerializer):
             validated_data['semester'] = semester_obj
 
         return super().update(instance, validated_data)
+
+    def validate(self, attrs):
+        course_type = attrs.get('course_type', getattr(self.instance, 'course_type', 'LECTURE'))
+        parent_course = attrs.get('parent_course', getattr(self.instance, 'parent_course', None))
+
+        if course_type == 'LAB' and not parent_course:
+            raise serializers.ValidationError("Lab course must have a parent_course (theory).")
+        if course_type == 'LECTURE' and parent_course:
+            raise serializers.ValidationError("Lecture course cannot have a parent_course.")
+
+        target_semester = attrs.get('semester', None) or getattr(self.instance, 'semester', None)
+        if parent_course and target_semester and parent_course.semester_id != target_semester.semester_id:
+            raise serializers.ValidationError("Parent course must be in the same semester.")
+
+        return attrs
+
+    def get_parent_course_details(self, obj):
+        if obj.parent_course:
+            return {
+                'course_id': obj.parent_course.course_id,
+                'name': obj.parent_course.name,
+                'code': obj.parent_course.code,
+                'credits': obj.parent_course.credits,
+                'course_type': obj.parent_course.course_type,
+            }
+        return None
 
 
 # ===========================

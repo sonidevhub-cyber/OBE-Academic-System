@@ -37,7 +37,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const initialDepartment = department.value;
     const initialSemester = semester.value;
     const initialCourse = course.value;
-
     department.addEventListener("change", () => {
       loadSemesters(department.value, null);
     });

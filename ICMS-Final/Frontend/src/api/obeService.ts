@@ -33,18 +33,28 @@ class OBEService {
   }
 
   async getCourseOutcomes(courseId: number) {
-    const response = await api.get(`/obe/course-outcomes/?course=${courseId}`);
+    const response = await api.get(`/obe/clos/?course=${courseId}`);
     return response.data;
   }
 
-  async getGraduateAttributes(departmentId: number) {
-    const response = await api.get(`/obe/graduate-attributes/?department=${departmentId}`);
+  async getGraduateAttributes(departmentId?: number) {
+    const params = departmentId ? `?department=${departmentId}` : '';
+    const response = await api.get(`/obe/graduate-attributes/${params}`);
     return response.data;
   }
 
   async createCLO(data: any) {
-    console.log('Creating CLO with URL: /obe/course-outcomes/');
-    const response = await api.post('/obe/course-outcomes/', data);
+    const response = await api.post('/obe/clos/', data);
+    return response.data;
+  }
+
+  async updateCLO(id: number, data: any) {
+    const response = await api.put(`/obe/clos/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteCLO(id: number) {
+    const response = await api.delete(`/obe/clos/${id}/`);
     return response.data;
   }
 
@@ -55,6 +65,21 @@ class OBEService {
 
   async createAssessment(data: any) {
     const response = await api.post('/obe/assessments/', data);
+    return response.data;
+  }
+
+  async bulkCreateCLOGAMappings(data: { mappings: Array<{ clo: number; ga: number; weightage: number }> }) {
+    const response = await api.post('/obe/clo-ga-mappings/bulk_create/', data);
+    return response.data;
+  }
+
+  async getCLOGAMappings(courseId: number) {
+    const response = await api.get(`/obe/clo-ga-mappings/?course=${courseId}`);
+    return response.data;
+  }
+
+  async deleteCLOGAMapping(id: number) {
+    const response = await api.delete(`/obe/clo-ga-mappings/${id}/`);
     return response.data;
   }
 

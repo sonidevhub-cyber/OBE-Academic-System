@@ -15,6 +15,8 @@ interface Department {
   code: string;
 }
 
+type EmploymentType = 'PERMANENT' | 'VISITING' | 'INTERNEE';
+
 const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, instructorId, onSuccess }): React.ReactElement | null => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,12 +24,26 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    employee_id: string;
+    department_id: string;
+    employment_type: EmploymentType;
+    designation: string;
+    specialization: string;
+    experience_years: string;
+    hire_date: string;
+    address: string;
+    password: string;
+  }>({
     name: '',
     email: '',
     phone: '',
     employee_id: '',
     department_id: '',  // Changed from department to department_id
+    employment_type: 'PERMANENT',
     designation: '',
     specialization: '',
     experience_years: '',
@@ -88,6 +104,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
             phone: instructor.phone || '',
             employee_id: instructor.employee_id || '',
             department_id: departmentId ? departmentId.toString() : '',
+            employment_type: instructor.employment_type || 'PERMANENT',
             designation: instructor.designation || '',
             specialization: instructor.specialization || '',
             experience_years: instructor.experience_years?.toString() || '',
@@ -113,6 +130,10 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    if (name === 'employment_type') {
+      setFormData(prev => ({ ...prev, employment_type: value as EmploymentType }));
+      return;
+    }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -174,6 +195,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
         dataToSend.append('user_email', formData.email);
         dataToSend.append('phone', formData.phone);
         dataToSend.append('department_id', formData.department_id);
+        dataToSend.append('employment_type', formData.employment_type);
         
         if (formData.employee_id) dataToSend.append('employee_id', formData.employee_id);
         if (formData.designation) dataToSend.append('designation', formData.designation);
@@ -192,6 +214,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
           user_email: formData.email,
           phone: formData.phone,
           department_id: parseInt(formData.department_id),
+          employment_type: formData.employment_type,
           ...(formData.employee_id && { employee_id: formData.employee_id }),
           ...(formData.designation && { designation: formData.designation }),
           ...(formData.specialization && { specialization: formData.specialization }),
@@ -214,6 +237,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
             user_email: formData.email,
             phone: formData.phone,
             department_id: parseInt(formData.department_id),
+            employment_type: formData.employment_type,
             ...(formData.employee_id && { employee_id: formData.employee_id }),
             ...(formData.designation && { designation: formData.designation }),
             ...(formData.specialization && { specialization: formData.specialization }),
@@ -387,6 +411,24 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
                           {dept.name} ({dept.code})
                         </option>
                       ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="employment_type">
+                      Employment Type *
+                    </label>
+                    <select
+                      id="employment_type"
+                      name="employment_type"
+                      required
+                      value={formData.employment_type}
+                      onChange={handleInputChange}
+                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    >
+                      <option value="PERMANENT">Permanent</option>
+                      <option value="VISITING">Visiting</option>
+                      <option value="INTERNEE">Internee</option>
                     </select>
                   </div>
 

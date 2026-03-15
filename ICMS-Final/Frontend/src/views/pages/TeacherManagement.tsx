@@ -85,7 +85,8 @@ const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
       filtered = filtered.filter(inst =>
         (inst.name && inst.name.toLowerCase().includes(lowerSearch)) ||
         (inst.department_name && inst.department_name.toLowerCase().includes(lowerSearch)) ||
-        (inst.designation && inst.designation.toLowerCase().includes(lowerSearch))
+        (inst.designation && inst.designation.toLowerCase().includes(lowerSearch)) ||
+        (inst.employment_type && inst.employment_type.toLowerCase().includes(lowerSearch))
       );
     }
     
@@ -228,6 +229,7 @@ const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Instructor</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Department</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Employment</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Designation</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Experience</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Actions</th>
@@ -292,6 +294,9 @@ const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {instructor.department_name || 'Unassigned'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {instructor.employment_type ? instructor.employment_type.toLowerCase().replace(/^\w/, c => c.toUpperCase()) : 'Permanent'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {instructor.designation || 'N/A'}

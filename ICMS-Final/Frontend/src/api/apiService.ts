@@ -67,7 +67,7 @@ export const courseService = {
   create: (data: any) => api.post('academics/courses/', data),
   update: (id: number, data: any) => api.put(`academics/courses/${id}/`, data),
   delete: (id: number) => api.delete(`academics/courses/${id}/`),
-  getBySemester: (semesterId: number) => api.get(`academics/semesters/${semesterId}/courses/`),
+  getBySemester: (semesterId: number) => api.get(`academics/courses/?semester=${semesterId}`),
   // Backward compatibility aliases
   getAllCourses: function() { return this.getAll(); },
   getCourseById: function(id: number) { return this.getById(id); },

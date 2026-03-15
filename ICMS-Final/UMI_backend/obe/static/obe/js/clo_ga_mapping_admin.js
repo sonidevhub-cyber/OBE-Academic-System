@@ -108,7 +108,7 @@ document.addEventListener("DOMContentLoaded", () => {
     clearOptions(clo);
     if (!courseId) return;
 
-    const url = `/api/obe/clo-by-course/?course=${encodeURIComponent(courseId)}`;
+    const url = `/api/obe/clos-by-course/?course=${encodeURIComponent(courseId)}`;
     const resp = await fetch(url, { credentials: "same-origin" });
     if (!resp.ok) return;
     const data = await resp.json();

@@ -55,12 +55,25 @@ class Semester(models.Model):
 
 # ---------- Course ----------
 class Course(models.Model):
+    COURSE_TYPE_CHOICES = [
+        ('LECTURE', 'Lecture'),
+        ('LAB', 'Lab'),
+    ]
+
     course_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=10, unique=True)
     description = models.TextField(blank=True)
     credits = models.PositiveIntegerField(default=3)
     semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name="courses", null=True, blank=True)
+    course_type = models.CharField(max_length=10, choices=COURSE_TYPE_CHOICES, default='LECTURE')
+    parent_course = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        related_name='lab_courses',
+        null=True,
+        blank=True,
+    )
 
     def __str__(self):
         return f"{self.name} ({self.code})"

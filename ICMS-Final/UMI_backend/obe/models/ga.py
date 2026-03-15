@@ -4,5 +4,5 @@ class GraduateAttribute(models.Model):
     code = models.CharField(max_length=10)
     description = models.TextField()
 
-    def _str_(self):
+    def __str__(self):
         return self.code

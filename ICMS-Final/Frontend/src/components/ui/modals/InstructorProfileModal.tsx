@@ -44,6 +44,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
     phone: instructor.phone || '',
     employee_id: instructor.employee_id || '',
     department: (typeof instructor.department === 'object' && instructor.department !== null ? ((instructor.department as any).department_id || instructor.department.id) : '') || '',
+    employment_type: instructor.employment_type || 'PERMANENT',
     designation: instructor.designation || '',
     specialization: instructor.specialization || '',
     experience_years: instructor.experience_years?.toString() || '',
@@ -94,6 +95,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
       phone: instructor.phone || '',
       employee_id: instructor.employee_id || '',
       department: (typeof instructor.department === 'object' && instructor.department !== null ? instructor.department.id : '') || '',
+      employment_type: instructor.employment_type || 'PERMANENT',
       designation: instructor.designation || '',
       specialization: instructor.specialization || '',
       experience_years: instructor.experience_years?.toString() || '',
@@ -144,6 +146,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
       }
 
       if (formData.employee_id) formDataToSend.append('employee_id', formData.employee_id);
+      if (formData.employment_type) formDataToSend.append('employment_type', formData.employment_type);
       if (formData.designation) formDataToSend.append('designation', formData.designation);
       if (formData.specialization) formDataToSend.append('specialization', formData.specialization);
       if (formData.experience_years) formDataToSend.append('experience_years', String(parseInt(formData.experience_years, 10) || 0));
@@ -367,6 +370,24 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
                   </div>
 
                   <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="employment_type">
+                      Employment Type *
+                    </label>
+                    <select
+                      id="employment_type"
+                      name="employment_type"
+                      required
+                      value={formData.employment_type}
+                      onChange={handleInputChange}
+                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    >
+                      <option value="PERMANENT">Permanent</option>
+                      <option value="VISITING">Visiting</option>
+                      <option value="INTERNEE">Internee</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="designation">
                       Designation
                     </label>
@@ -487,6 +508,11 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <p className="text-sm text-gray-500">Department</p>
                     <p className="font-medium">{departmentName}</p>
+                  </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500">Employment Type</p>
+                    <p className="font-medium">{instructor.employment_type || 'Permanent'}</p>
                   </div>
 
                   <div className="bg-gray-50 p-4 rounded-lg">

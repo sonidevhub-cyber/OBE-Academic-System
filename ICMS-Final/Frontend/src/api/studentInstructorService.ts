@@ -38,6 +38,7 @@ export interface Instructor {
   department?: Department | number;
   department_id?: number;
   department_name?: string;
+  employment_type?: 'PERMANENT' | 'VISITING' | 'INTERNEE';
   qualification?: string;
   experience?: number;
   joining_date?: string;

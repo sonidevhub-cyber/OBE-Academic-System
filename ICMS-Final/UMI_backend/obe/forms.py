@@ -1,49 +1,57 @@
 from django import forms
 from django.contrib.admin.widgets import FilteredSelectMultiple
+
+from academics.models import Course, Department, Semester
 from .models import CLO, CLOGAMapping
-from academics.models import Course, Semester, Department
+
+BLOOM_LEVEL_CHOICES = [
+    ("Remember", "Remember"),
+    ("Understand", "Understand"),
+    ("Apply", "Apply"),
+    ("Analyze", "Analyze"),
+    ("Evaluate", "Evaluate"),
+    ("Create", "Create"),
+]
 
 class CLOAdminForm(forms.ModelForm):
     department = forms.ModelChoiceField(queryset=Department.objects.all(), required=True)
     semester = forms.ModelChoiceField(queryset=Semester.objects.none(), required=True)
     course = forms.ModelChoiceField(queryset=Course.objects.none(), required=True)
-    bloom_level = forms.ChoiceField(choices=CLO.BLOOM_LEVEL_CHOICES, required=True)
+    bloom_level = forms.ChoiceField(choices=BLOOM_LEVEL_CHOICES, required=True)
 
     class Meta:
         model = CLO
-        fields = '__all__'
+        fields = "__all__"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if 'department' in self.data:
+        if "department" in self.data:
             try:
-                department_id = int(self.data.get('department'))
-                self.fields['semester'].queryset = Semester.objects.filter(department_id=department_id)
+                department_id = int(self.data.get("department"))
+                self.fields["semester"].queryset = Semester.objects.filter(department_id=department_id)
             except (ValueError, TypeError):
                 pass
-        elif self.instance.pk and self.instance.department_id:
-            self.fields['semester'].queryset = Semester.objects.filter(
-                department_id=self.instance.department_id
+        elif self.instance.pk and self.instance.course_id:
+            self.fields["semester"].queryset = Semester.objects.filter(
+                department_id=self.instance.course.semester.department_id
             )
 
-        if 'semester' in self.data:
+        if "semester" in self.data:
             try:
-                semester_id = int(self.data.get('semester'))
+                semester_id = int(self.data.get("semester"))
                 course_qs = Course.objects.filter(semester_id=semester_id)
-                if 'department' in self.data:
+                if "department" in self.data:
                     try:
-                        department_id = int(self.data.get('department'))
+                        department_id = int(self.data.get("department"))
                         course_qs = course_qs.filter(semester__department_id=department_id)
                     except (ValueError, TypeError):
                         pass
-                self.fields['course'].queryset = course_qs
+                self.fields["course"].queryset = course_qs
             except (ValueError, TypeError):
                 pass
-        elif self.instance.pk and self.instance.semester_id:
-            course_qs = Course.objects.filter(semester_id=self.instance.semester_id)
-            if self.instance.department_id:
-                course_qs = course_qs.filter(semester__department_id=self.instance.department_id)
-            self.fields['course'].queryset = course_qs
+        elif self.instance.pk and self.instance.course_id:
+            course_qs = Course.objects.filter(semester_id=self.instance.course.semester_id)
+            self.fields["course"].queryset = course_qs
 
     def clean(self):
         cleaned_data = super().clean()
@@ -163,10 +171,8 @@ class CLOGAMappingAdminForm(forms.ModelForm):
                     obj.save(update_fields=["weightage"])
             created.append(obj)
 
-        # Return first created/updated instance for admin flow
         self.instance = created[0]
         return self.instance
 
     def save_m2m(self):
-        # Admin expects this hook even though we don't use real m2m fields here.
         return None

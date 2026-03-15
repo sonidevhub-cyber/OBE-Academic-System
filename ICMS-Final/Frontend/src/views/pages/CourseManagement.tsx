@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { courseService } from '../../api/apiService';
+import obeService from '../../api/obeService';
 import { useDepartment } from '../../context/DepartmentContext';
 
 interface Course {
@@ -40,6 +41,12 @@ interface CourseFormData {
   credits: number;
 }
 
+interface CLOInput {
+  clo_number: number;
+  description: string;
+  bloom_level: string;
+}
+
 interface CourseManagementProps {
   activeTab: string;
 }
@@ -62,6 +69,9 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
     semester: '',
     credits: 3,
   });
+  const [cloInputs, setCloInputs] = useState<CLOInput[]>([
+    { clo_number: 1, description: '', bloom_level: 'Remember' }
+  ]);
 
   const fetchCourses = useCallback(async () => {
     setLoading(true);
@@ -133,7 +143,27 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
       if (editingCourse) {
         await courseService.updateCourse(editingCourse.course_id, courseData);
       } else {
-        await courseService.createCourse(courseData);
+        const validCLOs = cloInputs.filter((clo) => clo.description.trim());
+        if (validCLOs.length === 0) {
+          setError('Please add at least one CLO description.');
+          return;
+        }
+
+        const createdCourse = await courseService.createCourse(courseData);
+        const courseId = createdCourse?.data?.course_id ?? createdCourse?.data?.id;
+
+        if (courseId) {
+          await Promise.all(
+            validCLOs.map((clo) =>
+              obeService.createCLO({
+                course: courseId,
+                clo_number: clo.clo_number,
+                description: clo.description,
+                bloom_level: clo.bloom_level
+              })
+            )
+          );
+        }
       }
       fetchCourses();
       setShowModal(false);
@@ -146,6 +176,7 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
       semester: '',
       credits: 3,
     });
+    setCloInputs([{ clo_number: 1, description: '', bloom_level: 'Remember' }]);
     } catch (error: any) {
       setError(error.message || 'Failed to save course');
       console.error('Failed to save course:', error);
@@ -174,6 +205,7 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
       semester: course.semester_details?.semester_id.toString() || '',
       credits: course.credits,
     });
+    setCloInputs([{ clo_number: 1, description: '', bloom_level: 'Remember' }]);
     setShowModal(true);
   }, []);
 
@@ -187,8 +219,28 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
       semester: '',
       credits: 3,
     });
+    setCloInputs([{ clo_number: 1, description: '', bloom_level: 'Remember' }]);
     setShowModal(true);
   }, []);
+
+  const addCLO = () => {
+    setCloInputs((prev) => [
+      ...prev,
+      { clo_number: prev.length + 1, description: '', bloom_level: 'Remember' }
+    ]);
+  };
+
+  const updateCLO = (index: number, field: keyof CLOInput, value: string | number) => {
+    setCloInputs((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const removeCLO = (index: number) => {
+    setCloInputs((prev) => prev.filter((_, i) => i !== index));
+  };
 
   return (
     <div className="p-6" role="main" aria-labelledby="course-management-heading">
@@ -330,117 +382,245 @@ const CourseManagement: React.FC<CourseManagementProps> = ({ activeTab }): React
 
       {/* Course Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
-          <div className="bg-white rounded-lg max-w-md w-full max-h-[95vh] overflow-y-auto">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                {editingCourse ? 'Edit Course' : 'Add New Course'}
-              </h3>
-              <form onSubmit={handleSubmit}>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Course Name
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Course Code
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.code}
-                      onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description
-                    </label>
-                    <textarea
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      rows={3}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Department
-                    </label>
-                    <select
-                      value={formData.department}
-                      onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      required
-                    >
-                      <option value="">Select Department</option>
-                      {departments.map((dept) => (
-                        <option key={dept.department_id} value={dept.department_id.toString()}>
-                          {dept.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Semester
-                    </label>
-                    <select
-                      value={formData.semester}
-                      onChange={(e) => setFormData({ ...formData, semester: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      required
-                    >
-                      <option value="">Select Semester</option>
-                      {semesters.map((sem) => (
-                        <option key={sem.semester_id} value={sem.semester_id.toString()}>
-                          {sem.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Credits
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.credits}
-                      onChange={(e) => setFormData({ ...formData, credits: parseInt(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      min="1"
-                      max="6"
-                      required
-                    />
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 text-white rounded-t-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold">
+                    {editingCourse ? 'Edit Course' : 'Create Course + Define CLOs'}
+                  </h3>
+                  <p className="text-sm text-slate-200">
+                    {editingCourse ? 'Update course details' : 'Set up course details and CLOs in one flow'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="text-slate-200 hover:text-white transition-colors"
+                  aria-label="Close"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-slate-50 rounded-xl border border-slate-100 p-5">
+                  <h4 className="text-sm uppercase tracking-wide text-slate-500 font-semibold mb-4">
+                    Course Details
+                  </h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Course Name
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                        required
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Course Code
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.code}
+                          onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Credits
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.credits}
+                          onChange={(e) => setFormData({ ...formData, credits: parseInt(e.target.value) })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                          min="1"
+                          max="6"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Department
+                        </label>
+                        <select
+                          value={formData.department}
+                          onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                          required
+                        >
+                          <option value="">Select Department</option>
+                          {departments.map((dept) => (
+                            <option key={dept.department_id} value={dept.department_id.toString()}>
+                              {dept.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Semester
+                        </label>
+                        <select
+                          value={formData.semester}
+                          onChange={(e) => setFormData({ ...formData, semester: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                          required
+                        >
+                          <option value="">Select Semester</option>
+                          {semesters.map((sem) => (
+                            <option key={sem.semester_id} value={sem.semester_id.toString()}>
+                              {sem.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Description
+                      </label>
+                      <textarea
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                        rows={4}
+                      />
+                    </div>
                   </div>
                 </div>
-                <div className="flex justify-end space-x-3 mt-6">
+
+                <div className="bg-white rounded-xl border border-slate-100 p-5 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h4 className="text-sm uppercase tracking-wide text-slate-500 font-semibold">
+                        CLOs (Course Learning Outcomes)
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Add CLOs now so reporting works immediately.
+                      </p>
+                    </div>
+                    {!editingCourse && (
+                      <button
+                        type="button"
+                        onClick={addCLO}
+                        className="px-3 py-2 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
+                      >
+                        Add CLO
+                      </button>
+                    )}
+                  </div>
+
+                  {editingCourse ? (
+                    <div className="text-sm text-slate-500 bg-slate-50 rounded-lg p-4 border border-slate-100">
+                      CLOs can be managed from the OBE module for existing courses.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {cloInputs.map((clo, index) => (
+                        <div key={`clo-${index}`} className="border border-slate-100 rounded-lg p-4 bg-slate-50">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-sm font-semibold text-slate-700">
+                              CLO {clo.clo_number}
+                            </div>
+                            {cloInputs.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeCLO(index)}
+                                className="text-xs text-rose-600 hover:text-rose-700"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                CLO Number
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={clo.clo_number}
+                                onChange={(e) => updateCLO(index, 'clo_number', Number(e.target.value))}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                                required
+                              />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Bloom Level
+                              </label>
+                              <select
+                                value={clo.bloom_level}
+                                onChange={(e) => updateCLO(index, 'bloom_level', e.target.value)}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                              >
+                                <option value="Remember">Remember</option>
+                                <option value="Understand">Understand</option>
+                                <option value="Apply">Apply</option>
+                                <option value="Analyze">Analyze</option>
+                                <option value="Evaluate">Evaluate</option>
+                                <option value="Create">Create</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              CLO Description
+                            </label>
+                            <textarea
+                              value={clo.description}
+                              onChange={(e) => updateCLO(index, 'description', e.target.value)}
+                              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-slate-800 bg-white"
+                              rows={2}
+                              required
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <div className="text-xs text-slate-500">
+                  {editingCourse ? 'Course update only.' : 'CLOs will be created with this course.'}
+                </div>
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                    className="px-4 py-2 text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="px-5 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
                   >
-                    {editingCourse ? 'Update' : 'Create'}
+                    {editingCourse ? 'Update Course' : 'Create Course'}
                   </button>
                 </div>
-              </form>
-            </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
