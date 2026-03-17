@@ -147,7 +147,14 @@ class CourseAllocation(models.Model):
             self.status = 'active'
             self.save()
 
+class AllocationStudent(models.Model):
+    allocation = models.ForeignKey(CourseAllocation, on_delete=models.CASCADE, related_name="students")
+    student = models.ForeignKey("students.Student", on_delete=models.CASCADE)
 
+    def __str__(self):
+        return f"{self.student.name} - {self.allocation.course.name}"
+
+        
 class CoordinatorDashboard(models.Model):
     coordinator = models.OneToOneField(Coordinator, on_delete=models.CASCADE, related_name="dashboard")
     

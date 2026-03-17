@@ -42,7 +42,7 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
       setLoading(true);
       const response = await coordinatorService.getCourseAllocations();
       if (response.data) {
-        setAllocations(response.data);
+        setAllocations(response.data || []);
       }
     } catch (error) {
       console.error('Error fetching allocations:', error);
@@ -83,7 +83,8 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
   const getApprovedAllocations = () => allocations.filter(a => a.status === 'approved' || a.status === 'active');
   const getInstructorAllocations = (instructorId: number) =>
     allocations.filter(
-      a => a.instructor === instructorId && (a.status === 'active' || a.status === 'approved')
+      a =>
+      a.status === 'active' || a.status === 'approved'
     );
   const getAllocationsBySemester = (semesterId: number) => allocations.filter(a => a.semester === semesterId && (a.status === 'approved' || a.status === 'active'));
 

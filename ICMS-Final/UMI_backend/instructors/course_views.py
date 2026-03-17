@@ -16,7 +16,7 @@ class InstructorCourseViewSet(viewsets.ReadOnlyModelViewSet):
             instructor = user.instructor_profile
             return CourseAllocation.objects.filter(
                 instructor=instructor,
-                status='active'
+                status__in=['approved','active']
             ).select_related('course', 'semester', 'coordinator')
         return CourseAllocation.objects.none()
     
