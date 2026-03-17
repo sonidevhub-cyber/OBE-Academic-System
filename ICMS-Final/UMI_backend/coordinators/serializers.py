@@ -40,7 +40,7 @@ class CourseAllocationSerializer(serializers.ModelSerializer):
     semester_name = serializers.CharField(source='semester.name', read_only=True)
     coordinator_name = serializers.CharField(source='coordinator.name', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.name', read_only=True)
-    
+    # instructor = serializers.IntegerField(source='instructor.id')
     class Meta:
         model = CourseAllocation
         fields = '__all__'
@@ -87,6 +87,7 @@ class CreateCourseAllocationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         course = attrs.get('course')
         semester = attrs.get('semester')
+        
 
         if course and semester and course.semester_id != semester.semester_id:
             raise serializers.ValidationError({

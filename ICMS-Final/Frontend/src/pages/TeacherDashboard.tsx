@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bar, Line } from 'react-chartjs-2';
 import { courseService, studentService } from '../api/apiService';
+import { api } from '../api/api';
 import ResultUpload from '../components/ResultUpload';
 import InstructorProfileModal from '../components/ui/modals/InstructorProfileModal';
 import InstructorProfile from '../components/InstructorProfile';
@@ -122,15 +123,10 @@ const TeacherDashboard = () => {
           });
         }
 
-        const [coursesRes, studentsRes] = await Promise.all([
-          courseService.getAllCourses(),
-          studentService.getAllStudents(),
-        ]);
-
+        const coursesRes = await api.get("instructors/my-courses/");
+        const studentsRes = await studentService.getAllStudents();
         // Filter courses assigned to current instructor
-        const assignedCourses = coursesRes.data.filter((course: any) =>
-          course.instructor === currentUser?.id
-        );
+        const assignedCourses = coursesRes.data.courses;
 
         const totalStudents = studentsRes.data.length;
 

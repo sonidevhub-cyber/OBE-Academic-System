@@ -25,8 +25,8 @@ const ModularInstructorDashboard: React.FC = () => {
   const instructorCourses = getInstructorAllocations(currentInstructorId);
 
   const handleViewCourseDetails = (course: any) => {
-    alert(`Viewing details for ${course.course_name}`);
-  };
+  navigate(`/teacher/course-details/${course.allocation_id}`);
+};
 
   const handleManageClass = (course: any) => {
     alert(`Managing class for ${course.course_name}`);

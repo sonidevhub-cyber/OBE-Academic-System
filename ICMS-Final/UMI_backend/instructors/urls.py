@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import InstructorViewSet, InstructorProfileView, InstructorDashboardDataView, AttendanceReportsView, HODRecordsView
+from .views import InstructorViewSet, InstructorProfileView, InstructorDashboardDataView, AttendanceReportsView, HODRecordsView,course_details
 from .timetable_views import instructor_timetable, debug_instructor_mapping, current_user_info
 from .course_views import InstructorCourseViewSet
 router = DefaultRouter()
@@ -15,4 +15,6 @@ urlpatterns = [
     path('timetable/', instructor_timetable, name='instructor-timetable'),
     path('debug-mapping/', debug_instructor_mapping, name='debug-instructor-mapping'),
     path('current-user/', current_user_info, name='current-user-info'),
+    path('course-details/<int:allocation_id>/', course_details),
+
 ]

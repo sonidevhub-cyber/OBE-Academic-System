@@ -16,6 +16,7 @@ import PrincipalDashboardComponent from './roles/principal/PrincipalDashboard';
 import ResultManagement from './views/pages/ResultManagement';
 import ProfessionalResultManagement from './views/pages/ResultManagement';
 import EventManagement from './views/pages/EventManagement';
+import CourseDetails from 'views/pages/CourseDetails';
 import CreateEvent from "./views/pages/CreateEvent";
 import ActiveHODRecordsPage from './pages/ActiveHODRecordsPage';
 import ResetPassword from './components/forms/ResetPassword';
@@ -107,6 +108,8 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['instructor']} />}>
         <Route path="/teacher" element={<ModularInstructorDashboard />} />
         <Route path="/instructor-dashboard" element={<ModularInstructorDashboard />} />
+        <Route path="/teacher/course-details/:id"element={<CourseDetails/>}
+/>
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['coordinator']} />}>
