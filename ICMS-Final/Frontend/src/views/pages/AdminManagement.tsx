@@ -18,7 +18,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    employee_id: '',
     phone: '',
     role: 'admin' as 'super_admin' | 'admin' | 'department_admin',
     department_id: '',
@@ -38,9 +37,20 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
   ];
 
   const permissionOptions = [
-    'user_management', 'department_management', 'course_management', 
-    'results_management', 'attendance_management', 'reports_access',
-    'system_settings', 'audit_logs'
+    { code: 'manage_departments', label: 'Department Management', hint: 'Create/update departments and semesters' },
+    { code: 'manage_courses', label: 'Course Management', hint: 'Create/update courses and curriculum' },
+    { code: 'manage_clo', label: 'CLO & GA Mapping', hint: 'Define CLOs and map to Graduate Attributes' },
+    { code: 'manage_students', label: 'Student Management', hint: 'Add/edit/remove students and profiles' },
+    { code: 'manage_instructors', label: 'Instructor Management', hint: 'Add/edit/remove instructors and profiles' },
+    { code: 'manage_hods', label: 'HOD Management', hint: 'Create/update HOD accounts' },
+    { code: 'manage_principals', label: 'Principal Management', hint: 'Create/update Principal accounts' },
+    { code: 'manage_jsc_users', label: 'Admin (JSC) Management', hint: 'Create/deactivate JSC accounts' },
+    { code: 'assign_jsc_permissions', label: 'Assign JSC Permissions', hint: 'Grant/revoke JSC permissions' },
+    { code: 'manage_attendance', label: 'Attendance Management', hint: 'Review attendance and edit requests' },
+    { code: 'manage_results', label: 'Results Management', hint: 'Manage results and publishing' },
+    { code: 'manage_announcements', label: 'Announcements Management', hint: 'Create/update announcements' },
+    { code: 'manage_events', label: 'Events Management', hint: 'Create/update events and approvals' },
+    { code: 'view_obe_reports', label: 'OBE Reports', hint: 'View OBE analytics and reports' },
   ];
 
   useEffect(() => {
@@ -346,15 +356,7 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
           console.log('Admin list refreshed from server');
         }, 500);
       } else {
-        // New admin registration - force lowest role and inactive status
-        const newAdminData = {
-          ...adminData,
-          role: 'department_admin', // Always start with lowest role
-          status: 'inactive', // Requires approval
-          permissions: ['department_management'] // Basic permissions only
-        };
-        
-        const createdAdmin = await adminService.createAdmin(newAdminData as CreateAdminRequest);
+        const createdAdmin = await adminService.createAdmin(adminData as CreateAdminRequest);
         
         // Upload image if selected
         if (selectedImage && createdAdmin.id) {
@@ -367,7 +369,10 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
           }
         }
         
-        alert('⚠️ Admin account created successfully!\n\nAccount Status: INACTIVE\nRole: Department Admin\n\nA Super Admin must activate this account before login is possible.');
+        const createdEmployeeId = createdAdmin?.employee_id;
+        alert(
+          `⚠️ Admin account created successfully.${createdEmployeeId ? `\n\nEmployee ID: ${createdEmployeeId}` : ''}\n\nIf the account is inactive, a Super Admin must activate it before login is possible.`
+        );
         await loadAdmins();
       }
 
@@ -385,7 +390,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
     setFormData({
       name: admin.name,
       email: admin.email,
-      employee_id: admin.employee_id,
       phone: admin.phone || '',
       role: admin.role,
       department_id: admin.department_id?.toString() || '',
@@ -419,7 +423,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
     setFormData({
       name: '',
       email: '',
-      employee_id: '',
       phone: '',
       role: 'department_admin', // Default to lowest role
       department_id: '',
@@ -869,16 +872,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Employee ID</label>
-                      <input
-                        type="text"
-                        value={formData.employee_id}
-                        onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        required
-                      />
-                    </div>
-                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                       <input
                         type="tel"
@@ -954,20 +947,23 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Permissions</label>
                     <div className="grid grid-cols-2 gap-2">
                       {permissionOptions.map(permission => (
-                        <label key={permission} className="flex items-center">
+                        <label key={permission.code} className="flex items-start gap-2">
                           <input
                             type="checkbox"
-                            checked={formData.permissions.includes(permission)}
+                            checked={formData.permissions.includes(permission.code)}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setFormData({ ...formData, permissions: [...formData.permissions, permission] });
+                                setFormData({ ...formData, permissions: [...formData.permissions, permission.code] });
                               } else {
-                                setFormData({ ...formData, permissions: formData.permissions.filter(p => p !== permission) });
+                                setFormData({ ...formData, permissions: formData.permissions.filter(p => p !== permission.code) });
                               }
                             }}
-                            className="mr-2"
+                            className="mt-1"
                           />
-                          <span className="text-sm text-gray-700">{permission.replace('_', ' ')}</span>
+                          <span className="text-sm text-gray-700">
+                            {permission.label}
+                            <span className="block text-xs text-gray-400">{permission.hint}</span>
+                          </span>
                         </label>
                       ))}
                     </div>

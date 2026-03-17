@@ -1,13 +1,13 @@
 from rest_framework import permissions
 from .models import Instructor
+from rbac.services import user_has_permission
 
 class IsAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         # Allow read operations for all authenticated users
         if request.method in permissions.SAFE_METHODS:
             return request.user and request.user.is_authenticated
-        # Allow write operations for all authenticated users (temporary)
-        return request.user and request.user.is_authenticated
+        return request.user and request.user.is_authenticated and user_has_permission(request.user, 'manage_instructors')
 
     def has_object_permission(self, request, view, obj):
         # Allow read operations for all authenticated users
@@ -16,8 +16,7 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         # Allow write operations for admin users or the instructor themselves
         return (
             request.user and request.user.is_authenticated and (
-                request.user.is_staff or
-                getattr(request.user, 'role', None) in ['admin', 'principal', 'director'] or
+                user_has_permission(request.user, 'manage_instructors') or
                 (hasattr(obj, 'user') and obj.user == request.user)
             )
         )

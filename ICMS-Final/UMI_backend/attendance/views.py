@@ -2,7 +2,7 @@ from rest_framework import status, viewsets, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .permissions import IsInstructorOrAdmin, IsFacultyOrAdmin, IsAdminOrReadOnly, CanViewAttendanceReports
+from .permissions import IsInstructorOrAdmin, IsFacultyOrAdmin, CanViewAttendanceReports
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Count, Avg
@@ -14,6 +14,44 @@ from students.models import Student
 from instructors.models import Instructor
 from coordinators.models import Coordinator
 from hods.models import HOD
+from register.access_control import get_user_assigned_department_id, is_department_scoped_admin
+from rbac.services import user_has_permission
+
+
+def _current_role(user):
+    if hasattr(user, 'get_current_role'):
+        return user.get_current_role()
+    return getattr(user, 'active_role', None) or getattr(user, 'role', None)
+
+
+def _has_role(user, role):
+    if hasattr(user, 'has_role'):
+        return user.has_role(role)
+    return getattr(user, 'role', None) == role
+
+
+def _is_admin_user(user):
+    return bool(user.is_superuser or _has_role(user, 'admin'))
+
+
+def _is_principal_user(user):
+    return bool(hasattr(user, 'principal_profile') or _has_role(user, 'principal'))
+
+
+def _is_hod_user(user):
+    return bool(hasattr(user, 'hod_profile') or _has_role(user, 'hod'))
+
+
+def _is_coordinator_user(user):
+    return bool(hasattr(user, 'coordinator_profile') or _has_role(user, 'coordinator'))
+
+
+def _get_department_for_user(user):
+    if hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
+        return user.hod_profile.department
+    if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
+        return user.coordinator_profile.department
+    return None
 
 class AttendanceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -31,7 +69,11 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 course__semester__department=user.hod_profile.department
             )
         elif user.is_superuser or user.role == 'admin' or hasattr(user, 'principal_profile'):
-            return StudentAttendance.objects.all()
+            queryset = StudentAttendance.objects.all()
+            if is_department_scoped_admin(user):
+                assigned_department_id = get_user_assigned_department_id(user)
+                queryset = queryset.filter(course__semester__department_id=assigned_department_id)
+            return queryset
         return StudentAttendance.objects.none()
     
     def get_serializer_class(self):
@@ -198,6 +240,11 @@ def mark_self_attendance(request):
     user = request.user
     attendance_date = request.data.get('date', str(date.today()))
     attendance_status = request.data.get('status', 'Present')
+
+    active_role = _current_role(user)
+    if active_role not in {'instructor', 'coordinator', 'hod'}:
+        return Response({'error': 'Only active faculty role can mark self attendance'},
+                        status=status.HTTP_403_FORBIDDEN)
     
     faculty_type = None
     faculty_obj = None
@@ -300,7 +347,12 @@ def get_attendance_reports(request):
         # Principal/Admin sees all departments
         student_filters = filters.copy()
         faculty_filters = filters.copy()
-        
+        if is_department_scoped_admin(user):
+            assigned_department_id = get_user_assigned_department_id(user)
+            if department_filter and int(department_filter) != int(assigned_department_id):
+                return Response({'error': 'Forbidden: You can only access your assigned department.'}, status=status.HTTP_403_FORBIDDEN)
+            department_filter = assigned_department_id
+
         if department_filter:
             student_filters['course__semester__department_id'] = department_filter
             faculty_attendance = FacultyAttendance.objects.filter(
@@ -389,18 +441,41 @@ def request_attendance_edit(request):
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAdminOrReadOnly])
+@permission_classes([IsAuthenticated])
 def manage_edit_requests(request):
-    """Admin manages attendance edit requests"""
+    """Role-based management of attendance edit requests"""
     user = request.user
-    
-    if not (user.is_superuser or user.role == 'admin'):
-        return Response({'error': 'Only admins can manage edit requests'}, 
-                       status=status.HTTP_403_FORBIDDEN)
+    role = _current_role(user)
+    is_admin = _is_admin_user(user)
+    is_principal = _is_principal_user(user)
+    is_hod = _is_hod_user(user)
+    is_coordinator = _is_coordinator_user(user)
+
+    if not (is_hod or is_coordinator or is_admin or is_principal):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    if (is_admin or is_principal) and not (user.is_superuser or is_principal or user_has_permission(user, 'manage_attendance')):
+        return Response({'error': 'Forbidden', 'required_permission': 'manage_attendance'}, status=status.HTTP_403_FORBIDDEN)
     
     if request.method == 'GET':
-        # Get pending requests
         requests = AttendanceEditRequest.objects.filter(status='pending')
+        if is_hod or is_coordinator:
+            department = _get_department_for_user(user)
+            if not department:
+                return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+            requests = requests.filter(
+                request_type='student',
+                student_attendance__course__semester__department=department
+            )
+        else:
+            requests = requests.filter(request_type='faculty')
+            if is_department_scoped_admin(user):
+                assigned_department_id = get_user_assigned_department_id(user)
+                requests = requests.filter(
+                    Q(faculty_attendance__instructor__department_id=assigned_department_id) |
+                    Q(faculty_attendance__coordinator__department_id=assigned_department_id) |
+                    Q(faculty_attendance__hod__department_id=assigned_department_id)
+                )
         serializer = AttendanceEditRequestSerializer(requests, many=True)
         return Response(serializer.data)
     
@@ -412,6 +487,25 @@ def manage_edit_requests(request):
         
         try:
             edit_request = get_object_or_404(AttendanceEditRequest, pk=request_id)
+
+            if edit_request.request_type == 'student':
+                if not (is_hod or is_coordinator):
+                    return Response({'error': 'Forbidden: Student requests are handled by HOD/Coordinator.'}, status=status.HTTP_403_FORBIDDEN)
+                department = _get_department_for_user(user)
+                if not department:
+                    return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+                req_dept = edit_request.student_attendance.course.semester.department
+                if req_dept_id := getattr(req_dept, 'department_id', None):
+                    if department.department_id != req_dept_id:
+                        return Response({'error': 'Forbidden: You can only manage requests in your department.'}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                if not (is_admin or is_principal):
+                    return Response({'error': 'Forbidden: Faculty requests are handled by Principal/Admin.'}, status=status.HTTP_403_FORBIDDEN)
+                if is_department_scoped_admin(user):
+                    assigned_department_id = get_user_assigned_department_id(user)
+                    department = edit_request.faculty_attendance.get_department()
+                    if department and department.department_id != assigned_department_id:
+                        return Response({'error': 'Forbidden: You can only manage requests in your department.'}, status=status.HTTP_403_FORBIDDEN)
             
             if action == 'approve':
                 edit_request.status = 'approved'

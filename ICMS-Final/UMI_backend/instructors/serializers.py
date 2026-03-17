@@ -18,7 +18,7 @@ class InstructorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Instructor
         fields = ['id', 'user', 'employee_id', 'name', 'phone', 'password', 'department', 'department_id', 'employment_type', 'designation', 'hire_date', 'date_of_birth', 'gender', 'blood_group', 'salary', 'specialization', 'address', 'experience_years', 'image', 'ai_profile_notes', 'ai_last_generated', 'user_email', 'department_name']
-        read_only_fields = ['user', 'user_email', 'department_name']
+        read_only_fields = ['user', 'user_email', 'department_name', 'employee_id']
 
     def create(self, validated_data):
         department_id = validated_data.pop('department_id', None)
@@ -32,6 +32,11 @@ class InstructorSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        raw_password = validated_data.get('password')
+        if raw_password and instance.user:
+            # Keep user auth password in sync with instructor password updates.
+            instance.user.set_password(raw_password)
+            instance.user.save(update_fields=['password'])
         department_id = validated_data.pop('department_id', None)
         if department_id:
             from academics.models import Department

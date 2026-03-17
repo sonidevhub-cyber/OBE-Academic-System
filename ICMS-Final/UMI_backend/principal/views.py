@@ -1,15 +1,18 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from .models import Principal
 from .serializers import PrincipalCreateSerializer
 from rest_framework.generics import DestroyAPIView
+from rbac.decorators import require_permission
 
 
 # ADMIN CREATES PRINCIPAL (Pending by default)
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def create_principal(request):
     serializer = PrincipalCreateSerializer(data=request.data)
 
@@ -32,7 +35,8 @@ def create_principal(request):
 
 # LIST ALL PRINCIPALS
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def list_principals(request):
 
     principals = Principal.objects.all()
@@ -66,7 +70,8 @@ def list_principals(request):
 
 # APPROVE PRINCIPAL (Account Activation after Admin Approval)
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def approve_principal(request, id):
     try:
         p = Principal.objects.get(id=id)
@@ -83,7 +88,8 @@ def approve_principal(request, id):
 
 # DEACTIVATE (Retirement / Leave Case)
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def deactivate_principal(request, id):
     try:
         p = Principal.objects.get(id=id)
@@ -103,7 +109,8 @@ def deactivate_principal(request, id):
 
 # REACTIVATE PRINCIPAL
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def activate_principal(request, id):
     try:
         p = Principal.objects.get(id=id)
@@ -120,6 +127,8 @@ def activate_principal(request, id):
 from .serializers import PrincipalUpdateSerializer
 
 @api_view(["PUT", "PATCH"])
+@permission_classes([IsAuthenticated])
+@require_permission('manage_principals')
 def update_principal(request, id):
     try:
         principal = Principal.objects.get(id=id)
@@ -142,3 +151,11 @@ def update_principal(request, id):
 class delete_principal(DestroyAPIView):
     queryset = Principal.objects.all()
     serializer_class = PrincipalCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        if not getattr(self.request, "user", None) or not getattr(self.request.user, "has_permission", None):
+            raise PermissionDenied("Forbidden")
+        if not self.request.user.has_permission("manage_principals"):
+            raise PermissionDenied("Forbidden")
+        return super().perform_destroy(instance)

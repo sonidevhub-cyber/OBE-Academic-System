@@ -4,6 +4,8 @@ from django.db.models import Count
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from rbac.permissions import HasRBACPermission
+from rbac.services import user_has_permission
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -23,7 +25,8 @@ from register.access_control import can_access_department, get_user_assigned_dep
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasRBACPermission]
+    required_permission = 'manage_students'
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['department', 'semester']
@@ -55,6 +58,8 @@ class StudentViewSet(viewsets.ModelViewSet):
     # ✅ Create student + linked user
     def create(self, request, *args, **kwargs):
         try:
+            if not user_has_permission(request.user, 'manage_students'):
+                return Response({"error": "Forbidden", "required_permission": "manage_students"}, status=status.HTTP_403_FORBIDDEN)
             print(f"StudentViewSet create - Request data: {request.data}")
 
             # Initialize student_data first
@@ -96,8 +101,9 @@ class StudentViewSet(viewsets.ModelViewSet):
                 student.save(update_fields=['image'])
             
             # Create linked User with student_id as username
+            login_identifier = student.registration_number or student.student_id
             user = User.objects.create_user(
-                username=student.student_id,
+                username=login_identifier,
                 email=email,
                 password=password,
                 first_name=first_name,
@@ -131,6 +137,8 @@ class StudentViewSet(viewsets.ModelViewSet):
         print(f"StudentViewSet update - Request data: {request.data}")
         print(f"Request content type: {request.content_type}")
         try:
+            if not user_has_permission(request.user, 'manage_students'):
+                return Response({"error": "Forbidden", "required_permission": "manage_students"}, status=status.HTTP_403_FORBIDDEN)
             instance = self.get_object()
             new_department_id = request.data.get("department_id") or request.data.get("department") or instance.department_id
             if not can_access_department(request.user, new_department_id) or not can_access_department(request.user, instance.department_id):
@@ -185,6 +193,8 @@ class StudentViewSet(viewsets.ModelViewSet):
     # ✅ Delete student
     def destroy(self, request, *args, **kwargs):
         try:
+            if not user_has_permission(request.user, 'manage_students'):
+                return Response({"error": "Forbidden", "required_permission": "manage_students"}, status=status.HTTP_403_FORBIDDEN)
             instance = self.get_object()
             if not can_access_department(request.user, instance.department_id):
                 return Response({"error": "Forbidden: You can only manage students in your assigned department."}, status=status.HTTP_403_FORBIDDEN)

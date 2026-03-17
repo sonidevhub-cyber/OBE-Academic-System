@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate, get_user_model
+from django.db import models
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from .serializers import RegisterSerializer
@@ -16,6 +17,8 @@ from hods.serializers import HODSerializer
 from rbac.decorators import require_permission
 from rbac.services import ensure_base_roles, get_user_permission_codes, resolve_user_role_code
 from register.access_control import can_access_department, get_user_assigned_department_id, is_department_scoped_admin
+from students.models import Student
+from .identifiers import generate_employee_id
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,162 @@ def _build_login_response(user, user_payload, token_key):
         "refresh_token": None,
     }
     return response_data
+
+
+def _safe_get_profile(user, attr: str):
+    try:
+        return getattr(user, attr)
+    except Exception:
+        return None
+
+
+def _build_login_response_for_user(user):
+    token, _ = Token.objects.get_or_create(user=user)
+
+    student = Student.objects.select_related('department').filter(user=user).first()
+    if student:
+        return _build_login_response(
+            user=user,
+            user_payload={
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": "student",
+                "roles": ["student"],
+                "first_name": student.first_name or user.first_name,
+                "last_name": student.last_name or user.last_name,
+                "student_id": student.student_id,
+                "registration_number": student.registration_number,
+                "department": student.department.name if student.department else None,
+                "is_superuser": user.is_superuser,
+                "is_staff": user.is_staff,
+            },
+            token_key=token.key,
+        )
+
+    hod = _safe_get_profile(user, 'hod_profile')
+    if hod:
+        roles = ["hod"]
+        coordinator = _safe_get_profile(user, 'coordinator_profile')
+        instructor = _safe_get_profile(user, 'instructor_profile')
+        if coordinator:
+            roles.append("coordinator")
+        if instructor:
+            roles.append("instructor")
+
+        payload = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": "hod",
+            "roles": roles,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "employee_id": hod.employee_id,
+            "department": hod.department.name if hod.department else None,
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+        }
+        if coordinator:
+            payload.update({
+                "coordinator_id": coordinator.id,
+                "department_id": coordinator.department.department_id if coordinator.department else None,
+            })
+        if instructor:
+            payload.update({
+                "instructor_id": instructor.id,
+                "department_id": instructor.department.department_id if instructor.department else None,
+            })
+        return _build_login_response(user=user, user_payload=payload, token_key=token.key)
+
+    principal = _safe_get_profile(user, 'principal_profile')
+    if principal:
+        return _build_login_response(
+            user=user,
+            user_payload={
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": "principal",
+                "roles": ["principal"],
+                "first_name": principal.first_name or user.first_name,
+                "last_name": principal.last_name or user.last_name,
+                "employee_id": principal.employee_id,
+                "department": principal.department,
+                "is_superuser": user.is_superuser,
+                "is_staff": user.is_staff,
+            },
+            token_key=token.key,
+        )
+
+    instructor = _safe_get_profile(user, 'instructor_profile')
+    if instructor:
+        roles = ["instructor"]
+        coordinator = _safe_get_profile(user, 'coordinator_profile')
+        if coordinator:
+            roles.append("coordinator")
+        payload = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": "instructor",
+            "roles": roles,
+            "first_name": instructor.name.split()[0] if instructor.name else '',
+            "last_name": ' '.join(instructor.name.split()[1:]) if instructor.name and len(instructor.name.split()) > 1 else '',
+            "employee_id": instructor.employee_id,
+            "department": instructor.department.name if instructor.department else None,
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+        }
+        if coordinator:
+            payload.update({
+                "coordinator_id": coordinator.id,
+                "department_id": coordinator.department.department_id if coordinator.department else None,
+            })
+        return _build_login_response(user=user, user_payload=payload, token_key=token.key)
+
+    coordinator = _safe_get_profile(user, 'coordinator_profile')
+    if coordinator:
+        roles = ["coordinator"]
+        instructor = _safe_get_profile(user, 'instructor_profile')
+        if instructor:
+            roles.append("instructor")
+        payload = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": "coordinator",
+            "roles": roles,
+            "first_name": coordinator.name.split()[0] if coordinator.name else '',
+            "last_name": ' '.join(coordinator.name.split()[1:]) if coordinator.name and len(coordinator.name.split()) > 1 else '',
+            "employee_id": coordinator.employee_id,
+            "department": coordinator.department.name if coordinator.department else None,
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+        }
+        if instructor:
+            payload.update({
+                "instructor_id": instructor.id,
+                "department_id": instructor.department.department_id if instructor.department else None,
+            })
+        return _build_login_response(user=user, user_payload=payload, token_key=token.key)
+
+    return _build_login_response(
+        user=user,
+        user_payload={
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "roles": list(getattr(user, 'roles', []) or [user.role]),
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "employee_id": getattr(user, "employee_id", None),
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+        },
+        token_key=token.key,
+    )
 
 # -----------------------------
 # 1️⃣ Public Register API
@@ -93,12 +252,57 @@ def login(request):
     print(f"DEBUG: Request method: {request.method}")
     print(f"DEBUG: Request data: {request.data}")
     print(f"DEBUG: Request POST: {request.POST}")
-    username = request.data.get('username')
+    login_identifier = request.data.get('identifier') or request.data.get('username')
+    username = login_identifier
     password = request.data.get('password')
     print(f"DEBUG: Extracted username: {username}")
     print(f"DEBUG: Password provided: {bool(password)}")
 
     logger.info(f"Login attempt for username: {username}")
+
+    # Allow email login for any user
+    if login_identifier and '@' in login_identifier:
+        user_by_email = User.objects.filter(email__iexact=login_identifier).first()
+        if user_by_email and user_by_email.check_password(password):
+            return Response(_build_login_response_for_user(user_by_email), status=status.HTTP_200_OK)
+
+    # Allow staff login by employee_id even if username differs
+    if login_identifier and '@' not in login_identifier:
+        user_by_employee_id = User.objects.filter(employee_id__iexact=login_identifier).first()
+        if user_by_employee_id and user_by_employee_id.check_password(password):
+            return Response(_build_login_response_for_user(user_by_employee_id), status=status.HTTP_200_OK)
+
+    # Student login by registration number or student_id
+    if username and not '@' in username:
+        try:
+            student = Student.objects.select_related('user').filter(
+                models.Q(registration_number__iexact=username) |
+                models.Q(student_id__iexact=username)
+            ).first()
+            if student and student.user and student.user.check_password(password):
+                user = student.user
+                token, _ = Token.objects.get_or_create(user=user)
+                response_data = _build_login_response(
+                    user=user,
+                    user_payload={
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                        "role": "student",
+                        "roles": ["student"],
+                        "first_name": student.first_name or user.first_name,
+                        "last_name": student.last_name or user.last_name,
+                        "student_id": student.student_id,
+                        "registration_number": student.registration_number,
+                        "department": student.department.name if student.department else None,
+                        "is_superuser": user.is_superuser,
+                        "is_staff": user.is_staff,
+                    },
+                    token_key=token.key,
+                )
+                return Response(response_data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error in student login: {str(e)}")
 
     # Check if it's an instructor login (employee_id format)
     if username:
@@ -110,8 +314,8 @@ def login(request):
             
             # Check instructor first
             try:
-                instructor = Instructor.objects.select_related('user').get(employee_id=username)
-                if instructor.password and instructor.password == password:
+                instructor = Instructor.objects.select_related('user').get(employee_id__iexact=username)
+                if instructor.user and instructor.user.check_password(password):
                     user = instructor.user
                     logger.info(f"Instructor login successful for {username}")
                     
@@ -155,8 +359,8 @@ def login(request):
             
             # Check coordinator
             try:
-                coordinator = Coordinator.objects.select_related('user').get(employee_id=username)
-                if coordinator.password and coordinator.password == password:
+                coordinator = Coordinator.objects.select_related('user').get(employee_id__iexact=username)
+                if coordinator.user and coordinator.user.check_password(password):
                     user = coordinator.user
                     logger.info(f"Coordinator login successful for {username}")
                     
@@ -334,7 +538,7 @@ def login(request):
         logger.info("Checking for Principal login")
         try:
             from principal.models import Principal
-            principal = Principal.objects.select_related('user').get(employee_id=username)
+            principal = Principal.objects.select_related('user').get(employee_id__iexact=username)
             if principal.user and principal.user.check_password(password):
                 user = principal.user
                 logger.info(f"Principal login successful for {username}")
@@ -383,6 +587,7 @@ def login(request):
                     "role": user.role,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
+                    "employee_id": getattr(user, "employee_id", None),
                     "is_superuser": user.is_superuser,
                     "is_staff": user.is_staff,
                 },
@@ -527,9 +732,7 @@ def create_hod(request):
         first_name = request.data.get('first_name', '')
         last_name = request.data.get('last_name', '')
         email = request.data.get('email', '')
-        username = request.data.get('username', '')
         password = request.data.get('password', '')
-        employee_id = request.data.get('employee_id', '')
         department_id = request.data.get('department', '')
         phone = request.data.get('phone', '')
         joining_date = request.data.get('joining_date', '')
@@ -545,28 +748,16 @@ def create_hod(request):
             
         profile_pic = request.FILES.get('profile_pic', None)
         
-        if not all([first_name, last_name, email, username, password, employee_id, department_id]):
+        if not all([first_name, last_name, email, password, department_id]):
             return Response({
                 'success': False,
                 'error': 'Missing required fields'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if User.objects.filter(username=username).exists():
-            return Response({
-                'success': False,
-                'error': f'User with username "{username}" already exists'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         if User.objects.filter(email=email).exists():
             return Response({
                 'success': False,
                 'error': f'User with email "{email}" already exists'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if HOD.objects.filter(employee_id=employee_id).exists():
-            return Response({
-                'success': False,
-                'error': f'HOD with employee ID "{employee_id}" already exists'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         logger.info(f"Looking for department with ID: {department_id}")
@@ -587,6 +778,9 @@ def create_hod(request):
                 'error': f'Department with ID "{department_id}" not found. Available departments: {list(all_depts.values("department_id", "name"))}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        employee_id = generate_employee_id('hod', department)
+        username = employee_id
+
         user = User.objects.create_user(
             username=username,
             email=email,
@@ -595,6 +789,8 @@ def create_hod(request):
             last_name=last_name,
             role='hod'
         )
+        user.employee_id = employee_id
+        user.save(update_fields=['employee_id'])
         
         hod = HOD.objects.create(
             user=user,
@@ -661,6 +857,7 @@ def create_hod(request):
         return Response({
             'success': True,
             'message': f'HOD "{first_name} {last_name}" created successfully with roles: {", ".join(roles)}',
+            'employee_id': hod.employee_id,
             'data': serializer.data
         }, status=status.HTTP_201_CREATED)
         

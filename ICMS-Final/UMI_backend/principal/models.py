@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from register.identifiers import generate_employee_id
 
 
 class Principal(models.Model):
@@ -106,3 +107,13 @@ class Principal(models.Model):
 
     def __str__(self):
         return f"{self.first_name or ''} {self.last_name or ''} ({self.employee_id or 'N/A'})"
+
+    def save(self, *args, **kwargs):
+        if not self.employee_id:
+            self.employee_id = generate_employee_id('principal')
+        if self.user and not self.user.employee_id:
+            self.user.employee_id = self.employee_id
+            if not self.user.username:
+                self.user.username = self.employee_id
+            self.user.save(update_fields=['employee_id', 'username'])
+        super().save(*args, **kwargs)

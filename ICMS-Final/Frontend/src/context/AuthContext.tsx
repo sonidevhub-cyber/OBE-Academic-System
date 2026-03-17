@@ -30,7 +30,7 @@ interface AuthContextType {
   setCurrentUser: (user: User | null) => void;
   updateUser: (user: User) => void; // New method for updating user data
   switchRole: (newRole: string) => void; // Method for switching between roles
-  login: (username: string, password: string, enforceRole?: string) => Promise<void>;
+  login: (identifier: string, password: string, enforceRole?: string) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => void;
   forceLogout: () => void;
@@ -79,11 +79,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ✅ Updated login with enforceRole
-  const login = async (username: string, password: string, enforceRole?: string) => {
+  const login = async (identifier: string, password: string, enforceRole?: string) => {
     try {
       setLoading(true);
       setError(null);
-      const response = await authService.login({ username, password });
+      const response = await authService.login({ identifier, password });
       
       console.log('Login response in AuthContext:', response);
       console.log('User role from backend:', response.user.role);
@@ -295,6 +295,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       manage_courses: ['course_management'],
       manage_announcements: ['announcement_management'],
       manage_events: ['event_management'],
+      manage_hods: ['hod_management', 'user_management'],
+      manage_principals: ['principal_management'],
+      manage_jsc_users: ['user_management'],
+      assign_jsc_permissions: ['jsc_permissions'],
+      manage_attendance: ['attendance_management'],
+      manage_results: ['results_management'],
+      view_obe_reports: ['reports_access'],
+      manage_clo: ['clo_management'],
     };
 
     const granted = new Set(currentUser.permissions || []);

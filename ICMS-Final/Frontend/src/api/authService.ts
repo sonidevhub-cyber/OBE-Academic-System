@@ -14,7 +14,8 @@ interface RegisterData {
 }
 
 interface LoginData {
-  username: string;
+  identifier?: string;
+  username?: string;
   password: string;
 }
 
@@ -61,8 +62,12 @@ const register = async (_data: RegisterData): Promise<AuthResponse> => {
 
 const login = async (data: LoginData): Promise<AuthResponse> => {
   try {
-    console.log('Sending login data:', data);
-    const response = await apiClient.post<BackendResponse>('register/login/', data);
+    const identifier = data.identifier ?? data.username ?? '';
+    console.log('Sending login data:', { identifier, password: data.password });
+    const response = await apiClient.post<BackendResponse>('register/login/', {
+      identifier,
+      password: data.password
+    });
 
     console.log('Raw login response:', response);
 
@@ -96,7 +101,7 @@ const instructorLogin = async (data: InstructorLoginData): Promise<AuthResponse>
   try {
     console.log('Sending instructor login data:', data);
     const response = await apiClient.post<BackendResponse>('register/login/', {
-      username: data.employee_id,
+      identifier: data.employee_id,
       password: data.password
     });
 

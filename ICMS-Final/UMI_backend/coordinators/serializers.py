@@ -11,7 +11,7 @@ class CoordinatorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Coordinator
         fields = '__all__'
-        read_only_fields = ('user', 'assigned_by', 'created_at', 'updated_at')
+        read_only_fields = ('user', 'assigned_by', 'created_at', 'updated_at', 'employee_id')
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)

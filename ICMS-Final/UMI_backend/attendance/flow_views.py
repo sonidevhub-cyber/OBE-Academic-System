@@ -38,6 +38,23 @@ def _is_principal_user(user):
     return bool(hasattr(user, 'principal_profile') or _has_role(user, 'principal'))
 
 
+def _is_hod_user(user):
+    return bool(hasattr(user, 'hod_profile') or _has_role(user, 'hod'))
+
+
+def _is_coordinator_user(user):
+    return bool(hasattr(user, 'coordinator_profile') or _has_role(user, 'coordinator'))
+
+
+def _get_department_for_user(user):
+    hod = _get_hod_for_user(user)
+    if hod and hod.department:
+        return hod.department
+    coordinator = _get_coordinator_for_user(user)
+    if coordinator and coordinator.department:
+        return coordinator.department
+    return None
+
 def _get_instructor_for_user(user):
     if hasattr(user, 'instructor_profile'):
         return user.instructor_profile
@@ -271,7 +288,7 @@ def request_attendance_update(request):
         reason=reason,
         status='pending'
     )
-    return Response({'message': 'Update request sent to admin', 'request_id': req.id}, status=status.HTTP_201_CREATED)
+    return Response({'message': 'Update request sent to HOD/Coordinator', 'request_id': req.id}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
@@ -286,14 +303,27 @@ def instructor_update_requests(request):
 @permission_classes([IsAuthenticated])
 def admin_update_requests(request):
     user = request.user
-    if not _is_admin_user(user):
-        return Response({'error': 'Only admins can manage attendance update requests'}, status=status.HTTP_403_FORBIDDEN)
+    is_admin = _is_admin_user(user)
+    is_principal = _is_principal_user(user)
+    is_hod = _is_hod_user(user)
+    is_coordinator = _is_coordinator_user(user)
+
+    if not (is_hod or is_coordinator or is_admin or is_principal):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Student attendance update requests are handled by HOD/Coordinator.
+    if not (is_hod or is_coordinator):
+        return Response({'error': 'Only HOD/Coordinator can manage class attendance update requests'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
         status_filter = request.GET.get('status')
         qs = AttendanceUpdateRequest.objects.select_related('requested_by', 'timetable__course__semester', 'timetable__instructor')
         if status_filter:
             qs = qs.filter(status=status_filter)
+        department = _get_department_for_user(user)
+        if not department:
+            return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = qs.filter(timetable__course__semester__department=department)
         return Response(AttendanceUpdateRequestSerializer(qs, many=True).data)
 
     request_id = request.data.get('request_id')
@@ -303,6 +333,11 @@ def admin_update_requests(request):
         return Response({'error': 'request_id and valid action are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     req = get_object_or_404(AttendanceUpdateRequest, id=request_id)
+    department = _get_department_for_user(user)
+    if not department:
+        return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+    if req.timetable.course.semester.department_id != department.department_id:
+        return Response({'error': 'Forbidden: You can only manage requests in your department.'}, status=status.HTTP_403_FORBIDDEN)
     req.reviewed_by = user
     req.reviewed_at = timezone.now()
     req.admin_notes = admin_notes

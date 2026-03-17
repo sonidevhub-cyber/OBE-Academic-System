@@ -22,7 +22,7 @@ class Student(models.Model):
     first_name = models.CharField(max_length=50, blank=True, null=True)
     last_name = models.CharField(max_length=50, blank=True, null=True)
     password = models.CharField(max_length=128, blank=True, null=True)
-    registration_number = models.CharField(max_length=20, blank=True, null=True)
+    registration_number = models.CharField(max_length=30, blank=True, null=True, unique=True)
     gender = models.CharField(
         max_length=10,
         choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')],
@@ -45,6 +45,7 @@ class Student(models.Model):
     courses = models.ManyToManyField("academics.Course", related_name="students", blank=True)
 
     def save(self, *args, **kwargs):
+        from register.identifiers import generate_registration_number
         if not self.student_id and self.department:
             # Generate department-based student ID
             dept_code = self.department.code.lower()
@@ -67,6 +68,13 @@ class Student(models.Model):
             # Generate next ID
             next_num = max_num + 1
             self.student_id = f"{dept_code}{str(next_num).zfill(3)}"
+
+        if not self.registration_number:
+            self.registration_number = generate_registration_number(
+                student=self,
+                department=self.department,
+                batch=self.batch,
+            )
         
         super().save(*args, **kwargs)
 

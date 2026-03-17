@@ -26,6 +26,8 @@ class User(AbstractUser):
     profile_image = models.ImageField(upload_to='uploads/admin_images/', null=True, blank=True)
     # Temporary field to match database
     is_coordinator = models.BooleanField(default=False)
+    # System-generated employee identifier for staff/admin roles
+    employee_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
     
     def add_role(self, role):
         """Add a role to user's roles list"""
@@ -99,8 +101,51 @@ class User(AbstractUser):
         if hasattr(self, 'hod_profile'):
             if 'hod' not in self.roles:
                 self.roles.append('hod')
-        
+
+        # Ensure super admin gets SAC employee ID if missing
+        if self.role == 'super_admin' and not self.employee_id:
+            try:
+                from .identifiers import generate_employee_id
+                self.employee_id = generate_employee_id(role='super_admin')
+                if not self.username:
+                    self.username = self.employee_id
+            except Exception:
+                pass
+
         super().save(*args, **kwargs)
+
+
+class IdentifierConfig(models.Model):
+    """
+    Configurable identifier prefixes and sequences.
+    Use department-specific rows to override prefixes per department.
+    """
+    ROLE_CHOICES = [
+        ('SAC', 'Super Admin'),
+        ('JSC', 'Admin (JSC)'),
+        ('PRINCIPAL', 'Principal'),
+        ('INSTRUCTOR', 'Instructor'),
+        ('HOD', 'HOD'),
+        ('COORDINATOR', 'Coordinator'),
+        ('STUDENT', 'Student'),
+    ]
+
+    role_key = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    department = models.ForeignKey(
+        "academics.Department", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    prefix = models.CharField(max_length=20)
+    next_sequence = models.IntegerField(default=1)
+    padding = models.IntegerField(default=3)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('role_key', 'department')
+        ordering = ['role_key']
+
+    def __str__(self):
+        dept = self.department.code if self.department else "GLOBAL"
+        return f"{self.role_key}:{dept} -> {self.prefix}{self.next_sequence:0{self.padding}d}"
 class PrincipalRegistrationRequest(models.Model):
     name = models.CharField(max_length=100)
     username = models.CharField(max_length=100)

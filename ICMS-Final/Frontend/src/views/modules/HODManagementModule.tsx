@@ -40,9 +40,7 @@ interface CreateHODForm {
   first_name: string;
   last_name: string;
   email: string;
-  username: string;
   password: string;
-  employee_id: string;
   department: string;
   phone: string;
   joining_date: string;
@@ -111,9 +109,7 @@ const HODManagementModule: React.FC<HODManagementProps> = ({ token }) => {
     first_name: '',
     last_name: '',
     email: '',
-    username: '',
     password: '',
-    employee_id: '',
     department: '',
     phone: '',
     joining_date: new Date().toISOString().split('T')[0],
@@ -244,9 +240,7 @@ const HODManagementModule: React.FC<HODManagementProps> = ({ token }) => {
       formDataToSend.append('first_name', formData.first_name);
       formDataToSend.append('last_name', formData.last_name);
       formDataToSend.append('email', formData.email);
-      formDataToSend.append('username', formData.username);
       formDataToSend.append('password', formData.password);
-      formDataToSend.append('employee_id', formData.employee_id);
       formDataToSend.append('department', formData.department);
       formDataToSend.append('phone', formData.phone);
       formDataToSend.append('joining_date', formData.joining_date);
@@ -265,16 +259,16 @@ const HODManagementModule: React.FC<HODManagementProps> = ({ token }) => {
       });
 
       if (response.ok) {
-        setFormMessage('✓ HOD created successfully!');
+        const payload = await response.json();
+        const createdEmployeeId = payload?.employee_id;
+        setFormMessage(`✓ HOD created successfully!${createdEmployeeId ? ` Employee ID: ${createdEmployeeId}` : ''}`);
         setTimeout(() => {
           setShowAddForm(false);
           setFormData({
             first_name: '',
             last_name: '',
             email: '',
-            username: '',
             password: '',
-            employee_id: '',
             department: '',
             phone: '',
             joining_date: new Date().toISOString().split('T')[0],
@@ -659,27 +653,11 @@ const HODManagementModule: React.FC<HODManagementProps> = ({ token }) => {
                   className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <input
-                  type="text"
-                  placeholder="Username"
-                  required
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                <input
                   type="password"
                   placeholder="Password"
                   required
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                <input
-                  type="text"
-                  placeholder="Employee ID"
-                  required
-                  value={formData.employee_id}
-                  onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
                   className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
                 <select

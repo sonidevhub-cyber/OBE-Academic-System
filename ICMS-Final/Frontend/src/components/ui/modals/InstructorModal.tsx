@@ -28,7 +28,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
     name: string;
     email: string;
     phone: string;
-    employee_id: string;
     department_id: string;
     employment_type: EmploymentType;
     designation: string;
@@ -41,7 +40,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
     name: '',
     email: '',
     phone: '',
-    employee_id: '',
     department_id: '',  // Changed from department to department_id
     employment_type: 'PERMANENT',
     designation: '',
@@ -67,22 +65,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
     fetchDepartments();
   }, []);
 
-  // Generate unique employee ID for new instructors
-  useEffect(() => {
-    if (!instructorId) {
-      const generateEmployeeId = () => {
-        const timestamp = Date.now().toString().slice(-4);
-        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-        return `${timestamp}${random}`;
-      };
-
-      setFormData(prev => ({
-        ...prev,
-        employee_id: generateEmployeeId()
-      }));
-    }
-  }, [instructorId]);
-
   // Fetch instructor data if editing
   useEffect(() => {
     if (instructorId) {
@@ -102,7 +84,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
             name: instructor.name || '',
             email: instructor.user?.email || '',
             phone: instructor.phone || '',
-            employee_id: instructor.employee_id || '',
             department_id: departmentId ? departmentId.toString() : '',
             employment_type: instructor.employment_type || 'PERMANENT',
             designation: instructor.designation || '',
@@ -197,7 +178,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
         dataToSend.append('department_id', formData.department_id);
         dataToSend.append('employment_type', formData.employment_type);
         
-        if (formData.employee_id) dataToSend.append('employee_id', formData.employee_id);
         if (formData.designation) dataToSend.append('designation', formData.designation);
         if (formData.specialization) dataToSend.append('specialization', formData.specialization);
         if (formData.experience_years) dataToSend.append('experience_years', formData.experience_years);
@@ -215,7 +195,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
           phone: formData.phone,
           department_id: parseInt(formData.department_id),
           employment_type: formData.employment_type,
-          ...(formData.employee_id && { employee_id: formData.employee_id }),
           ...(formData.designation && { designation: formData.designation }),
           ...(formData.specialization && { specialization: formData.specialization }),
           ...(formData.experience_years && { experience_years: parseInt(formData.experience_years) }),
@@ -238,7 +217,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
             phone: formData.phone,
             department_id: parseInt(formData.department_id),
             employment_type: formData.employment_type,
-            ...(formData.employee_id && { employee_id: formData.employee_id }),
             ...(formData.designation && { designation: formData.designation }),
             ...(formData.specialization && { specialization: formData.specialization }),
             ...(formData.experience_years && { experience_years: parseInt(formData.experience_years) }),
@@ -265,7 +243,12 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
         response = await instructorService.createInstructor(dataToSend);
       }
 
-
+      if (!instructorId) {
+        const createdEmployeeId = response?.data?.employee_id;
+        if (createdEmployeeId) {
+          alert(`Instructor created successfully!\nEmployee ID: ${createdEmployeeId}`);
+        }
+      }
 
       onSuccess();
     } catch (error: any) {
@@ -374,20 +357,6 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
                       type="tel"
                       required
                       value={formData.phone}
-                      onChange={handleInputChange}
-                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="employee_id">
-                      Employee ID
-                    </label>
-                    <input
-                      id="employee_id"
-                      name="employee_id"
-                      type="text"
-                      value={formData.employee_id}
                       onChange={handleInputChange}
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                     />

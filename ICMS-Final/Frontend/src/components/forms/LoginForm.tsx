@@ -7,7 +7,7 @@ interface LoginFormProps {
 }
 
 const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [isAnimating, setIsAnimating] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -19,12 +19,12 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
     
     try {
-      await login(username, password);
+      await login(identifier, password);
       console.log('Login successful');
       
       if (onLoginSuccess) {
         // If onLoginSuccess is provided, call it (for custom handling)
-        onLoginSuccess({ username });
+        onLoginSuccess({ identifier });
       }
       // Navigation is handled by AuthContext based on user role
     } catch (err: any) {
@@ -80,7 +80,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
             {authError && <p className="text-red-600 mb-6 text-center bg-red-50 p-3 rounded-lg border border-red-100">{authError}</p>}
             
             <div className="mb-6 relative group">
-              <label className="block text-sm font-medium text-gray-700 mb-1 ml-1">Username</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 ml-1">Employee ID / Registration No / Email</label>
               <div className="relative">
                 <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -89,9 +89,9 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
                 </div>
                 <input
                   type="text"
-                  placeholder="Enter your username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g., CS001, PGCW001, UG2026-001, or email"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all group-hover:shadow-md"
                   required
                 />

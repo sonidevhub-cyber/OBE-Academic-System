@@ -5,6 +5,7 @@ from .serializers import EventSerializer
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
+from rbac.services import user_has_permission, resolve_user_role_code, SAC_ROLE_CODE
 
 
 class EventViewSet(viewsets.ModelViewSet):
@@ -17,22 +18,16 @@ class EventViewSet(viewsets.ModelViewSet):
         return [permissions.AllowAny()]
 
     def perform_create(self, serializer):
-        # ✅ Admin/Super Admin create kar sakta hai
-        if self.request.user.is_superuser or self.request.user.role in ['admin', 'super_admin']:
+        if user_has_permission(self.request.user, 'manage_events'):
             serializer.save(created_by=self.request.user)
-        else:
-            raise PermissionDenied("Only admin can create events.")
+            return
+        raise PermissionDenied("Missing manage_events permission.")
 
     def get_queryset(self):
         user = self.request.user
 
-        # ✅ Principal/Superuser ko sab events dikhein (approve/reject ke liye)
-        if user.is_authenticated and (user.role in ['principal']):
+        if user.is_authenticated and (resolve_user_role_code(user) == SAC_ROLE_CODE or user_has_permission(user, 'manage_events')):
             return Event.objects.all()
-        
-        # ✅ Admin ko sirf apne events dikhein
-        if user.is_authenticated and user.role == 'admin':
-            return Event.objects.filter(created_by=user)
         
         # ✅ Baqi sabko sirf approved events dikhein
         return Event.objects.filter(status='approved')
@@ -40,8 +35,8 @@ class EventViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         event = self.get_object()
-        if request.user.role != 'principal':
-            raise PermissionDenied("Only principal can approve events.")
+        if not user_has_permission(request.user, 'manage_events'):
+            raise PermissionDenied("Missing manage_events permission.")
         event.status = 'approved'
         event.save()
         return Response({'status': 'Event approved successfully'}, status=status.HTTP_200_OK)
@@ -49,8 +44,8 @@ class EventViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         event = self.get_object()
-        if request.user.role != 'principal':
-            raise PermissionDenied("Only principal can reject events.")
+        if not user_has_permission(request.user, 'manage_events'):
+            raise PermissionDenied("Missing manage_events permission.")
         event.status = 'rejected'
         event.save()
         return Response({'status': 'Event rejected successfully'}, status=status.HTTP_200_OK)

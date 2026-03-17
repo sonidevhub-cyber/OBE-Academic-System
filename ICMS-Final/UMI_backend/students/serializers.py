@@ -5,6 +5,7 @@ from datetime import date
 from .models import Student
 from academics.models import Course, Department, Semester
 from academics.serializers import CourseSerializer
+from register.identifiers import identifier_in_use
 
 
 class StudentSerializer(serializers.ModelSerializer):
@@ -75,6 +76,19 @@ class StudentSerializer(serializers.ModelSerializer):
 
         if not data.get('name') and not (data.get('first_name') and data.get('last_name')):
             raise serializers.ValidationError("Either 'name' or both 'first_name' and 'last_name' are required")
+
+        registration_number = data.get('registration_number')
+        if registration_number:
+            exclude_user_id = self.instance.user_id if self.instance and getattr(self.instance, 'user_id', None) else None
+            exclude_student_id = self.instance.student_id if self.instance else None
+            if identifier_in_use(
+                registration_number,
+                exclude_user_id=exclude_user_id,
+                exclude_student_id=exclude_student_id,
+            ):
+                raise serializers.ValidationError(
+                    {"registration_number": "This registration number is already in use."}
+                )
 
         return data
 

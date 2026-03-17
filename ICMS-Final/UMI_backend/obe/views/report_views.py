@@ -2,11 +2,14 @@ from collections import defaultdict
 import re
 
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from academics.models import Course
 from students.models import Student
+from register.access_control import get_user_assigned_department_id, is_department_scoped_admin
+from rbac.decorators import require_permission
 from ..models import (
     Assessment,
     AssessmentCLOMapping,
@@ -27,6 +30,8 @@ def _natural_key(value):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
+@require_permission("view_obe_reports")
 def marksheet_report(request):
     course_id = request.query_params.get("course")
     if not course_id:
@@ -40,6 +45,11 @@ def marksheet_report(request):
         course = Course.objects.select_related("semester", "semester__department").get(course_id=course_id)
     except Course.DoesNotExist:
         return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if is_department_scoped_admin(request.user):
+        assigned_department_id = get_user_assigned_department_id(request.user)
+        if assigned_department_id and course.semester and course.semester.department_id != assigned_department_id:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
     assessments = list(
         Assessment.objects.filter(course_id=course_id)
