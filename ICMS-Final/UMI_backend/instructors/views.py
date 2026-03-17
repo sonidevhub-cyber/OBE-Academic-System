@@ -467,3 +467,33 @@ class HODRecordsView(APIView):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from coordinators.models import CourseAllocation
+from students.models import Student
+
+@api_view(['GET'])
+def course_details(request, allocation_id):
+    allocation = CourseAllocation.objects.get(allocation_id=allocation_id)
+
+    students = Student.objects.filter(semester=allocation.semester)
+
+    student_list = [
+        {
+            "reg_no": s.registration_number,
+            "name": s.name
+        }
+        for s in students
+    ]
+
+    data = {
+        "course": allocation.course.name,
+        "course_code": allocation.course.code,
+        "semester": allocation.semester.name,
+        "instructor": allocation.instructor.name,
+        "HOD comments": allocation.hod_comments,
+        "coordinator": allocation.coordinator.name,
+        "students": student_list
+    }
+
+    return Response(data)

@@ -25,7 +25,7 @@ const HODCourseAllocationModule: React.FC = () => {
   const submitAction = async () => {
     try {
       updateAllocation(selectedAllocation.allocation_id, {
-        status: actionType === 'approve' ? 'approved' : 'rejected',
+        status: actionType === 'approve' ? 'active' : 'rejected',
         hod_comments: comments,
         approved_at: new Date().toISOString()
       });

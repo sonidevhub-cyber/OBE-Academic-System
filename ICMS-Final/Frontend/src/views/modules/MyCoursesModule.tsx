@@ -22,7 +22,7 @@ const MyCoursesModule: React.FC = () => {
         instructorCourseService.getCoursesSummary()
       ]);
       
-      setCourses(coursesRes.data.courses || []);
+      setCourses(coursesRes.data);
       setSummary(summaryRes.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -31,9 +31,9 @@ const MyCoursesModule: React.FC = () => {
     }
   };
 
-  const handleViewCourse = async (courseId: number) => {
+  const handleViewCourse = async (allocationId: number) => {
     try {
-      const response = await instructorCourseService.getCourseDetails(courseId);
+      const response = await instructorCourseService.getCourseDetails(allocationId);
       setSelectedCourse(response.data);
       setShowCourseModal(true);
     } catch (error) {
@@ -142,7 +142,7 @@ const MyCoursesModule: React.FC = () => {
                 key={course.allocation_id}
                 className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
                 whileHover={{ scale: 1.02 }}
-                onClick={() => handleViewCourse(course.course_id)}
+                onClick={() => handleViewCourse(course.allocation_id)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -154,7 +154,13 @@ const MyCoursesModule: React.FC = () => {
                       <span className="text-sm text-gray-600">{course.credits} Credits</span>
                     </div>
                   </div>
-                  <ChevronRight className="h-5 w-5 text-gray-400" />
+                  <Eye 
+  className="h-5 w-5 text-blue-500 cursor-pointer" 
+  onClick={(e) => {
+    e.stopPropagation();
+    handleViewCourse(course.allocation_id);
+  }}
+/>
                 </div>
                 <div className="mt-3 pt-3 border-t">
                   <div className="flex items-center justify-between text-sm">
@@ -235,7 +241,7 @@ const CourseDetailsModal: React.FC<{
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Course Information */}
+          Course Information
           <div className="space-y-4">
             <div className="bg-blue-50 p-4 rounded-lg">
               <h4 className="font-semibold text-blue-900 mb-2">Course Details</h4>

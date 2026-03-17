@@ -126,8 +126,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'icms_db',
-        'USER': 'icms_user',
-        'PASSWORD': 'admin.123',
+        'USER': 'postgres',
+        'PASSWORD': '12345678',
         'HOST': 'localhost',
         'PORT': '5432',
         'OPTIONS': {
