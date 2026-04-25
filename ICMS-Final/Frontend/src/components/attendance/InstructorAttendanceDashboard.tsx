@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Clock, Users, CheckCircle, XCircle, AlertTriangle, Lock, Unlock } from 'lucide-react';
+import FacultySelfAttendanceComponent from './FacultySelfAttendanceComponent';
 
 interface ClassSlot {
   timetable_id: number;
@@ -32,6 +33,7 @@ interface InstructorAttendanceDashboardProps {
 }
 
 const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps> = ({ className = '' }) => {
+  const [activeView, setActiveView] = useState<'class' | 'self'>('class');
   const [activeSlots, setActiveSlots] = useState<ClassSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState('');
@@ -172,7 +174,7 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
   };
 
   const requestAttendanceUpdate = async (slot: ClassSlot) => {
-    const reason = window.prompt('Enter reason for attendance update request to admin:');
+    const reason = window.prompt('Enter reason for attendance update request to HOD/Coordinator:');
     if (!reason || !reason.trim()) return;
 
     try {
@@ -204,7 +206,7 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
         return;
       }
 
-      alert('Update request sent to admin successfully.');
+      alert('Update request sent to HOD/Coordinator successfully.');
     } catch (error) {
       console.error('Error requesting attendance update:', error);
       alert('Failed to send update request.');
@@ -230,7 +232,7 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
     return 'text-red-600';
   };
 
-  if (loading) {
+  if (loading && activeView === 'class') {
     return (
       <div className={`bg-white rounded-2xl shadow-lg p-8 ${className}`}>
         <div className="flex items-center justify-center">
@@ -241,33 +243,32 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
     );
   }
 
-  if (activeSlots.length === 0) {
-    return (
-      <div className={`bg-white rounded-2xl shadow-lg p-8 text-center ${className}`}>
-        <div className="text-gray-400 mb-4">
-          <Calendar className="w-16 h-16 mx-auto" />
-        </div>
-        <h3 className="text-xl font-semibold text-gray-900 mb-2">No Active Classes Today</h3>
-        <p className="text-gray-600 mb-4">
-          You don't have any classes scheduled for today.
-        </p>
-        <div className="text-sm text-gray-500">
-          <p>Current Time: {currentTime}</p>
-          <p>Day: {currentDay}</p>
-        </div>
-        <button
-          onClick={fetchActiveSlots}
-          disabled={refreshing}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className={`space-y-6 ${className}`}>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1">
+        <div className="flex space-x-1">
+          {[
+            { id: 'class', label: 'Class Attendance' },
+            { id: 'self', label: 'Self Attendance' }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveView(tab.id as 'class' | 'self')}
+              className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                activeView === tab.id ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeView === 'self' && (
+        <FacultySelfAttendanceComponent />
+      )}
+      {activeView === 'class' && (
+      <>
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-2xl p-6">
         <div className="flex items-center justify-between">
@@ -291,6 +292,29 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
         </div>
       </div>
 
+      {activeSlots.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="text-gray-400 mb-4">
+            <Calendar className="w-16 h-16 mx-auto" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">No Active Classes Today</h3>
+          <p className="text-gray-600 mb-4">
+            You don't have any classes scheduled for today.
+          </p>
+          <div className="text-sm text-gray-500">
+            <p>Current Time: {currentTime}</p>
+            <p>Day: {currentDay}</p>
+          </div>
+          <button
+            onClick={fetchActiveSlots}
+            disabled={refreshing}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+      ) : (
+        <>
       {/* Active Slots */}
       {activeSlots.map((slot, slotIndex) => (
         <motion.div
@@ -368,7 +392,7 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
                   onClick={() => requestAttendanceUpdate(slot)}
                   className="mt-3 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  Request Admin Approval To Update
+                  Request HOD/Coordinator Approval To Update
                 </button>
               </div>
             )}
@@ -450,6 +474,10 @@ const InstructorAttendanceDashboard: React.FC<InstructorAttendanceDashboardProps
           {refreshing ? 'Refreshing...' : 'Refresh Classes'}
         </button>
       </div>
+        </>
+      )}
+      </>
+      )}
     </div>
   );
 };

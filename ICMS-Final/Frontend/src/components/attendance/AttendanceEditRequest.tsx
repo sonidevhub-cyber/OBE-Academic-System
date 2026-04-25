@@ -89,7 +89,7 @@ const AttendanceEditRequest: React.FC = () => {
       });
 
       if (response.ok) {
-        alert('Edit request submitted successfully! Waiting for admin approval.');
+        alert('Edit request submitted successfully! Waiting for HOD/Coordinator approval.');
         setSelectedRecord(null);
         setReason('');
         fetchEditRequests();

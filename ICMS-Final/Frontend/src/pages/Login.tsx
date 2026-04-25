@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
-import authService from "../api/authService";
 import ForgotPassword from "../components/forms/ForgotPassword";
 
 const Login = () => {
@@ -10,7 +9,7 @@ const Login = () => {
   const [searchParams] = useSearchParams();
   const selectedRole = searchParams.get('role');
   
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -37,14 +36,14 @@ const Login = () => {
     e.preventDefault();
     setError("");
     
-    if (!username.trim() || !password.trim()) {
-      setError("Please enter both username and password");
+    if (!identifier.trim() || !password.trim()) {
+      setError("Please enter both identifier and password");
       return;
     }
     
     try {
       // Pass the selected role to enforce role-based login
-      await login(username, password, selectedRole || undefined);
+      await login(identifier, password, selectedRole || undefined);
       // No need to navigate here as AuthContext handles redirects
     } catch (err: any) {
       // Additional error handling if needed
@@ -135,9 +134,9 @@ const Login = () => {
           </div>
           <input
             type="text"
-            placeholder="Username or Employee ID"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Employee ID / Registration No / Email"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
             disabled={loading}
           />

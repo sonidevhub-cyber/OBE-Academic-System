@@ -1,5 +1,6 @@
 from django.db import models
 from register.models import User
+from register.identifiers import generate_employee_id
 
 class Coordinator(models.Model):
     GENDER_CHOICES = (
@@ -45,6 +46,16 @@ class Coordinator(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.department.name if self.department else 'No Department'}"
+
+    def save(self, *args, **kwargs):
+        if not self.employee_id:
+            self.employee_id = generate_employee_id('coordinator', self.department)
+        if self.user and not self.user.employee_id:
+            self.user.employee_id = self.employee_id
+            if not self.user.username:
+                self.user.username = self.employee_id
+            self.user.save(update_fields=['employee_id', 'username'])
+        super().save(*args, **kwargs)
 
 
 class TimetableProposal(models.Model):
@@ -136,7 +147,14 @@ class CourseAllocation(models.Model):
             self.status = 'active'
             self.save()
 
+class AllocationStudent(models.Model):
+    allocation = models.ForeignKey(CourseAllocation, on_delete=models.CASCADE, related_name="students")
+    student = models.ForeignKey("students.Student", on_delete=models.CASCADE)
 
+    def __str__(self):
+        return f"{self.student.name} - {self.allocation.course.name}"
+
+        
 class CoordinatorDashboard(models.Model):
     coordinator = models.OneToOneField(Coordinator, on_delete=models.CASCADE, related_name="dashboard")
     

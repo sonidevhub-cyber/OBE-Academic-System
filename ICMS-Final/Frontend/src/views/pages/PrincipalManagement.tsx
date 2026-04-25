@@ -23,9 +23,7 @@ export default function AdminPrincipalManagement() {
     first_name: "",
     last_name: "",
     email: "",
-    username: "",
     password: "",
-    employee_id: "",
     rank: "",
     gender: "",
     phone: "",
@@ -55,6 +53,7 @@ export default function AdminPrincipalManagement() {
     e.preventDefault();
 
     try {
+      let response;
       // If a profile picture is provided, send multipart/form-data
       if (profilePicFile) {
         const fd = new FormData();
@@ -62,21 +61,20 @@ export default function AdminPrincipalManagement() {
           if (v !== undefined && v !== null) fd.append(k, v as any);
         });
         fd.append('profile_pic', profilePicFile);
-        await axios.post(`${API_BASE}/create/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        response = await axios.post(`${API_BASE}/create/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       } else {
-        await axios.post(`${API_BASE}/create/`, form);
+        response = await axios.post(`${API_BASE}/create/`, form);
       }
 
-      alert("Principal Created Successfully");
+      const createdEmployeeId = response?.data?.employee_id;
+      alert(`Principal Created Successfully${createdEmployeeId ? `\nEmployee ID: ${createdEmployeeId}` : ''}`);
       setShowForm(false);
 
       setForm({
         first_name: "",
         last_name: "",
         email: "",
-        username: "",
         password: "",
-        employee_id: "",
         rank: "",
         gender: "",
         phone: "",
@@ -371,11 +369,6 @@ export default function AdminPrincipalManagement() {
               onChange={e => setForm({ ...form, email: e.target.value })}
               required />
 
-            <input className="border p-2 rounded" placeholder="Username"
-              value={form.username}
-              onChange={e => setForm({ ...form, username: e.target.value })}
-              required />
-
             <input className="border p-2 rounded" type="password"
               placeholder="Password"
               value={form.password}
@@ -389,12 +382,6 @@ export default function AdminPrincipalManagement() {
           <h3 className="font-semibold mb-2">Employment Details</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
-            <input className="border p-2 rounded" placeholder="Employee ID"
-              value={form.employee_id}
-              onChange={e => setForm({ ...form, employee_id: e.target.value })} />
-
-            
 
             <input className="border p-2 rounded" placeholder="Rank / Designation"
               value={form.rank}

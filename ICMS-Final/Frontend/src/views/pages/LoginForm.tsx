@@ -3,14 +3,14 @@ import { useAuth } from "../../context/AuthContext";
 
 const LoginForm = () => {
   const { login, error, loading } = useAuth();
-  const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [credentials, setCredentials] = useState({ identifier: "", password: "" });
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
     try {
-      await login(credentials.username, credentials.password);
+      await login(credentials.identifier, credentials.password);
     } catch (err: any) {
       setLocalError(err.message || "Login failed. Please try again.");
       console.error('Login form error:', err);
@@ -22,9 +22,9 @@ const LoginForm = () => {
       <div>
         <input
           type="text"
-          placeholder="Username"
-          value={credentials.username}
-          onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
+          placeholder="Employee ID / Registration No / Email"
+          value={credentials.identifier}
+          onChange={(e) => setCredentials({ ...credentials, identifier: e.target.value })}
           disabled={loading}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           required

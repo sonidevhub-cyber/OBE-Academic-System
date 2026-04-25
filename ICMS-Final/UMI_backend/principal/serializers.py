@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from datetime import datetime
 from .models import Principal
+from register.identifiers import identifier_in_use
 
 User = get_user_model()
 
@@ -42,7 +43,7 @@ def parse_flexible_date(value):
 class PrincipalCreateSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField()
     last_name = serializers.CharField()
-    username = serializers.CharField()
+    username = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True)
 
     class Meta:
@@ -56,10 +57,17 @@ class PrincipalCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        from register.identifiers import generate_employee_id
         password = validated_data.pop("password")
-        username = validated_data.pop("username")
+        validated_data.pop("username", None)
         first_name = validated_data.pop("first_name")
         last_name = validated_data.pop("last_name")
+        validated_data.pop("employee_id", None)
+        employee_id = generate_employee_id("principal")
+        validated_data["employee_id"] = employee_id
+        if identifier_in_use(employee_id):
+            raise serializers.ValidationError({"employee_id": "Generated employee ID is already in use."})
+        username = employee_id
 
         # Get or Create Auth User
         user, created = User.objects.get_or_create(
@@ -75,6 +83,7 @@ class PrincipalCreateSerializer(serializers.ModelSerializer):
         
         # Only set password if user was created
         if created:
+            user.employee_id = employee_id
             user.set_password(password)
             user.save()
 
@@ -104,7 +113,7 @@ class PrincipalUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Principal
         fields = [
-            "employee_id", "rank", "department", "gender",
+            "rank", "department", "gender",
             "phone", "email",
             "joining_date", "retirement_date",
             "status", "profile_pic",

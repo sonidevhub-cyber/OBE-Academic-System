@@ -70,6 +70,7 @@ class HODRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     confirm_password = serializers.CharField(write_only=True)
     department_id = serializers.IntegerField()
+    employee_id = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = HODRegistrationRequest
@@ -87,15 +88,14 @@ class HODRegistrationSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=data['email']).exists():
             raise serializers.ValidationError({"email": "A user with this email already exists."})
         
-        # Check if employee_id already exists
-        if HODRegistrationRequest.objects.filter(employee_id=data['employee_id']).exists():
-            raise serializers.ValidationError({"employee_id": "A HOD with this employee ID already exists."})
+        # Employee ID is system-generated; ignore manual input if provided.
         
         return data
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')
         department_id = validated_data.pop('department_id')
+        validated_data.pop('employee_id', None)
         
         from academics.models import Department
         try:
@@ -103,8 +103,11 @@ class HODRegistrationSerializer(serializers.ModelSerializer):
         except Department.DoesNotExist:
             raise serializers.ValidationError({"department_id": "Invalid department."})
         
+        from register.identifiers import generate_employee_id
+        employee_id = generate_employee_id('hod', department)
         hod_request = HODRegistrationRequest.objects.create(
             department=department,
+            employee_id=employee_id,
             **validated_data
         )
         

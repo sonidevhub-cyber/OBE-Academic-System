@@ -10,6 +10,7 @@ from instructors.models import Instructor
 from register.models import User
 from hods.models import HOD
 from register.multi_role_service import MultiRoleService
+from register.identifiers import generate_employee_id
 
 class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     queryset = Coordinator.objects.all()
@@ -287,13 +288,16 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         try:
             hod = HOD.objects.get(user=request.user)
             
+            employee_id = generate_employee_id('coordinator', hod.department)
+
             # Create user account
             user_data = {
-                'username': request.data.get('username'),
+                'username': employee_id,
                 'email': request.data.get('email'),
                 'password': make_password(request.data.get('password')),
                 'role': 'coordinator',
-                'name': request.data.get('name')
+                'name': request.data.get('name'),
+                'employee_id': employee_id,
             }
             
             user = User.objects.create(**user_data)
@@ -301,7 +305,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
             # Create coordinator profile
             coordinator_data = {
                 'user': user,
-                'employee_id': request.data.get('employee_id'),
+                'employee_id': employee_id,
                 'name': request.data.get('name'),
                 'email': request.data.get('email'),
                 'phone': request.data.get('phone'),
@@ -327,7 +331,8 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
             
             return Response({
                 'message': f'Coordinator {coordinator.name} created successfully',
-                'coordinator_id': coordinator.id
+                'coordinator_id': coordinator.id,
+                'employee_id': coordinator.employee_id
             })
             
         except Exception as e:

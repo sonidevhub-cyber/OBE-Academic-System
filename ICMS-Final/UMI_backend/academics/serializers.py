@@ -49,11 +49,12 @@ class DepartmentSerializer(serializers.ModelSerializer):
 # ===========================
 class SemesterSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(source='semester_id', read_only=True)
+    semester_id = serializers.IntegerField(read_only=True)
     department = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Semester
-        fields = ['id', 'name', 'semester_code', 'program', 'capacity', 'department']
+        fields = ['id', 'semester_id', 'name', 'semester_code', 'program', 'capacity', 'department']
 
 
 # ===========================

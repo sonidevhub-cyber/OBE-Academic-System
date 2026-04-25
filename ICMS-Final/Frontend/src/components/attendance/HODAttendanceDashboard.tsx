@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { BarChart3, TrendingUp, Users, CheckCircle, FileText } from 'lucide-react';
+import { BarChart3, TrendingUp, Users, CheckCircle, FileText, Clock } from 'lucide-react';
+import AttendanceUpdateRequestsPanel from './AttendanceUpdateRequestsPanel';
+import FacultySelfAttendanceComponent from './FacultySelfAttendanceComponent';
 import attendanceReportsService, { StudentAttendanceRecord, FacultyAttendanceRecord } from '../../api/attendanceReportsService';
 
 interface DepartmentStats {
@@ -49,7 +51,7 @@ interface HODAttendanceDashboardProps {
 }
 
 const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ className = '' }) => {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'reports'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'courses' | 'reports' | 'requests' | 'self'>('analytics');
   const [departmentStats, setDepartmentStats] = useState<DepartmentStats | null>(null);
   const [courseAnalytics, setCourseAnalytics] = useState<CourseAnalytics[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentAttendanceRecord[]>([]);
@@ -249,7 +251,7 @@ const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ classNa
     <div className={`space-y-6 ${className}`}>
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl p-6">
         <h2 className="text-2xl font-bold mb-2">Department Attendance Analytics</h2>
-        <p className="text-purple-100">Student and instructor attendance reports with admin update-request tracking</p>
+        <p className="text-purple-100">Department attendance analytics with update-request oversight</p>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1">
@@ -257,11 +259,13 @@ const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ classNa
           {[
             { id: 'analytics', label: 'Department Analytics', icon: BarChart3 },
             { id: 'courses', label: 'Course Performance', icon: FileText },
-            { id: 'reports', label: 'Student & Instructor Reports', icon: Users }
+            { id: 'reports', label: 'Student & Instructor Reports', icon: Users },
+            { id: 'requests', label: 'Update Requests', icon: CheckCircle },
+            { id: 'self', label: 'My Attendance', icon: Clock }
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as 'analytics' | 'courses' | 'reports')}
+              onClick={() => setActiveTab(tab.id as 'analytics' | 'courses' | 'reports' | 'requests' | 'self')}
               className={`flex-1 flex items-center justify-center px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === tab.id ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -273,47 +277,49 @@ const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ classNa
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
-          <div className="flex space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Period:</label>
-              <select
-                value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-                <option value="180">Last 6 months</option>
-              </select>
-            </div>
-
-            {activeTab === 'courses' && (
+      {activeTab !== 'requests' && activeTab !== 'self' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+            <div className="flex space-x-4">
               <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700">Semester:</label>
+                <label className="text-sm font-medium text-gray-700">Period:</label>
                 <select
-                  value={selectedSemester}
-                  onChange={(e) => setSelectedSemester(e.target.value)}
+                  value={selectedPeriod}
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                 >
-                  <option value="">All Semesters</option>
-                  <option value="1">Semester 1</option>
-                  <option value="2">Semester 2</option>
-                  <option value="3">Semester 3</option>
-                  <option value="4">Semester 4</option>
-                  <option value="5">Semester 5</option>
-                  <option value="6">Semester 6</option>
-                  <option value="7">Semester 7</option>
-                  <option value="8">Semester 8</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="180">Last 6 months</option>
                 </select>
               </div>
-            )}
+
+              {activeTab === 'courses' && (
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium text-gray-700">Semester:</label>
+                  <select
+                    value={selectedSemester}
+                    onChange={(e) => setSelectedSemester(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">All Semesters</option>
+                    <option value="1">Semester 1</option>
+                    <option value="2">Semester 2</option>
+                    <option value="3">Semester 3</option>
+                    <option value="4">Semester 4</option>
+                    <option value="5">Semester 5</option>
+                    <option value="6">Semester 6</option>
+                    <option value="7">Semester 7</option>
+                    <option value="8">Semester 8</option>
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {loading ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
@@ -463,10 +469,10 @@ const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ classNa
                 {departmentName && (
                   <p className="mt-2 text-sm text-indigo-700 font-medium">Department: {departmentName}</p>
                 )}
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Attendance edit requests are handled in Super Admin Dashboard under Attendance -&gt; Edit Requests.
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Student attendance update requests are reviewed by HOD/Coordinator in the Update Requests tab.
+                  </div>
                 </div>
-              </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -640,6 +646,17 @@ const HODAttendanceDashboard: React.FC<HODAttendanceDashboardProps> = ({ classNa
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'requests' && (
+            <AttendanceUpdateRequestsPanel
+              title="Student Attendance Update Requests"
+              subtitle="Approve or reject instructor requests to update submitted class attendance."
+            />
+          )}
+
+          {activeTab === 'self' && (
+            <FacultySelfAttendanceComponent />
           )}
 
         </>

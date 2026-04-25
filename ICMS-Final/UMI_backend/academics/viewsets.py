@@ -9,6 +9,7 @@ from .permissions import AllowAnyReadOnly
 import logging
 import re
 from register.access_control import can_access_department, get_user_assigned_department_id, is_department_scoped_admin
+from rbac.services import user_has_permission
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Override create to handle errors properly"""
+        if not user_has_permission(request.user, 'manage_departments'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_departments'}, status=status.HTTP_403_FORBIDDEN)
         if is_department_scoped_admin(request.user):
             return Response({'error': 'Forbidden: Department admins cannot create departments.'}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -90,6 +93,8 @@ class DepartmentViewSet(viewsets.ModelViewSet):
             )
 
     def update(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_departments'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_departments'}, status=status.HTTP_403_FORBIDDEN)
         if is_department_scoped_admin(request.user):
             return Response({'error': 'Forbidden: Department admins cannot update departments.'}, status=status.HTTP_403_FORBIDDEN)
         instance = self.get_object()
@@ -158,6 +163,13 @@ class SemesterViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Semester.objects.all()
         department = self.request.query_params.get('department', None)
+        user = self.request.user
+        # If coordinator/HOD, restrict to their department unless explicit filter overrides
+        if not department:
+            if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
+                department = user.coordinator_profile.department_id
+            elif hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
+                department = user.hod_profile.department_id
         if department is not None:
             queryset = queryset.filter(department=department)
         if is_department_scoped_admin(self.request.user):
@@ -166,12 +178,16 @@ class SemesterViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_departments'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_departments'}, status=status.HTTP_403_FORBIDDEN)
         department_id = request.data.get('department')
         if not can_access_department(request.user, department_id):
             return Response({'error': 'Forbidden: You can only manage semesters in your assigned department.'}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_departments'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_departments'}, status=status.HTTP_403_FORBIDDEN)
         instance = self.get_object()
         target_department_id = request.data.get('department', instance.department_id)
         if not can_access_department(request.user, instance.department_id) or not can_access_department(request.user, target_department_id):
@@ -217,12 +233,16 @@ class CourseViewSet(viewsets.ModelViewSet):
         return None
 
     def create(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_courses'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_courses'}, status=status.HTTP_403_FORBIDDEN)
         target_department_id = self._resolve_target_department_id(request.data)
         if not can_access_department(request.user, target_department_id):
             return Response({'error': 'Forbidden: You can only manage courses in your assigned department.'}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_courses'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_courses'}, status=status.HTTP_403_FORBIDDEN)
         instance = self.get_object()
         target_department_id = self._resolve_target_department_id(request.data, instance=instance)
         current_department_id = instance.semester.department_id if instance.semester else None
@@ -231,6 +251,8 @@ class CourseViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
+        if not user_has_permission(request.user, 'manage_courses'):
+            return Response({'error': 'Forbidden', 'required_permission': 'manage_courses'}, status=status.HTTP_403_FORBIDDEN)
         instance = self.get_object()
         current_department_id = instance.semester.department_id if instance.semester else None
         if not can_access_department(request.user, current_department_id):

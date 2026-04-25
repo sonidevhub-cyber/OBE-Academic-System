@@ -7,7 +7,7 @@ import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
 import HODCoordinatorManagementModule from '../modules/hod/HODCoordinatorManagementModule';
-import HODCourseAllocationModule from '../modules/hod/HODCourseAllocationModule';
+import HODCourseAllocationModule from '../modules/HODCourseAllocationModule';
 import HODInstructorManagementModule from '../modules/hod/HODInstructorManagementModule';
 import HODInstructorOnlyModule from '../modules/hod/HODInstructorOnlyModule';
 import HODCoordinatorOnlyModule from '../modules/hod/HODCoordinatorOnlyModule';
@@ -632,16 +632,16 @@ const ModularHODDashboard: React.FC = () => {
         return <HODCoordinatorOnlyModule />;
 
       case 'allocations':
-        return <HODCourseAllocationModule />;
+        return <HODCourseAllocationModule view="all" />;
 
       case 'allocation-pending':
-        return <HODCourseAllocationModule />;
+        return <HODCourseAllocationModule view="pending" />;
 
       case 'allocation-approved':
-        return <HODCourseAllocationModule />;
+        return <HODCourseAllocationModule view="approved" />;
 
       case 'allocation-rejected':
-        return <HODCourseAllocationModule />;
+        return <HODCourseAllocationModule view="rejected" />;
 
       case 'timetable-pending':
         return renderTimetableProposals('pending');

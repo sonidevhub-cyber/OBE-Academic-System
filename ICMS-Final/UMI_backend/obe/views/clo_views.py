@@ -2,6 +2,10 @@ from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+
+from register.access_control import get_user_assigned_department_id, is_department_scoped_admin
+from rbac.permissions import HasRBACPermission
 
 from ..models import CLO, CLOGAMapping
 from ..serializers.clo_serializers import CLOSerializer, CLOGAMappingSerializer
@@ -9,6 +13,13 @@ from ..serializers.clo_serializers import CLOSerializer, CLOGAMappingSerializer
 
 class CLOViewSet(viewsets.ModelViewSet):
     serializer_class = CLOSerializer
+    permission_classes = [IsAuthenticated, HasRBACPermission]
+    required_permission = 'manage_clo'
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasRBACPermission()]
 
     def get_queryset(self):
         queryset = CLO.objects.select_related("course", "course__semester", "course__semester__department")
@@ -22,12 +33,22 @@ class CLOViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(course__semester_id=semester_id)
         if department_id:
             queryset = queryset.filter(course__semester__department_id=department_id)
+        if is_department_scoped_admin(self.request.user):
+            assigned_department_id = get_user_assigned_department_id(self.request.user)
+            queryset = queryset.filter(course__semester__department_id=assigned_department_id)
 
         return queryset.order_by("clo_number")
 
 
 class CLOGAMappingViewSet(viewsets.ModelViewSet):
     serializer_class = CLOGAMappingSerializer
+    permission_classes = [IsAuthenticated, HasRBACPermission]
+    required_permission = 'manage_clo'
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasRBACPermission()]
 
     def get_queryset(self):
         queryset = CLOGAMapping.objects.select_related(
@@ -49,6 +70,9 @@ class CLOGAMappingViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(clo__course__semester_id=semester_id)
         if department_id:
             queryset = queryset.filter(clo__course__semester__department_id=department_id)
+        if is_department_scoped_admin(self.request.user):
+            assigned_department_id = get_user_assigned_department_id(self.request.user)
+            queryset = queryset.filter(clo__course__semester__department_id=assigned_department_id)
 
         return queryset
 

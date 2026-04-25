@@ -9,8 +9,10 @@ import logging
 
 from .models import Instructor
 from .serializers import InstructorSerializer
-from .permissions import IsAdminOrReadOnly
+from .permissions import IsAdminOrReadOnly, CanViewInstructors
 from register.access_control import can_access_department, get_user_assigned_department_id, is_department_scoped_admin
+from rbac.permissions import HasRBACPermission
+from rbac.services import user_has_permission
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,23 @@ logger = logging.getLogger(__name__)
 class InstructorViewSet(viewsets.ModelViewSet):
     queryset = Instructor.objects.all()
     serializer_class = InstructorSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasRBACPermission]
+    required_permission = 'manage_instructors'
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated(), CanViewInstructors()]
+        return [IsAuthenticated(), HasRBACPermission()]
 
     def get_queryset(self):
         # Show all instructors, including those who are also coordinators
         queryset = Instructor.objects.all()
+        user = self.request.user
+        if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
+            queryset = queryset.filter(department=user.coordinator_profile.department)
+        elif hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
+            queryset = queryset.filter(department=user.hod_profile.department)
         if is_department_scoped_admin(self.request.user):
             assigned_department_id = get_user_assigned_department_id(self.request.user)
             queryset = queryset.filter(department_id=assigned_department_id)
@@ -31,6 +44,8 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
+            if not user_has_permission(request.user, 'manage_instructors'):
+                return Response({"error": "Forbidden", "required_permission": "manage_instructors"}, status=status.HTTP_403_FORBIDDEN)
             data_for_validation = request.data.copy()
             from register.models import User
             from rest_framework import serializers
@@ -42,11 +57,11 @@ class InstructorViewSet(viewsets.ModelViewSet):
             user_email = data_for_validation.pop('user_email', None)
             if not user_email:
                 return Response({"error": "user_email is required"}, status=status.HTTP_400_BAD_REQUEST)
+            raw_password = request.data.get('password')
+            if not raw_password:
+                return Response({"error": "password is required"}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Check if employee_id already exists
-            employee_id = data_for_validation.get('employee_id')
-            if employee_id and Instructor.objects.filter(employee_id=employee_id).exists():
-                return Response({"error": "Employee ID already exists"}, status=status.HTTP_400_BAD_REQUEST)
+            # Employee ID is system-generated; ignore manual input if provided.
             
             user, created = User.objects.get_or_create(
                 email=user_email, 
@@ -56,6 +71,9 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     'is_coordinator': False  # Instructors are NOT coordinators by default
                 }
             )
+            if created or not user.has_usable_password():
+                user.set_password(raw_password)
+                user.save(update_fields=['password'])
 
             # Check if user already has an instructor profile
             if hasattr(user, 'instructor_profile'):
@@ -75,6 +93,8 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         try:
+            if not user_has_permission(request.user, 'manage_instructors'):
+                return Response({"error": "Forbidden", "required_permission": "manage_instructors"}, status=status.HTTP_403_FORBIDDEN)
             data_for_validation = request.data.copy()
             from register.models import User
             from rest_framework import serializers
@@ -467,3 +487,33 @@ class HODRecordsView(APIView):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from coordinators.models import CourseAllocation
+from students.models import Student
+
+@api_view(['GET'])
+def course_details(request, allocation_id):
+    allocation = CourseAllocation.objects.get(allocation_id=allocation_id)
+
+    students = Student.objects.filter(semester=allocation.semester)
+
+    student_list = [
+        {
+            "reg_no": s.registration_number,
+            "name": s.name
+        }
+        for s in students
+    ]
+
+    data = {
+        "course": allocation.course.name,
+        "course_code": allocation.course.code,
+        "semester": allocation.semester.name,
+        "instructor": allocation.instructor.name,
+        "HOD comments": allocation.hod_comments,
+        "coordinator": allocation.coordinator.name,
+        "students": student_list
+    }
+
+    return Response(data)

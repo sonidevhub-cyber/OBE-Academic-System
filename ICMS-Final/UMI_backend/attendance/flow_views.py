@@ -38,6 +38,23 @@ def _is_principal_user(user):
     return bool(hasattr(user, 'principal_profile') or _has_role(user, 'principal'))
 
 
+def _is_hod_user(user):
+    return bool(hasattr(user, 'hod_profile') or _has_role(user, 'hod'))
+
+
+def _is_coordinator_user(user):
+    return bool(hasattr(user, 'coordinator_profile') or _has_role(user, 'coordinator'))
+
+
+def _get_department_for_user(user):
+    hod = _get_hod_for_user(user)
+    if hod and hod.department:
+        return hod.department
+    coordinator = _get_coordinator_for_user(user)
+    if coordinator and coordinator.department:
+        return coordinator.department
+    return None
+
 def _get_instructor_for_user(user):
     if hasattr(user, 'instructor_profile'):
         return user.instructor_profile
@@ -271,7 +288,7 @@ def request_attendance_update(request):
         reason=reason,
         status='pending'
     )
-    return Response({'message': 'Update request sent to admin', 'request_id': req.id}, status=status.HTTP_201_CREATED)
+    return Response({'message': 'Update request sent to HOD/Coordinator', 'request_id': req.id}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
@@ -286,14 +303,27 @@ def instructor_update_requests(request):
 @permission_classes([IsAuthenticated])
 def admin_update_requests(request):
     user = request.user
-    if not _is_admin_user(user):
-        return Response({'error': 'Only admins can manage attendance update requests'}, status=status.HTTP_403_FORBIDDEN)
+    is_admin = _is_admin_user(user)
+    is_principal = _is_principal_user(user)
+    is_hod = _is_hod_user(user)
+    is_coordinator = _is_coordinator_user(user)
+
+    if not (is_hod or is_coordinator or is_admin or is_principal):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Student attendance update requests are handled by HOD/Coordinator.
+    if not (is_hod or is_coordinator):
+        return Response({'error': 'Only HOD/Coordinator can manage class attendance update requests'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
         status_filter = request.GET.get('status')
         qs = AttendanceUpdateRequest.objects.select_related('requested_by', 'timetable__course__semester', 'timetable__instructor')
         if status_filter:
             qs = qs.filter(status=status_filter)
+        department = _get_department_for_user(user)
+        if not department:
+            return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = qs.filter(timetable__course__semester__department=department)
         return Response(AttendanceUpdateRequestSerializer(qs, many=True).data)
 
     request_id = request.data.get('request_id')
@@ -303,6 +333,11 @@ def admin_update_requests(request):
         return Response({'error': 'request_id and valid action are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     req = get_object_or_404(AttendanceUpdateRequest, id=request_id)
+    department = _get_department_for_user(user)
+    if not department:
+        return Response({'error': 'Department not found for reviewer'}, status=status.HTTP_400_BAD_REQUEST)
+    if req.timetable.course.semester.department_id != department.department_id:
+        return Response({'error': 'Forbidden: You can only manage requests in your department.'}, status=status.HTTP_403_FORBIDDEN)
     req.reviewed_by = user
     req.reviewed_at = timezone.now()
     req.admin_notes = admin_notes
@@ -791,4 +826,96 @@ def principal_performers(request):
         'departments': ranked_departments,
         'courses': top_courses,
         'faculty': top_faculty
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def principal_insights(request):
+    user = request.user
+    if not (_is_principal_user(user) or _is_admin_user(user)):
+        return Response({'error': 'Only principal/admin can access this view'}, status=status.HTTP_403_FORBIDDEN)
+
+    period = int(request.GET.get('period', 30))
+    start_date = date.today() - timedelta(days=max(period, 1))
+    end_date = date.today()
+
+    semester_rows = []
+    semester_records = _department_student_records(None, start_date, end_date).select_related('course__semester__department')
+    semester_map = {}
+    for rec in semester_records:
+        semester = rec.course.semester if rec.course else None
+        if not semester:
+            continue
+        key = semester.id
+        if key not in semester_map:
+            semester_map[key] = {
+                'semester_id': semester.id,
+                'semester_name': semester.name,
+                'department_name': semester.department.name if semester.department else 'N/A',
+                'total_records': 0,
+                'present_count': 0,
+                'absent_count': 0
+            }
+        semester_map[key]['total_records'] += 1
+        if rec.status in ['Present', 'Late']:
+            semester_map[key]['present_count'] += 1
+        elif rec.status == 'Absent':
+            semester_map[key]['absent_count'] += 1
+
+    for row in semester_map.values():
+        rate = round((row['present_count'] / row['total_records'] * 100), 2) if row['total_records'] else 0
+        row['attendance_rate'] = rate
+        semester_rows.append(row)
+
+    lowest_semesters = sorted(semester_rows, key=lambda x: x['attendance_rate'])[:8]
+
+    faculty_records = FacultyAttendance.objects.filter(date__gte=start_date, date__lte=end_date).select_related(
+        'instructor__department', 'coordinator__department', 'hod__department'
+    )
+    faculty_map = {}
+    for rec in faculty_records:
+        if rec.instructor:
+            key = f"instructor:{rec.instructor_id}"
+            name = rec.instructor.name
+            role = 'Instructor'
+            dept = rec.instructor.department.name if rec.instructor.department else 'N/A'
+        elif rec.coordinator:
+            key = f"coordinator:{rec.coordinator_id}"
+            name = rec.coordinator.name
+            role = 'Coordinator'
+            dept = rec.coordinator.department.name if rec.coordinator.department else 'N/A'
+        else:
+            key = f"hod:{rec.hod_id}"
+            name = rec.hod.name
+            role = 'HOD'
+            dept = rec.hod.department.name if rec.hod.department else 'N/A'
+
+        if key not in faculty_map:
+            faculty_map[key] = {
+                'name': name,
+                'role': role,
+                'department': dept,
+                'total_days': 0,
+                'present_days': 0,
+                'absent_days': 0
+            }
+        faculty_map[key]['total_days'] += 1
+        if rec.status in ['Present', 'Late']:
+            faculty_map[key]['present_days'] += 1
+        elif rec.status == 'Absent':
+            faculty_map[key]['absent_days'] += 1
+
+    faculty_rows = []
+    for row in faculty_map.values():
+        rate = round((row['present_days'] / row['total_days'] * 100), 2) if row['total_days'] else 0
+        row['attendance_rate'] = rate
+        faculty_rows.append(row)
+
+    lowest_faculty = sorted(faculty_rows, key=lambda x: x['attendance_rate'])[:10]
+
+    return Response({
+        'period_days': period,
+        'lowest_semesters': lowest_semesters,
+        'lowest_faculty': lowest_faculty
     })

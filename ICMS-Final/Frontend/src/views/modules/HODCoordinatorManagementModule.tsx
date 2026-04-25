@@ -241,7 +241,13 @@ const HODCoordinatorManagementModule: React.FC = () => {
         <CreateCoordinatorModal
           onSubmit={async (data) => {
             try {
-              await api.post('coordinators/api/hod-management/create_new_coordinator/', data);
+              const res = await api.post('coordinators/api/hod-management/create_new_coordinator/', data);
+              const createdEmployeeId = res?.data?.employee_id;
+              if (createdEmployeeId) {
+                alert(`Coordinator created successfully!\nEmployee ID: ${createdEmployeeId}`);
+              } else {
+                alert('Coordinator created successfully!');
+              }
               fetchData();
               setShowCreateModal(false);
               setShowCoordinators(true);
@@ -515,11 +521,9 @@ const CreateCoordinatorModal: React.FC<{
   onClose: () => void;
 }> = ({ onSubmit, onClose }) => {
   const [formData, setFormData] = useState({
-    username: '',
     email: '',
     password: '',
     name: '',
-    employee_id: '',
     phone: '',
     specialization: '',
     experience_years: 0,
@@ -536,17 +540,6 @@ const CreateCoordinatorModal: React.FC<{
       <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4">Create New Coordinator</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Username</label>
-            <input
-              type="text"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              className="w-full p-2 border rounded-md"
-              required
-            />
-          </div>
-          
           <div>
             <label className="block text-sm font-medium mb-1">Full Name</label>
             <input
@@ -575,17 +568,6 @@ const CreateCoordinatorModal: React.FC<{
               type="password"
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className="w-full p-2 border rounded-md"
-              required
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Employee ID</label>
-            <input
-              type="text"
-              value={formData.employee_id}
-              onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
               className="w-full p-2 border rounded-md"
               required
             />

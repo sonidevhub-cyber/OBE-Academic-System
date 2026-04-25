@@ -5,7 +5,6 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 interface PrincipalForm {
   first_name: string;
   last_name: string;
-  employee_id: string;
   rank: string;
   department: string;
   gender: string;
@@ -40,7 +39,6 @@ const PrincipalEditModal: React.FC<Props> = ({ principal, onClose, onUpdated }) 
   const [form, setForm] = useState<PrincipalForm>({
     first_name: principal?.first_name || "",
     last_name: principal?.last_name || "",
-    employee_id: principal?.employee_id || "",
     rank: principal?.rank || "",
     department: principal?.department || "",
     gender: principal?.gender || "",
@@ -187,13 +185,6 @@ const PrincipalEditModal: React.FC<Props> = ({ principal, onClose, onUpdated }) 
           <div className="bg-gray-50 border rounded-xl p-4">
             <h3 className="font-semibold mb-3">Employment Details</h3>
             <div className="grid grid-cols-2 gap-3">
-              <input 
-                name="employee_id" 
-                value={form.employee_id} 
-                onChange={handleChange} 
-                placeholder="Employee ID" 
-                className="border p-2 rounded" 
-              />
               <input 
                 name="rank" 
                 value={form.rank} 

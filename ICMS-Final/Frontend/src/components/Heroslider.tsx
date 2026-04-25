@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import logo from "assets/logo.png";
+import logo from "assets/logo2.png";
 import activity from "assets/activity.jpg";
 import welcome from "assets/welcome.jpg";
 import department from "assets/department.jpg";

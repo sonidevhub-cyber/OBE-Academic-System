@@ -42,7 +42,6 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
   const [formData, setFormData] = useState({
     name: instructor.name || '',
     phone: instructor.phone || '',
-    employee_id: instructor.employee_id || '',
     department: (typeof instructor.department === 'object' && instructor.department !== null ? ((instructor.department as any).department_id || instructor.department.id) : '') || '',
     employment_type: instructor.employment_type || 'PERMANENT',
     designation: instructor.designation || '',
@@ -93,7 +92,6 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
     setFormData({
       name: instructor.name || '',
       phone: instructor.phone || '',
-      employee_id: instructor.employee_id || '',
       department: (typeof instructor.department === 'object' && instructor.department !== null ? instructor.department.id : '') || '',
       employment_type: instructor.employment_type || 'PERMANENT',
       designation: instructor.designation || '',
@@ -145,7 +143,6 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
         formDataToSend.append('department_id', deptId);
       }
 
-      if (formData.employee_id) formDataToSend.append('employee_id', formData.employee_id);
       if (formData.employment_type) formDataToSend.append('employment_type', formData.employment_type);
       if (formData.designation) formDataToSend.append('designation', formData.designation);
       if (formData.specialization) formDataToSend.append('specialization', formData.specialization);
@@ -329,20 +326,6 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
                       type="text"
                       required
                       value={formData.phone}
-                      onChange={handleInputChange}
-                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="employee_id">
-                      Employee ID
-                    </label>
-                    <input
-                      id="employee_id"
-                      name="employee_id"
-                      type="text"
-                      value={formData.employee_id}
                       onChange={handleInputChange}
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                     />

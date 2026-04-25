@@ -11,7 +11,7 @@ class CoordinatorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Coordinator
         fields = '__all__'
-        read_only_fields = ('user', 'assigned_by', 'created_at', 'updated_at')
+        read_only_fields = ('user', 'assigned_by', 'created_at', 'updated_at', 'employee_id')
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
@@ -40,7 +40,7 @@ class CourseAllocationSerializer(serializers.ModelSerializer):
     semester_name = serializers.CharField(source='semester.name', read_only=True)
     coordinator_name = serializers.CharField(source='coordinator.name', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.name', read_only=True)
-    
+    # instructor = serializers.IntegerField(source='instructor.id')
     class Meta:
         model = CourseAllocation
         fields = '__all__'
@@ -87,6 +87,7 @@ class CreateCourseAllocationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         course = attrs.get('course')
         semester = attrs.get('semester')
+        
 
         if course and semester and course.semester_id != semester.semester_id:
             raise serializers.ValidationError({

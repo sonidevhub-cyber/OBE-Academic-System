@@ -154,7 +154,7 @@ const FacultyAttendanceModule: React.FC = () => {
                     <p className="text-sm text-yellow-800 font-medium">Attendance Locked</p>
                     <p className="text-xs text-yellow-700 mt-1">
                       {facultyAttendance?.is_submitted 
-                        ? 'Attendance has been submitted and locked. Contact admin to request changes.'
+                        ? 'Attendance has been submitted and locked. Contact Principal/Admin to request changes.'
                         : 'Attendance editing is currently disabled.'}
                     </p>
                   </div>
@@ -180,7 +180,7 @@ const FacultyAttendanceModule: React.FC = () => {
                 <li>Mark your attendance daily to maintain accurate records</li>
                 <li>If you teach classes, your attendance may be auto-marked as "Present"</li>
                 <li>You can update your attendance status if needed</li>
-                <li>Contact admin if you need to modify submitted attendance</li>
+                <li>Contact Principal/Admin if you need to modify submitted attendance</li>
               </ul>
             </div>
           </div>

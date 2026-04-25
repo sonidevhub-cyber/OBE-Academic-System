@@ -5,6 +5,11 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import transaction
 from django.db import IntegrityError
+from students.models import Student
+from instructors.models import Instructor as InstructorModel
+from .models import AllocationStudent
+
+
 from .models import Coordinator, TimetableProposal, TimetableSlot, CourseAllocation, CoordinatorDashboard
 from .serializers import (
     CoordinatorSerializer, TimetableProposalSerializer, TimetableSlotSerializer,
@@ -12,7 +17,7 @@ from .serializers import (
     CreateTimetableProposalSerializer, CreateTimetableSlotSerializer, CreateCourseAllocationSerializer
 )
 from academics.models import Course, Semester, Timetable
-from instructors.models import Instructor
+
 from hods.models import HOD
 
 def _is_hod_user(user):
@@ -41,9 +46,9 @@ def _get_coordinator_for_user(user):
         employee_id = user.instructor_profile.employee_id
     else:
         try:
-            instructor = Instructor.objects.get(user=user)
+            instructor = InstructorModel.objects.get(user=user)
             employee_id = instructor.employee_id
-        except Instructor.DoesNotExist:
+        except InstructorModel.DoesNotExist:
             employee_id = None
 
     if employee_id:
@@ -207,7 +212,7 @@ class TimetableProposalViewSet(viewsets.ModelViewSet):
                         if course_id:
                             course = Course.objects.filter(course_id=course_id).first()
                         if instructor_id:
-                            instructor = Instructor.objects.filter(id=instructor_id).first()
+                            instructor = InstructorModel.objects.filter(id=instructor_id).first()
 
                     if not course:
                         continue
@@ -452,14 +457,17 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
 
         # If user is currently acting as instructor, only show their own allocations.
         if current_role == 'instructor' or user.role == 'instructor':
-            instructor = Instructor.objects.filter(user=user).first()
+            instructor = InstructorModel.objects.filter(user=user).first()
             if instructor:
-                return CourseAllocation.objects.filter(instructor=instructor)
+               return CourseAllocation.objects.filter(
+    instructor=instructor,
+    status__in=['approved', 'active']
+)
 
             # Fallback for multi-role mappings by employee ID.
             coordinator = Coordinator.objects.filter(user=user).first()
             if coordinator and coordinator.employee_id:
-                mapped_instructor = Instructor.objects.filter(employee_id=coordinator.employee_id).first()
+                mapped_instructor = InstructorModel.objects.filter(employee_id=coordinator.employee_id).first()
                 if mapped_instructor:
                     return CourseAllocation.objects.filter(instructor=mapped_instructor)
 
@@ -501,12 +509,25 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError({'error': 'User is not a coordinator'})
 
         try:
-            serializer.save(coordinator=coordinator, status='proposed')
+            allocation = serializer.save(coordinator=coordinator, status='proposed')
+
+    # Students automatically attach karo
+            from students.models import Student
+            from .models import AllocationStudent
+
+            students = Student.objects.filter(semester=allocation.semester)
+
+            for student in students:
+                                    AllocationStudent.objects.create(
+                                            allocation=allocation,
+                                             student=student
+    )
+
         except IntegrityError:
             from rest_framework import serializers
             raise serializers.ValidationError({
-                'error': 'Allocation already exists for this course and semester. Please edit the existing proposal instead.'
-            })
+             'error': 'Allocation already exists for this course and semester. Please edit the existing proposal instead.'
+        })
     
     @action(detail=True, methods=['post'])
     def approve_allocation(self, request, pk=None):
@@ -557,6 +578,21 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
         allocation.save()
         
         return Response({'message': 'Course allocation rejected'})
+    @action(detail=True, methods=['get'])
+    def students(self, request, pk=None):
+        allocation = self.get_object()
+        students = AllocationStudent.objects.filter(allocation=allocation)
+
+        data = [    
+           {
+            "id": s.student.id,
+            "name": s.student.name,
+            "registration_number": s.student.registration_number
+            }
+         for s in students
+         ]
+    
+        return Response(data)
 
 class CoordinatorDashboardViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoordinatorDashboard.objects.all()
@@ -575,3 +611,4 @@ class CoordinatorDashboardViewSet(viewsets.ReadOnlyModelViewSet):
         dashboard = self.get_object()
         dashboard.update_metrics()
         return Response({'message': 'Dashboard metrics updated'})
+

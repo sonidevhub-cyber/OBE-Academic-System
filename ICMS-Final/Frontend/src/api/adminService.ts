@@ -39,7 +39,6 @@ export interface AdminRecord {
 export interface CreateAdminRequest {
   name: string;
   email: string;
-  employee_id: string;
   phone?: string;
   role: 'super_admin' | 'admin' | 'department_admin';
   permissions: string[];
@@ -70,18 +69,8 @@ export const adminService = {
   // Create new admin with security controls
   createAdmin: async (adminData: CreateAdminRequest) => {
     const api = createAuthAxios();
-    
-    // Force security defaults for new registrations
-    const secureAdminData = {
-      ...adminData,
-      role: 'department_admin', // Always start with lowest role
-      status: 'inactive', // Requires Super Admin approval
-      permissions: ['department_management'], // Basic permissions only
-      requires_approval: true,
-      created_by: JSON.parse(localStorage.getItem('auth') || '{}').user?.id
-    };
-    
-    const response = await api.post('/admin/admins/', secureAdminData);
+
+    const response = await api.post('/admin/admins/', adminData);
     return response.data;
   },
 

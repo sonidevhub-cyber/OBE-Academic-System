@@ -8,6 +8,7 @@ from .views import (
 from .admin_views import AdminViewSet, PrincipalViewSet
 from .multi_role_views import switch_role, get_user_roles, enable_instructor_role, setup_multi_role_system
 from .role_views import get_user_roles as get_available_roles, switch_role as switch_active_role
+from .password_reset_views import confirm_password_reset, request_password_reset
 
 router = DefaultRouter()
 router.register(r'admins', AdminViewSet, basename='admin')
@@ -17,6 +18,11 @@ urlpatterns = [
     path('registration/', register, name='register'),       # POST only
     path('registrations/', get_user_registrations, name='get-registrations'),  # GET registrations
     path('login/', login, name='login'),                     # POST login
+    path('password-reset-request/', request_password_reset, name='password-reset-request'),
+    path('password-reset-otp/', request_password_reset, name='password-reset-otp'),
+    path('password-reset-confirm/', confirm_password_reset, name='password-reset-confirm'),
+    path('password-reset-confirm-otp/', confirm_password_reset, name='password-reset-confirm-otp'),
+    path('reset-password-with-otp/', confirm_password_reset, name='reset-password-with-otp'),
     path('test/', lambda request: Response({'message': 'Test endpoint works'}), name='test'),
     path('users/', UserListView.as_view(), name='user-list'),      # GET all users
     path('users/<int:pk>/', UserDetailView.as_view(), name='user-detail'),  # GET/PUT/DELETE

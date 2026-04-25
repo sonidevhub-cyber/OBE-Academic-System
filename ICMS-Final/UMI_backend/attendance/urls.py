@@ -53,4 +53,5 @@ urlpatterns = [
     path('principal/overview/', flow_views.principal_overview, name='principal_overview'),
     path('principal/departments/', flow_views.principal_departments, name='principal_departments'),
     path('principal/performers/', flow_views.principal_performers, name='principal_performers'),
+    path('principal/insights/', flow_views.principal_insights, name='principal_insights'),
 ]

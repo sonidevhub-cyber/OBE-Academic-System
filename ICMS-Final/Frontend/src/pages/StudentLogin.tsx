@@ -6,19 +6,19 @@ const StudentLogin = () => {
   const { login, error: authError, loading } = useAuth();
   const navigate = useNavigate();
   
-  // ✅ use registration_number instead of username
-  const [form, setForm] = useState({ registration_number: "", password: "" });
+  // use registration_number instead of username
+  const [form, setForm] = useState({ identifier: "", password: "" });
   const [isAnimating, setIsAnimating] = useState(true);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  // ✅ login using registration_number
+  // login using registration_number
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(form.registration_number, form.password, "student");
+      await login(form.identifier, form.password, "student");
       navigate("/student/dashboard");
     } catch (err) {
       console.error("Login failed:", err);
@@ -60,13 +60,13 @@ const StudentLogin = () => {
             {/* Registration Number */}
             <div className="mb-6 relative group">
               <label className="block text-sm font-medium text-gray-700 mb-1 ml-1">
-                Registration Number
+                Registration Number / Email
               </label>
               <input
                 type="text"
-                name="registration_number"
-                placeholder="Enter your registration number"
-                value={form.registration_number}
+                name="identifier"
+                placeholder="e.g., UG2026-001 or email"
+                value={form.identifier}
                 onChange={handleChange}
                 className="w-full p-3 pl-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition-all"
                 required

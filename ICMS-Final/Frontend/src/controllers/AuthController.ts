@@ -1,7 +1,7 @@
 import authService from '../api/authService';
 
 export class AuthController {
-  static async login(credentials: { username: string; password: string }) {
+  static async login(credentials: { identifier: string; password: string }) {
     try {
       const response = await authService.login(credentials);
       return { success: true, data: response };

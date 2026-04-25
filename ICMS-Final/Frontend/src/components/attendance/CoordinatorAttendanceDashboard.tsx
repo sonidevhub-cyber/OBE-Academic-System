@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Users, TrendingUp, BarChart3, FileText, Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import AttendanceUpdateRequestsPanel from './AttendanceUpdateRequestsPanel';
+import FacultySelfAttendanceComponent from './FacultySelfAttendanceComponent';
 
 interface AttendanceStats {
   total_students: number;
@@ -37,7 +39,7 @@ interface CoordinatorAttendanceDashboardProps {
 }
 
 const CoordinatorAttendanceDashboard: React.FC<CoordinatorAttendanceDashboardProps> = ({ className = '' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'faculty'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'faculty' | 'requests' | 'self'>('overview');
   const [stats, setStats] = useState<AttendanceStats | null>(null);
   const [courseAttendance, setCourseAttendance] = useState<CourseAttendance[]>([]);
   const [facultyAttendance, setFacultyAttendance] = useState<FacultyAttendance[]>([]);
@@ -180,7 +182,9 @@ const CoordinatorAttendanceDashboard: React.FC<CoordinatorAttendanceDashboardPro
           {[
             { id: 'overview', label: 'Today\'s Overview', icon: BarChart3 },
             { id: 'reports', label: 'Course Reports', icon: FileText },
-            { id: 'faculty', label: 'Faculty Attendance', icon: Users }
+            { id: 'faculty', label: 'Faculty Attendance', icon: Users },
+            { id: 'requests', label: 'Update Requests', icon: CheckCircle },
+            { id: 'self', label: 'My Attendance', icon: Clock }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -198,46 +202,47 @@ const CoordinatorAttendanceDashboard: React.FC<CoordinatorAttendanceDashboardPro
         </div>
       </div>
 
-      {/* Date Controls */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Date Range</h3>
-          <div className="flex space-x-4">
-            {activeTab === 'overview' ? (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700">Date:</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
+        {activeTab !== 'requests' && activeTab !== 'self' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Date Range</h3>
+              <div className="flex space-x-4">
+                {activeTab === 'overview' ? (
+                  <div className="flex items-center space-x-2">
+                    <label className="text-sm font-medium text-gray-700">Date:</label>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm font-medium text-gray-700">From:</label>
+                      <input
+                        type="date"
+                        value={dateRange.start}
+                        onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <label className="text-sm font-medium text-gray-700">To:</label>
+                      <input
+                        type="date"
+                        value={dateRange.end}
+                        onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">From:</label>
-                  <input
-                    type="date"
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">To:</label>
-                  <input
-                    type="date"
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-            )}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
 
       {/* Content */}
       {loading ? (
@@ -455,6 +460,17 @@ const CoordinatorAttendanceDashboard: React.FC<CoordinatorAttendanceDashboardPro
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'requests' && (
+            <AttendanceUpdateRequestsPanel
+              title="Student Attendance Update Requests"
+              subtitle="Approve or reject instructor requests to update submitted class attendance."
+            />
+          )}
+
+          {activeTab === 'self' && (
+            <FacultySelfAttendanceComponent />
           )}
         </>
       )}
