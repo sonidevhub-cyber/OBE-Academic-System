@@ -4,10 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { coordinatorService } from '../../api/coordinatorService';
 import { multiRoleService } from '../../api/multiRoleService';
+import { fetchCurrentProfile } from '../../api/profileService';
 import CoordinatorOBEModule from '../modules/CoordinatorOBEModule';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import CoordinatorAttendanceDashboard from '../../components/attendance/CoordinatorAttendanceDashboard';
+import { getEffectiveRole } from '../../utils/profileHelpers';
 
 type TabId = 'dashboard' | 'attendance' | 'allocations' | 'timetable' | 'obe';
 type AllocationTab = 'new' | 'approved' | 'pending' | 'rejected';
@@ -378,6 +380,32 @@ const ModularCoordinatorDashboard: React.FC = () => {
   const [rooms, setRooms] = useState<any[]>([]);
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [selectedAllocationForTimetable, setSelectedAllocationForTimetable] = useState<any>(null);
+  const [coordinatorProfile, setCoordinatorProfile] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = getEffectiveRole(currentUser, 'coordinator');
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile(role);
+        if (!cancelled) {
+          setCoordinatorProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch coordinator profile:', error);
+        if (!cancelled) {
+          setCoordinatorProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   const fetchAllocations = async () => {
     try {
@@ -848,7 +876,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={currentUser} label="Coordinator" />
+              <TopbarProfileMenu userData={coordinatorProfile || currentUser} label="Coordinator" />
             </div>
           </div>
         </header>

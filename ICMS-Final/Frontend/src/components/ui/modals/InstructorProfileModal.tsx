@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { instructorService, departmentService, Instructor } from '../../../api/studentInstructorService';
 import { toast } from 'react-toastify';
+import { getProfileImageUrl } from '../../../utils/profileHelpers';
 
 // Utility function to decode HTML entities
 const decodeHtmlEntities = (text: string): string => {
@@ -37,7 +38,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(instructor.image || null);
+  const [imagePreview, setImagePreview] = useState<string | null>(getProfileImageUrl(instructor) || null);
 
   const [formData, setFormData] = useState({
     name: instructor.name || '',
@@ -101,7 +102,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
       address: instructor.address || '',
     });
     setImageFile(null);
-    setImagePreview(instructor.image || null);
+    setImagePreview(getProfileImageUrl(instructor) || null);
   };
 
   const handleSave = async () => {

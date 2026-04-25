@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { studentService } from '../../api/apiService';
+import { getDisplayName, getProfileImageUrl } from '../../utils/profileHelpers';
 
 interface EnhancedStudentProfileProps {
   studentId?: number;
@@ -117,6 +118,9 @@ const EnhancedStudentProfile: React.FC<EnhancedStudentProfileProps> = ({ student
     );
   }
 
+  const displayName = getDisplayName(student, 'Student');
+  const imageUrl = getProfileImageUrl(student);
+
   const tabs = [
     { id: 'overview', name: 'Overview', icon: '👤' },
     { id: 'academic', name: 'Academic', icon: '📚' },
@@ -131,17 +135,17 @@ const EnhancedStudentProfile: React.FC<EnhancedStudentProfileProps> = ({ student
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-8">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-6">
-                <div className="w-24 h-24 rounded-full overflow-hidden bg-white shadow-lg">
-                  {student.image ? (
-                    <img src={student.image} alt={student.name} className="w-full h-full object-cover" />
+                  <div className="w-24 h-24 rounded-full overflow-hidden bg-white shadow-lg">
+                  {imageUrl ? (
+                    <img src={imageUrl} alt={displayName} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-400 to-purple-500 text-white text-2xl font-bold">
-                      {student.name.charAt(0).toUpperCase()}
+                      {displayName.charAt(0).toUpperCase()}
                     </div>
                   )}
                 </div>
                 <div>
-                  <h1 className="text-3xl font-bold text-white">{student.name}</h1>
+                  <h1 className="text-3xl font-bold text-white">{displayName}</h1>
                   <p className="text-indigo-100 text-lg">{student.email}</p>
                   <p className="text-indigo-200">Student ID: {student.student_id}</p>
                 </div>

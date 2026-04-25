@@ -1,7 +1,6 @@
 import logging
 import secrets
 from datetime import timedelta
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
@@ -34,14 +33,14 @@ def _otp_expiry():
 
 
 def _send_reset_otp_email(user, otp):
-    subject = "Your ICMS password reset code"
+    subject = "Your CMS password reset code"
     from_email = settings.DEFAULT_FROM_EMAIL
     display_name = user.get_full_name() or user.username or user.email
     message = (
         f"Hello {display_name},\n\n"
-        "Use this one-time code to reset your ICMS password:\n\n"
+        "Use this one-time code to reset your CMS password:\n\n"
         f"{otp}\n\n"
-        "This code expires soon. If you did not request a password reset, you can ignore this email.\n"
+        "This code expires in 10 minutes. If you did not request a password reset, you can ignore this email.\n"
     )
     send_mail(subject, message, from_email, [user.email], fail_silently=False)
 

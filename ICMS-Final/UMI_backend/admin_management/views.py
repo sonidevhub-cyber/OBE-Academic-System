@@ -8,6 +8,9 @@ from django.core.files.base import ContentFile
 from django.db import models
 import os
 
+from students.models import Student
+from instructors.models import Instructor
+from hods.models import HODRegistrationRequest
 from rbac.models import RBACPermission, RBACRole, RBACUserPermission, RBACUserRole
 from rbac.services import ensure_base_roles, get_user_permission_codes, ensure_superuser_is_sac, user_has_permission, JSC_ROLE_CODE
 from register.access_control import get_user_assigned_department_id, is_department_scoped_admin
@@ -148,7 +151,7 @@ class AdminViewSet(viewsets.ViewSet):
             return permission_error
 
         ensure_base_roles()
-        admins = User.objects.filter(role='admin')
+        admins = User.objects.filter(models.Q(role='admin') | models.Q(role='super_admin') | models.Q(is_superuser=True))
         if is_department_scoped_admin(request.user):
             assigned_department_id = get_user_assigned_department_id(request.user)
             admins = admins.filter(admin_profile__department_id=assigned_department_id)
@@ -184,6 +187,26 @@ class AdminViewSet(viewsets.ViewSet):
                 'image': image_url
             })
         return Response({'data': data})
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        permission_error = _enforce_permission(request, 'manage_jsc_users')
+        if permission_error:
+            return permission_error
+
+        active_hods = HODRegistrationRequest.objects.filter(status='approved').count()
+        pending_hods = HODRegistrationRequest.objects.filter(status='pending').count()
+
+        return Response({
+            'success': True,
+            'data': {
+                'total_students': Student.objects.count(),
+                'total_instructors': Instructor.objects.count(),
+                'total_hods': active_hods,
+                'pending_hods': pending_hods,
+                'total_admins': User.objects.filter(models.Q(role='admin') | models.Q(role='super_admin') | models.Q(is_superuser=True)).count(),
+            }
+        })
     
     def create(self, request):
         permission_error = _enforce_permission(request, 'manage_jsc_users')

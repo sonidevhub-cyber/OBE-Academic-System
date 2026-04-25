@@ -159,3 +159,70 @@ class delete_principal(DestroyAPIView):
         if not self.request.user.has_permission("manage_principals"):
             raise PermissionDenied("Forbidden")
         return super().perform_destroy(instance)
+def _resolve_principal_for_user(user):
+    principal = Principal.objects.select_related("user").filter(user=user).first()
+    if principal:
+        return principal
+
+    if getattr(user, "email", None):
+        principal = Principal.objects.select_related("user").filter(email=user.email).first()
+        if principal:
+            return principal
+
+    if getattr(user, "employee_id", None):
+        principal = Principal.objects.select_related("user").filter(employee_id=user.employee_id).first()
+        if principal:
+            return principal
+
+    if getattr(user, "username", None):
+        principal = Principal.objects.select_related("user").filter(user__username=user.username).first()
+        if principal:
+            return principal
+
+    return None
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def principal_profile(request):
+    principal = _resolve_principal_for_user(request.user)
+    if not principal:
+        return Response({"error": "Principal profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    display_name = " ".join(
+        part for part in [
+            principal.first_name or (principal.user.first_name if principal.user else None),
+            principal.last_name or (principal.user.last_name if principal.user else None),
+        ]
+        if part
+    ).strip()
+
+    profile_pic_url = None
+    if principal.profile_pic:
+        try:
+            profile_pic_url = request.build_absolute_uri(principal.profile_pic.url)
+        except Exception:
+            profile_pic_url = principal.profile_pic.url
+
+    return Response({
+        "id": principal.id,
+        "name": display_name or principal.employee_id or (principal.user.username if principal.user else "Principal"),
+        "full_name": display_name or None,
+        "first_name": principal.first_name or (principal.user.first_name if principal.user else None),
+        "last_name": principal.last_name or (principal.user.last_name if principal.user else None),
+        "username": principal.user.username if principal.user else None,
+        "email": principal.email or (principal.user.email if principal.user else None),
+        "employee_id": principal.employee_id,
+        "department": principal.department,
+        "department_name": principal.department,
+        "rank": principal.rank,
+        "gender": principal.gender,
+        "phone": principal.phone,
+        "joining_date": principal.joining_date.isoformat() if principal.joining_date else None,
+        "retirement_date": principal.retirement_date.isoformat() if principal.retirement_date else None,
+        "status": principal.status,
+        "role": "principal",
+        "image": profile_pic_url,
+        "profile_pic": profile_pic_url,
+        "created_at": principal.created_at.isoformat() if principal.created_at else None,
+    })

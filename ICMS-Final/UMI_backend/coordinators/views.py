@@ -1,4 +1,6 @@
 from rest_framework import viewsets, status, permissions
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
@@ -58,6 +60,57 @@ def _get_coordinator_for_user(user):
             return None
 
     return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def coordinator_profile(request):
+    coordinator = _get_coordinator_for_user(request.user)
+    if not coordinator:
+        return Response({'error': 'Coordinator profile not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    profile_image_url = None
+    if coordinator.image:
+        try:
+            profile_image_url = request.build_absolute_uri(coordinator.image.url)
+        except Exception:
+            profile_image_url = coordinator.image.url
+
+    department_data = None
+    if coordinator.department:
+        department_data = {
+            'id': getattr(coordinator.department, 'department_id', coordinator.department.pk),
+            'department_id': getattr(coordinator.department, 'department_id', coordinator.department.pk),
+            'name': coordinator.department.name,
+            'code': getattr(coordinator.department, 'code', None),
+        }
+
+    return Response({
+        'id': coordinator.id,
+        'name': coordinator.name,
+        'full_name': coordinator.name,
+        'username': coordinator.user.username if coordinator.user else None,
+        'email': coordinator.email or (coordinator.user.email if coordinator.user else None),
+        'employee_id': coordinator.employee_id,
+        'phone': coordinator.phone,
+        'designation': coordinator.designation,
+        'specialization': coordinator.specialization,
+        'experience_years': coordinator.experience_years,
+        'hire_date': coordinator.hire_date.isoformat() if coordinator.hire_date else None,
+        'date_of_birth': coordinator.date_of_birth.isoformat() if coordinator.date_of_birth else None,
+        'gender': coordinator.gender,
+        'department': department_data,
+        'department_name': coordinator.department.name if coordinator.department else None,
+        'can_act_as_instructor': coordinator.can_act_as_instructor,
+        'assigned_by': coordinator.assigned_by.name if coordinator.assigned_by else None,
+        'is_active': coordinator.is_active,
+        'status': 'active' if coordinator.is_active else 'inactive',
+        'role': 'coordinator',
+        'image': profile_image_url,
+        'profile_image': profile_image_url,
+        'created_at': coordinator.created_at.isoformat() if coordinator.created_at else None,
+        'updated_at': coordinator.updated_at.isoformat() if coordinator.updated_at else None,
+    })
 
 class CoordinatorViewSet(viewsets.ModelViewSet):
     queryset = Coordinator.objects.all()

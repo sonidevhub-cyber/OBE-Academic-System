@@ -7,6 +7,8 @@ urlpatterns = [
 
     path("principal/", views.list_principals),
 
+    path("principal/profile/", views.principal_profile),
+
     path("principal/activate/<int:id>/", views.activate_principal),
 
     path("principal/deactivate/<int:id>/", views.deactivate_principal),

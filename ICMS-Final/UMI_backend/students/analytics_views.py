@@ -7,6 +7,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from .models import Student
 from academics.models import Result, Course, Department, Semester, Attendance
+from attendance.models import StudentAttendance
 from .services.analysis import generate_performance_notes
 
 
@@ -59,50 +60,83 @@ def student_analytics_dashboard(request):
         
         # Attendance Analytics - Real Data
         attendance_data = []
-        from academics.models import SlotAttendance
-        
-        # Get real attendance from SlotAttendance model
-        slot_attendance = SlotAttendance.objects.filter(student=student)
-        
-        if slot_attendance.exists():
-            # Group by course
+        attended_statuses = {"Present", "Late"}
+
+        student_attendance = StudentAttendance.objects.filter(student=student).select_related(
+            "course",
+            "course__semester",
+        )
+
+        if student_attendance.exists():
+            # Group by course so dashboard cards can show a per-course breakdown.
             course_attendance = {}
-            for record in slot_attendance:
-                course_name = record.course.name if record.course else "Unknown Course"
-                if course_name not in course_attendance:
-                    course_attendance[course_name] = {'total': 0, 'present': 0}
-                
-                course_attendance[course_name]['total'] += 1
-                if record.status == 'present':
-                    course_attendance[course_name]['present'] += 1
-            
-            for course_name, data in course_attendance.items():
-                percentage = (data['present'] / data['total'] * 100) if data['total'] > 0 else 0
-                attendance_data.append({
-                    "course": course_name,
-                    "total_classes": data['total'],
-                    "present_classes": data['present'],
-                    "attendance_percentage": round(percentage, 2)
-                })
+            for record in student_attendance:
+                course = record.course
+                course_key = course.course_id if course else record.course_id
+                course_code = course.code if course else "N/A"
+                course_name = course.name if course else "Unknown Course"
+
+                if course_key not in course_attendance:
+                    course_attendance[course_key] = {
+                        "course": f"{course_code} - {course_name}" if course_code != "N/A" else course_name,
+                        "course_code": course_code,
+                        "course_name": course_name,
+                        "section": course.semester.name if course and course.semester else "N/A",
+                        "total_classes": 0,
+                        "present_classes": 0,
+                        "absent_classes": 0,
+                        "late_classes": 0,
+                    }
+
+                course_attendance[course_key]["total_classes"] += 1
+                if record.status in attended_statuses:
+                    course_attendance[course_key]["present_classes"] += 1
+                if record.status == "Late":
+                    course_attendance[course_key]["late_classes"] += 1
+                elif record.status == "Absent":
+                    course_attendance[course_key]["absent_classes"] += 1
+                elif record.status == "Excused":
+                    course_attendance[course_key]["absent_classes"] += 1
+
+            for _, data in sorted(course_attendance.items(), key=lambda item: item[1]["course_code"]):
+                percentage = (data["present_classes"] / data["total_classes"] * 100) if data["total_classes"] > 0 else 0
+                data["attendance_percentage"] = round(percentage, 2)
+                attendance_data.append(data)
         else:
-            # Fallback to old Attendance model if SlotAttendance is empty
-            if student.semester:
-                courses = Course.objects.filter(semester=student.semester)
-                for course in courses:
-                    attendance_records = Attendance.objects.filter(
-                        student=student,
-                        course=course
-                    )
-                    total_classes = attendance_records.count()
-                    present_classes = attendance_records.filter(status='present').count()
-                    attendance_percentage = (present_classes / total_classes * 100) if total_classes > 0 else 0
-                    
-                    attendance_data.append({
-                        "course": course.name,
-                        "total_classes": total_classes,
-                        "present_classes": present_classes,
-                        "attendance_percentage": round(attendance_percentage, 2)
-                    })
+            # Fallback to the legacy model if the newer attendance table has no records yet.
+            attendance_records = Attendance.objects.filter(student=student).select_related("course", "course__semester")
+            if attendance_records.exists():
+                course_attendance = {}
+                for record in attendance_records:
+                    course = record.course
+                    course_key = course.course_id if course else record.course_id
+                    course_code = course.code if course else "N/A"
+                    course_name = course.name if course else "Unknown Course"
+
+                    if course_key not in course_attendance:
+                        course_attendance[course_key] = {
+                            "course": f"{course_code} - {course_name}" if course_code != "N/A" else course_name,
+                            "course_code": course_code,
+                            "course_name": course_name,
+                            "section": course.semester.name if course and course.semester else "N/A",
+                            "total_classes": 0,
+                            "present_classes": 0,
+                            "absent_classes": 0,
+                            "late_classes": 0,
+                        }
+
+                    course_attendance[course_key]["total_classes"] += 1
+                    if record.status in {Attendance.PRESENT, Attendance.LATE}:
+                        course_attendance[course_key]["present_classes"] += 1
+                    if record.status == Attendance.LATE:
+                        course_attendance[course_key]["late_classes"] += 1
+                    elif record.status == Attendance.ABSENT:
+                        course_attendance[course_key]["absent_classes"] += 1
+
+                for _, data in sorted(course_attendance.items(), key=lambda item: item[1]["course_code"]):
+                    percentage = (data["present_classes"] / data["total_classes"] * 100) if data["total_classes"] > 0 else 0
+                    data["attendance_percentage"] = round(percentage, 2)
+                    attendance_data.append(data)
         
         # Performance Insights
         performance_notes = generate_performance_notes(student)
@@ -126,29 +160,26 @@ def student_analytics_dashboard(request):
         
         # Monthly Attendance Trend - Real Data
         monthly_attendance = []
-        from academics.models import SlotAttendance
-        
         for i in range(6):  # Last 6 months
             month_start = timezone.now().replace(day=1) - timedelta(days=30*i)
             month_end = month_start + timedelta(days=30)
             
-            # Try SlotAttendance first
-            month_slot_attendance = SlotAttendance.objects.filter(
+            month_attendance = StudentAttendance.objects.filter(
                 student=student,
                 date__range=[month_start, month_end]
             )
-            
-            if month_slot_attendance.exists():
-                total = month_slot_attendance.count()
-                present = month_slot_attendance.filter(status='present').count()
+
+            if month_attendance.exists():
+                total = month_attendance.count()
+                present = month_attendance.filter(status__in=["Present", "Late"]).count()
             else:
-                # Fallback to old Attendance model
+                # Fallback to the legacy Attendance model.
                 month_attendance = Attendance.objects.filter(
                     student=student,
                     date__range=[month_start, month_end]
                 )
                 total = month_attendance.count()
-                present = month_attendance.filter(status='present').count()
+                present = month_attendance.filter(status__in=[Attendance.PRESENT, Attendance.LATE]).count()
             
             percentage = (present / total * 100) if total > 0 else 0
             

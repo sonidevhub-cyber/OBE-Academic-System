@@ -11,6 +11,7 @@ import EventsModule from '../modules/EventsModule';
 import AnalyticsModule from '../modules/AnalyticsModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import Timetable from '../../components/timetable/Timetable';
+import { getProfileImageUrl } from '../../utils/profileHelpers';
 
 type TabId = 'Dashboard' | 'Results' | 'Attendance' | 'Timetable' | 'Events' | 'Announcements' | 'Profile' | 'Feedback';
 
@@ -21,6 +22,7 @@ const ModularStudentDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   const token = JSON.parse(localStorage.getItem("auth") || "{}")?.access_token;
+  const profileImageUrl = getProfileImageUrl(studentData);
 
   const modules = [
     { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -100,11 +102,9 @@ const ModularStudentDashboard: React.FC = () => {
           >
             <img
               src={
-                studentData?.image
-                  ? `http://127.0.0.1:8000${studentData.image}`
-                  : "https://via.placeholder.com/150"
+                profileImageUrl || "https://via.placeholder.com/150"
               }
-              alt="Profile"
+              alt={studentData?.name || 'Student Profile'}
               className="w-20 h-20 rounded-full border-4 border-blue-500 object-cover shadow-md"
             />
           </div>

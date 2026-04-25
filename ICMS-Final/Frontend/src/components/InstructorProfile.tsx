@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
+import { getDisplayName, getProfileImageUrl } from '../utils/profileHelpers';
 
 // Utility function to decode HTML entities
 const decodeHtmlEntities = (text: string): string => {
@@ -91,6 +92,9 @@ const InstructorProfile: React.FC = () => {
     );
   }
 
+  const displayName = getDisplayName(instructorData, 'Instructor');
+  const imageUrl = getProfileImageUrl(instructorData);
+
   return (
     <div className="space-y-6">
       {/* Main Profile Card */}
@@ -107,8 +111,8 @@ const InstructorProfile: React.FC = () => {
             <div className="relative">
               <div className="w-32 h-32 rounded-full border-4 border-white shadow-xl overflow-hidden bg-white">
                 <img
-                  src={instructorData.image || "https://via.placeholder.com/150"}
-                  alt="Profile"
+                  src={imageUrl || "https://via.placeholder.com/150"}
+                  alt={displayName}
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -121,7 +125,7 @@ const InstructorProfile: React.FC = () => {
 
             {/* Profile Info */}
             <div className="text-center md:text-left flex-1">
-              <h1 className="text-3xl font-bold mb-2">{instructorData.name}</h1>
+              <h1 className="text-3xl font-bold mb-2">{displayName}</h1>
               <p className="text-xl opacity-90 mb-1">{instructorData.designation || "Instructor"}</p>
               <p className="text-lg opacity-80 mb-3">{instructorData.department?.name || instructorData.department_name || "Department"}</p>
               <div className="flex flex-wrap gap-2 justify-center md:justify-start">

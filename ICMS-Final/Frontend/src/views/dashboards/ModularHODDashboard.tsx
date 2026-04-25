@@ -17,6 +17,8 @@ import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { FeedbackViewer } from '../../components/feedback';
 import { multiRoleService } from '../../api/multiRoleService';
 import { coordinatorService } from '../../api/coordinatorService';
+import { fetchCurrentProfile } from '../../api/profileService';
+import { getEffectiveRole } from '../../utils/profileHelpers';
 
 interface Department {
   id: number;
@@ -103,6 +105,7 @@ const ModularHODDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [timetableProposals, setTimetableProposals] = useState<TimetableProposal[]>([]);
   const [timetableAudit, setTimetableAudit] = useState<TimetablePublishAuditData | null>(null);
+  const [hodProfile, setHodProfile] = useState<any>(null);
 
   const authData = localStorage.getItem('auth');
   const token = authData ? JSON.parse(authData).access_token || JSON.parse(authData).token : null;
@@ -123,6 +126,31 @@ const ModularHODDashboard: React.FC = () => {
     fetchDashboardData();
     fetchTimetableProposals();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = getEffectiveRole(currentUser, 'hod');
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile(role);
+        if (!cancelled) {
+          setHodProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch HOD profile:', error);
+        if (!cancelled) {
+          setHodProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   const fetchDashboardData = async () => {
     try {
@@ -741,7 +769,7 @@ const ModularHODDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={currentUser} label="HOD" />
+              <TopbarProfileMenu userData={hodProfile || currentUser} label="HOD" />
             </div>
           </motion.div>
         </header>

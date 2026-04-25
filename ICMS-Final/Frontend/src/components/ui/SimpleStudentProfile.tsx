@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { studentService } from '../../api/apiService';
+import { getDisplayName, getProfileImageUrl } from '../../utils/profileHelpers';
 
 interface SimpleStudentProfileProps {
   studentId?: number;
@@ -90,6 +91,9 @@ const SimpleStudentProfile: React.FC<SimpleStudentProfileProps> = ({ studentId, 
     );
   }
 
+  const displayName = getDisplayName(student, 'Student');
+  const imageUrl = getProfileImageUrl(student);
+
   return (
     <div className="bg-gray-50 min-h-screen p-6">
       <div className="max-w-4xl mx-auto">
@@ -108,8 +112,8 @@ const SimpleStudentProfile: React.FC<SimpleStudentProfileProps> = ({ studentId, 
           <div className="md:flex">
             <div className="md:flex-shrink-0 p-6 flex items-center justify-center">
               <div className="w-40 h-40 rounded-full overflow-hidden bg-gray-200">
-                {student.image ? (
-                  <img src={student.image} alt={student.name} className="w-full h-full object-cover" />
+                {imageUrl ? (
+                  <img src={imageUrl} alt={displayName} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-indigo-100 text-indigo-500">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-20 w-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -119,12 +123,12 @@ const SimpleStudentProfile: React.FC<SimpleStudentProfileProps> = ({ studentId, 
                 )}
               </div>
             </div>
-            <div className="p-6 md:p-8 w-full">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-800">{student.name}</h2>
-                  <p className="text-gray-600 mb-2">Email: {student.email}</p>
-                  <p className="text-gray-600 mb-2">Phone: {student.phone}</p>
+              <div className="p-6 md:p-8 w-full">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-800">{displayName}</h2>
+                    <p className="text-gray-600 mb-2">Email: {student.email}</p>
+                    <p className="text-gray-600 mb-2">Phone: {student.phone}</p>
                   <p className="text-gray-600 mb-2">Course: {student.course?.name || 'Not assigned'}</p>
                   <p className="text-gray-600 mb-2">Department: {student.department?.name || 'Not assigned'}</p>
                 </div>

@@ -6,20 +6,16 @@ import TopbarProfileMenu from '../components/TopbarProfileMenu';
 // Import Modular Components
 import DashboardStats from '../views/modules/DashboardStats';
 import HODManagementModule from '../views/modules/HODManagementModule';
-import TimetableModule from '../views/modules/TimetableModule';
 import AnnouncementModule from '../views/modules/AnnouncementModule';
-import ResultsModule from '../views/modules/ResultsModule';
 import PrincipalManagement from '../views/pages/PrincipalManagement';
-
 // Import Existing Page Components
 import StudentManagement from '../views/pages/StudentManagement';
 import DepartmentManagement from '../views/pages/DepartmentManagement';
-import CourseManagement from '../views/pages/CourseManagement';
 import TeacherManagement from '../views/pages/TeacherManagement';
 import EventManagement from '../views/pages/EventManagement';
-import AdminAttendanceManagement from '../components/attendance/AdminAttendanceManagement';
 import AdminManagement from '../views/pages/AdminManagement';
-
+import { fetchCurrentProfile } from '../api/profileService';
+import { getEffectiveRole, getProfileImageUrl } from '../utils/profileHelpers';
 // Import Dashboard Widgets
 import SystemHealthWidget from '../components/widgets/dashboard/SystemHealthWidget';
 import NotificationPanel from '../components/widgets/dashboard/NotificationPanel';
@@ -27,7 +23,7 @@ import QuickActions from '../components/widgets/dashboard/QuickActions';
 import ActivityFeed from '../components/widgets/dashboard/ActivityFeed';
 import CalendarWidget from '../components/widgets/dashboard/CalendarWidget';
 
-type TabId = 'dashboard' | 'students' | 'instructors' | 'departments' | 'courses' | 'results' | 'attendance' | 'events' | 'announcements' | 'hod' | 'admin-management' | 'principal';
+type TabId = 'dashboard' | 'students' | 'instructors' | 'departments' | 'courses' | 'events' | 'announcements' | 'hod' | 'admin-management' | 'principal';
 type AdminTab = { id: TabId; label: string; icon: string; permission?: string };
 
 const ModularAdminDashboard = () => {
@@ -35,20 +31,13 @@ const ModularAdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [adminData, setAdminData] = useState({
     stats: {
-      totalUsers: 1200,
-      activeUsers: 850,
-      totalDepartments: 25,
-      totalCourses: 40,
-      totalStudents: 1000,
-      totalStaff: 200,
+      totalStudents: 0,
+      totalInstructors: 0,
+      totalHods: 0,
+      totalAdmins: 0,
     },
   });
-  const [hodRequests, setHodRequests] = useState({
-    pending: 0,
-    approved: 0,
-    rejected: 0,
-    total: 0
-  });
+  const [adminProfile, setAdminProfile] = useState<any>(null);
 
   // Get auth token
   const authData = localStorage.getItem('auth');
@@ -62,11 +51,8 @@ const ModularAdminDashboard = () => {
     { id: 'hod', label: 'HOD', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', permission: 'manage_hods' },
     { id: 'admin-management', label: 'Admin', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z', permission: 'manage_jsc_users' },
     { id: 'principal', label: 'Principal', icon: 'M5 3v4h14V3H5zm0 7h14v11H5V10zm7 4a2 2 0 110-4 2 2 0 010 4z', permission: 'manage_principals' },
-    { id: 'departments', label: 'Academic Units', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', permission: 'manage_departments' },
-    { id: 'results', label: 'Results', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01', permission: 'manage_results' },
-    { id: 'attendance', label: 'Attendance', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', permission: 'manage_attendance' },
+    { id: 'departments', label: 'Academia Units', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', permission: 'manage_departments' },
     { id: 'announcements', label: 'Announcements', icon: 'M3 10v4a1 1 0 001 1h3l4 3V6l-4 3H4a1 1 0 00-1 1z', permission: 'manage_announcements' },
-    { id: 'events', label: 'Events', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', permission: 'manage_events' },
   ] as AdminTab[]).filter((tab) => !tab.permission || isSAC || hasPermission(tab.permission)), [hasPermission, isSAC]);
 
   useEffect(() => {
@@ -84,7 +70,6 @@ const ModularAdminDashboard = () => {
       'manage_results',
       'manage_attendance',
       'manage_announcements',
-      'manage_events',
     ];
     const hasDepartmentOnlyScope =
       hasPermission('manage_departments') &&
@@ -95,104 +80,84 @@ const ModularAdminDashboard = () => {
     }
   }, [activeTab, hasPermission]);
 
-  // Fetch admin data including actual counts
+  // Fetch data including actual counts
   const fetchAdminData = async () => {
     try {
-      let totalStudents = 0;
-      let totalInstructors = 0;
-
-      // Fetch students count
-      try {
-        const studentsResponse = await fetch('http://localhost:8000/api/students/', {
-          headers: {
-            'Authorization': `Token ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (studentsResponse.ok) {
-          const studentsData = await studentsResponse.json();
-          totalStudents = studentsData.count || studentsData.results?.length || 0;
+      const response = await fetch('http://localhost:8000/api/admin/admins/stats/', {
+        headers: {
+          'Authorization': `Token ${token}`,
+          'Content-Type': 'application/json'
         }
-      } catch (error) {
-        console.error('Error fetching students count:', error);
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load dashboard stats: ${response.status}`);
       }
 
-      // Fetch instructors count
-      try {
-        const instructorsResponse = await fetch('http://localhost:8000/api/instructors/instructor/', {
-          headers: {
-            'Authorization': `Token ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        if (instructorsResponse.ok) {
-          const instructorsData = await instructorsResponse.json();
-          totalInstructors = instructorsData.count || instructorsData.results?.length || 0;
-        }
-      } catch (error) {
-        console.error('Error fetching instructors count:', error);
-      }
+      const statsResponse = await response.json();
+      const statsData = statsResponse.data || {};
 
-      // Update admin data with actual counts
       setAdminData(prev => ({
         ...prev,
         stats: {
           ...prev.stats,
-          totalStudents,
-          totalStaff: totalInstructors
+          totalStudents: statsData.total_students ?? 0,
+          totalInstructors: statsData.total_instructors ?? 0,
+          totalAdmins: statsData.total_admins ?? 0,
+          totalHods: statsData.total_hods ?? 0,
         }
       }));
     } catch (error) {
       console.error('Error fetching admin data:', error);
     }
   };
-
-  // HOD Request Action Handler (stub - endpoint /api/hods/admin/requests/ does not exist)
-  const handleHodRequestAction = async (requestId: number, action: string) => {
-    console.log(`HOD Request Action: ${action} on request ${requestId}`);
-    // Endpoint does not exist yet
-  };
-
-  // Fetch HOD requests data
-  const fetchHodRequestsData = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/hods/admin/requests/', {
-        headers: {
-          'Authorization': `Token ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.stats) {
-          setHodRequests(data.stats);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching HOD requests:', error);
-    }
-  };
-
   useEffect(() => {
     if (token) {
       fetchAdminData();
     }
-    // Commented out - endpoint /api/hods/admin/requests/ does not exist
     // fetchHodRequestsData();
   }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = getEffectiveRole(currentUser, 'admin');
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile(role);
+        if (!cancelled) {
+          setAdminProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch admin profile:', error);
+        if (!cancelled) {
+          setAdminProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+
+  const headerProfile = adminProfile || currentUser;
+  const headerImageUrl = getProfileImageUrl(headerProfile);
+  const headerName = (headerProfile?.name || headerProfile?.username || 'Admin').trim();
 
   // Render navigation tabs
   const renderTabs = () => (
     <div className="w-64 bg-gradient-to-b from-indigo-600 via-purple-700 to-pink-800 text-white p-4 space-y-2 min-h-screen shadow-xl">
       <div className="mb-8 text-center">
         <div className="h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-2 flex items-center justify-center border border-white/30">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" viewBox="0 0 20 20" fill="currentColor">
+          <svg xmlns="logo2" className="h-10 w-10 text-white" viewBox="0 0 20 20" fill="currentColor">
             <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z" />
           </svg>
         </div>
         <h3 className="text-lg font-semibold text-white">FGPG Admin</h3>
-        <p className="text-xs text-blue-200">University Management</p>
+        <p className="text-xs text-blue-200">Collage Management</p>
       </div>
 
       <nav>
@@ -240,7 +205,6 @@ const ModularAdminDashboard = () => {
           >
             <DashboardStats 
               stats={adminData.stats} 
-              hodRequests={hodRequests}
               onNavigate={setActiveTab}
             />
             
@@ -268,10 +232,7 @@ const ModularAdminDashboard = () => {
         );
 
       case 'hod':
-        return <HODManagementModule token={token} onRequestAction={handleHodRequestAction} />;
-
-      case 'results':
-        return <ResultsModule token={token} />;
+        return <HODManagementModule token={token} />;
 
       case 'principal':
         return <PrincipalManagement />;
@@ -287,9 +248,6 @@ const ModularAdminDashboard = () => {
 
       case 'departments':
         return <DepartmentManagement activeTab={activeTab} />;
-
-      case 'attendance':
-        return <AdminAttendanceManagement />;
 
       case 'admin-management':
         return <AdminManagement activeTab={activeTab} />;
@@ -324,10 +282,18 @@ const ModularAdminDashboard = () => {
             transition={{ duration: 0.8, ease: "easeOut" }}
           >
             <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border-2 border-white shadow-lg">
-                <span className="text-lg font-semibold text-white">
-                  {(currentUser?.name || 'Admin').charAt(0).toUpperCase()}
-                </span>
+              <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center overflow-hidden border-2 border-white shadow-lg">
+                {headerImageUrl ? (
+                  <img
+                    src={headerImageUrl}
+                    alt={headerName}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-lg font-semibold text-white">
+                    {headerName.charAt(0).toUpperCase()}
+                  </span>
+                )}
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-white">
@@ -335,13 +301,13 @@ const ModularAdminDashboard = () => {
                    tabs.find(tab => tab.id === activeTab)?.label || 'Admin Dashboard'}
                 </h1>
                 <p className="text-gray-600 text-sm">
-                  {activeTab === 'dashboard' ? 'University Management System' :
+                  {activeTab === 'dashboard' ? 'Collage Management System' :
                    `Manage ${tabs.find(tab => tab.id === activeTab)?.label || 'System'}`}
                 </p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <TopbarProfileMenu userData={currentUser} label="Admin" />
+              <TopbarProfileMenu userData={adminProfile || currentUser} label="Admin" />
             </div>
           </motion.div>
         </header>

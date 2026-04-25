@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -8,6 +8,8 @@ import InstructorTimetable from '../../components/InstructorTimetable';
 import InstructorAttendanceDashboard from '../../components/attendance/InstructorAttendanceDashboard';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
+import { fetchCurrentProfile } from '../../api/profileService';
+import { getEffectiveRole } from '../../utils/profileHelpers';
 
 type TabId = 'dashboard' | 'courses' | 'attendance' | 'schedule' | 'obe';
 
@@ -16,6 +18,7 @@ const ModularInstructorDashboard: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>('courses');
+  const [instructorProfile, setInstructorProfile] = useState<any>(null);
   
   const currentInstructorId = Number(
     currentUser?.instructor_id ??
@@ -23,6 +26,31 @@ const ModularInstructorDashboard: React.FC = () => {
     0
   );
   const instructorCourses = getInstructorAllocations(currentInstructorId);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = getEffectiveRole(currentUser, 'instructor');
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile(role);
+        if (!cancelled) {
+          setInstructorProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch instructor profile:', error);
+        if (!cancelled) {
+          setInstructorProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   const handleViewCourseDetails = (course: any) => {
   navigate(`/teacher/course-details/${course.allocation_id}`);
@@ -347,7 +375,7 @@ const ModularInstructorDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={currentUser} label="Instructor" />
+              <TopbarProfileMenu userData={instructorProfile || currentUser} label="Instructor" />
             </div>
           </div>
         </header>

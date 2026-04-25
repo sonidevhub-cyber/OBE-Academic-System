@@ -4,24 +4,26 @@ import { motion } from 'framer-motion';
 interface StatsProps {
   stats: {
     totalStudents: number;
-    totalStaff: number;
-    totalDepartments: number;
-    totalCourses: number;
+    totalInstructors: number;
+    totalHods: number;
+    totalAdmins: number;
   };
-  hodRequests?: {
-    pending: number;
-  };
-  onNavigate?: (tab: any) => void;
+  onNavigate?: (tab: 'students' | 'instructors' | 'hod' | 'admin-management') => void;
 }
 
-const DashboardStats: React.FC<StatsProps> = ({ stats, hodRequests, onNavigate }) => {
+const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
+  const cardBase =
+    'bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300';
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <motion.div 
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      <motion.button
+        type="button"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300"
+        className={`${cardBase} text-left cursor-pointer`}
+        onClick={() => onNavigate?.('students')}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -34,18 +36,20 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, hodRequests, onNavigate }
             </svg>
           </div>
         </div>
-      </motion.div>
+      </motion.button>
 
-      <motion.div 
+      <motion.button
+        type="button"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300"
+        className={`${cardBase} text-left cursor-pointer`}
+        onClick={() => onNavigate?.('instructors')}
       >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-gray-600 text-sm font-medium">Total Instructors</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalStaff}</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalInstructors}</p>
           </div>
           <div className="h-14 w-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
             <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -53,43 +57,41 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, hodRequests, onNavigate }
             </svg>
           </div>
         </div>
-      </motion.div>
+      </motion.button>
 
-      {hodRequests && (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300 cursor-pointer"
-          onClick={() => onNavigate?.('hod')}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-gray-600 text-sm font-medium">HOD Requests</p>
-              <p className="text-3xl font-bold text-gray-900 mt-1">{hodRequests.pending}</p>
-              <p className="text-xs text-gray-500 mt-1">Click to manage</p>
-            </div>
-            <div className="h-14 w-14 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
-              <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className={`${cardBase} text-left cursor-pointer`}
+        onClick={() => onNavigate?.('hod')}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-gray-600 text-sm font-medium">Total HODs</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalHods}</p>
           </div>
-        </motion.div>
-      )}
-      
-      <motion.div 
+          <div className="h-14 w-14 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
+            <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+        </div>
+      </motion.button>
+
+      <motion.button
+        type="button"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300 cursor-pointer"
+        className={`${cardBase} text-left cursor-pointer`}
         onClick={() => onNavigate?.('admin-management')}
       >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-gray-600 text-sm font-medium">Total Admins</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">3</p>
-            <p className="text-xs text-gray-500 mt-1">Click to manage</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalAdmins}</p>
           </div>
           <div className="h-14 w-14 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
             <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -97,7 +99,7 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, hodRequests, onNavigate }
             </svg>
           </div>
         </div>
-      </motion.div>
+      </motion.button>
     </div>
   );
 };

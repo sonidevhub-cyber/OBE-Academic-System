@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
 import TopbarProfileMenu from "../components/TopbarProfileMenu";
+import { fetchCurrentProfile } from "../api/profileService";
 
 import PrincipalEvents from "../components/principal/PrincipalEvents";
 import PrincipalDepartmentWiseAttendance from "../components/principal/Principalattendance";
@@ -57,6 +58,31 @@ export default function PrincipalDashboard() {
 
   const [activeTab, setActiveTab] = useState<TabType>("Dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [principalProfile, setPrincipalProfile] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile('principal');
+        if (!cancelled) {
+          setPrincipalProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch principal profile:', error);
+        if (!cancelled) {
+          setPrincipalProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -149,7 +175,7 @@ export default function PrincipalDashboard() {
           </h1>
 
           <div className="flex items-center gap-3">
-            <TopbarProfileMenu userData={currentUser} label="Principal" />
+            <TopbarProfileMenu userData={principalProfile || currentUser} label="Principal" />
           </div>
         </div>
 

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { LogOut, Users, BookOpen, ClipboardList, CalendarDays, Menu } from 'lucide-react';
 
 // Import Modular Components
-import DashboardStats from '../modules/DashboardStats';
+import DashboardStats from '../../components/widgets/DashboardStats';
 import EventsModule from '../modules/EventsModule';
 import AnnouncementModule from '../modules/AnnouncementModule';
 import AnalyticsModule from '../modules/AnalyticsModule';

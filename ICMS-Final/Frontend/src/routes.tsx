@@ -16,7 +16,7 @@ import PrincipalDashboardComponent from './roles/principal/PrincipalDashboard';
 import ResultManagement from './views/pages/ResultManagement';
 import ProfessionalResultManagement from './views/pages/ResultManagement';
 import EventManagement from './views/pages/EventManagement';
-import CourseDetails from 'views/pages/CourseDetails';
+import CourseDetails from './views/pages/CourseDetails';
 import CreateEvent from "./views/pages/CreateEvent";
 import ActiveHODRecordsPage from './pages/ActiveHODRecordsPage';
 import ResetPassword from './components/forms/ResetPassword';

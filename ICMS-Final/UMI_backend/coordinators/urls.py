@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     CoordinatorViewSet, TimetableProposalViewSet, TimetableSlotViewSet,
-    CourseAllocationViewSet, CoordinatorDashboardViewSet
+    CourseAllocationViewSet, CoordinatorDashboardViewSet, coordinator_profile
 )
 from .hod_management_views import HODCoordinatorManagementViewSet
 from .professional_dashboard_views import CoordinatorProfessionalDashboardViewSet
@@ -18,6 +18,7 @@ router.register(r'professional-dashboard', CoordinatorProfessionalDashboardViewS
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('profile/', coordinator_profile, name='coordinator-profile'),
     path('timetable-proposals/<int:pk>/approve/', TimetableProposalViewSet.as_view({'post': 'approve_proposal'}), name='approve-timetable-proposal'),
     path('timetable-proposals/<int:pk>/reject/', TimetableProposalViewSet.as_view({'post': 'reject_proposal'}), name='reject-timetable-proposal'),
 ]
