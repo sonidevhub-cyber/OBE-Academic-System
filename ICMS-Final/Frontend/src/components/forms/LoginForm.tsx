@@ -72,7 +72,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
           <form onSubmit={handleLogin} className="p-10 bg-white rounded-lg shadow-2xl w-96 backdrop-blur-sm bg-opacity-95 border border-indigo-100">
             <div className="absolute -top-12 left-0 right-0 flex justify-center">
               <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white px-8 py-4 rounded-t-lg font-bold text-xl shadow-lg">
-                <span className="mr-2">✦</span> Educational Portal <span className="ml-2">✦</span>
+                <span className="mr-2">✦</span> Collage Management System <span className="ml-2">✦</span>
               </div>
             </div>
             

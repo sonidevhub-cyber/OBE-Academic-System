@@ -827,3 +827,95 @@ def principal_performers(request):
         'courses': top_courses,
         'faculty': top_faculty
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def principal_insights(request):
+    user = request.user
+    if not (_is_principal_user(user) or _is_admin_user(user)):
+        return Response({'error': 'Only principal/admin can access this view'}, status=status.HTTP_403_FORBIDDEN)
+
+    period = int(request.GET.get('period', 30))
+    start_date = date.today() - timedelta(days=max(period, 1))
+    end_date = date.today()
+
+    semester_rows = []
+    semester_records = _department_student_records(None, start_date, end_date).select_related('course__semester__department')
+    semester_map = {}
+    for rec in semester_records:
+        semester = rec.course.semester if rec.course else None
+        if not semester:
+            continue
+        key = semester.id
+        if key not in semester_map:
+            semester_map[key] = {
+                'semester_id': semester.id,
+                'semester_name': semester.name,
+                'department_name': semester.department.name if semester.department else 'N/A',
+                'total_records': 0,
+                'present_count': 0,
+                'absent_count': 0
+            }
+        semester_map[key]['total_records'] += 1
+        if rec.status in ['Present', 'Late']:
+            semester_map[key]['present_count'] += 1
+        elif rec.status == 'Absent':
+            semester_map[key]['absent_count'] += 1
+
+    for row in semester_map.values():
+        rate = round((row['present_count'] / row['total_records'] * 100), 2) if row['total_records'] else 0
+        row['attendance_rate'] = rate
+        semester_rows.append(row)
+
+    lowest_semesters = sorted(semester_rows, key=lambda x: x['attendance_rate'])[:8]
+
+    faculty_records = FacultyAttendance.objects.filter(date__gte=start_date, date__lte=end_date).select_related(
+        'instructor__department', 'coordinator__department', 'hod__department'
+    )
+    faculty_map = {}
+    for rec in faculty_records:
+        if rec.instructor:
+            key = f"instructor:{rec.instructor_id}"
+            name = rec.instructor.name
+            role = 'Instructor'
+            dept = rec.instructor.department.name if rec.instructor.department else 'N/A'
+        elif rec.coordinator:
+            key = f"coordinator:{rec.coordinator_id}"
+            name = rec.coordinator.name
+            role = 'Coordinator'
+            dept = rec.coordinator.department.name if rec.coordinator.department else 'N/A'
+        else:
+            key = f"hod:{rec.hod_id}"
+            name = rec.hod.name
+            role = 'HOD'
+            dept = rec.hod.department.name if rec.hod.department else 'N/A'
+
+        if key not in faculty_map:
+            faculty_map[key] = {
+                'name': name,
+                'role': role,
+                'department': dept,
+                'total_days': 0,
+                'present_days': 0,
+                'absent_days': 0
+            }
+        faculty_map[key]['total_days'] += 1
+        if rec.status in ['Present', 'Late']:
+            faculty_map[key]['present_days'] += 1
+        elif rec.status == 'Absent':
+            faculty_map[key]['absent_days'] += 1
+
+    faculty_rows = []
+    for row in faculty_map.values():
+        rate = round((row['present_days'] / row['total_days'] * 100), 2) if row['total_days'] else 0
+        row['attendance_rate'] = rate
+        faculty_rows.append(row)
+
+    lowest_faculty = sorted(faculty_rows, key=lambda x: x['attendance_rate'])[:10]
+
+    return Response({
+        'period_days': period,
+        'lowest_semesters': lowest_semesters,
+        'lowest_faculty': lowest_faculty
+    })

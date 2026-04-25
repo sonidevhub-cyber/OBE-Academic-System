@@ -9,7 +9,7 @@ import logging
 
 from .models import Instructor
 from .serializers import InstructorSerializer
-from .permissions import IsAdminOrReadOnly
+from .permissions import IsAdminOrReadOnly, CanViewInstructors
 from register.access_control import can_access_department, get_user_assigned_department_id, is_department_scoped_admin
 from rbac.permissions import HasRBACPermission
 from rbac.services import user_has_permission
@@ -24,9 +24,19 @@ class InstructorViewSet(viewsets.ModelViewSet):
     required_permission = 'manage_instructors'
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated(), CanViewInstructors()]
+        return [IsAuthenticated(), HasRBACPermission()]
+
     def get_queryset(self):
         # Show all instructors, including those who are also coordinators
         queryset = Instructor.objects.all()
+        user = self.request.user
+        if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
+            queryset = queryset.filter(department=user.coordinator_profile.department)
+        elif hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
+            queryset = queryset.filter(department=user.hod_profile.department)
         if is_department_scoped_admin(self.request.user):
             assigned_department_id = get_user_assigned_department_id(self.request.user)
             queryset = queryset.filter(department_id=assigned_department_id)

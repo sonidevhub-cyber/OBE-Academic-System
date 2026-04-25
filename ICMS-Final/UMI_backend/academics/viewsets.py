@@ -163,6 +163,13 @@ class SemesterViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Semester.objects.all()
         department = self.request.query_params.get('department', None)
+        user = self.request.user
+        # If coordinator/HOD, restrict to their department unless explicit filter overrides
+        if not department:
+            if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
+                department = user.coordinator_profile.department_id
+            elif hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
+                department = user.hod_profile.department_id
         if department is not None:
             queryset = queryset.filter(department=department)
         if is_department_scoped_admin(self.request.user):

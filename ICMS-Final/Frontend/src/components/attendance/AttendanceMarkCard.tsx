@@ -337,7 +337,7 @@ const AttendanceMarkCard: React.FC<AttendanceMarkCardProps> = ({ filters }) => {
       });
 
       if (submitResponse.ok) {
-        alert('Attendance marked and finalized! Admin permission required for further edits.');
+        alert('Attendance marked and finalized! HOD/Coordinator approval is required for further edits.');
         setStudents([]);
       } else {
         const error = await submitResponse.json();
@@ -680,7 +680,7 @@ const AttendanceMarkCard: React.FC<AttendanceMarkCardProps> = ({ filters }) => {
                 }}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
               >
-                Submit Request to Admin
+                Submit Request to HOD/Coordinator
               </button>
             </div>
           </div>

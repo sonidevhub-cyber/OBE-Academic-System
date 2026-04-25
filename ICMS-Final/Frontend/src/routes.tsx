@@ -25,17 +25,12 @@ import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
 
 
-//import TransportManagement from './components/pages/TransportManagement';
-
-
 // Use the full AdminDashboard component from pages/AdminDashboard.tsx
 
 // Use AdminDashboard as the default dashboard for now
 const Dashboard = () => <AdminDashboard />;
 
-// Staff dashboard component
-const StaffDashboard = () => <div className="p-8"><h1 className="text-2xl font-bold">Staff Dashboard</h1><p>Staff dashboard content will be added here.</p></div>;
-
+//
 const AppRoutes: React.FC = () => {
   const { currentUser } = useAuth();
 
@@ -48,8 +43,6 @@ const getRedirectPath = () => {
   switch (userRole) {
     case 'student':
       return '/student';
-    case 'staff':
-      return '/staff';
     case 'instructor':
       return '/teacher';
     case 'coordinator':
@@ -60,8 +53,6 @@ const getRedirectPath = () => {
       return '/admin';
     case 'principal':
       return '/principal';
-    case 'director':
-      return '/director';
     default:
       return '/dashboard';
   }
@@ -100,11 +91,6 @@ const getRedirectPath = () => {
         <Route path="/student-profile/:id" element={<StudentProfile />} />
       </Route>
       
-      <Route element={<ProtectedRoute allowedRoles={['staff']} />}>
-        <Route path="/staff" element={<StaffDashboard />} />
-        <Route path="/staff-dashboard" element={<Navigate to="/staff" />} />
-      </Route>
-      
       <Route element={<ProtectedRoute allowedRoles={['instructor']} />}>
         <Route path="/teacher" element={<ModularInstructorDashboard />} />
         <Route path="/instructor-dashboard" element={<ModularInstructorDashboard />} />
@@ -133,12 +119,6 @@ const getRedirectPath = () => {
   <Route path="/event-management" element={<EventManagement />} />
   <Route path="/active-hod-records" element={<ActiveHODRecordsPage />} />
 </Route>
-
-      {/* Result Management Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director']} />}>
-        <Route path="/result-management" element={<ResultManagement />} />
-        <Route path="/professional-result-management" element={<ProfessionalResultManagement />} />
-      </Route>
 {/* events */}
       <Route path="/create-event" element={<CreateEvent />} />
       

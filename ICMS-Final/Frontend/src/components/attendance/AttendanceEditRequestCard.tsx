@@ -154,7 +154,7 @@ const AttendanceEditRequestCard: React.FC = () => {
     >
       <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Attendance Edit Requests</h2>
-        <p className="text-gray-600 mb-6">Request admin permission to edit submitted attendance records</p>
+        <p className="text-gray-600 mb-6">Request HOD/Coordinator permission to edit submitted attendance records</p>
 
         {/* Tab Navigation */}
         <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">
@@ -275,7 +275,7 @@ const AttendanceEditRequestCard: React.FC = () => {
                         </p>
                         {request.admin_notes && (
                           <p className="text-sm text-blue-700 bg-blue-50 p-2 rounded mt-2">
-                            <span className="font-medium">Admin Notes:</span> {request.admin_notes}
+                            <span className="font-medium">Reviewer Notes:</span> {request.admin_notes}
                           </p>
                         )}
                       </div>

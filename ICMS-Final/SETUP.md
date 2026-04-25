@@ -207,6 +207,46 @@ If a collaborator gets errors after cloning, check these first:
 - backend server is running
 - frontend server is running
 
+## Password reset OTP setup
+
+To make the forgot-password flow send a real OTP email, create `UMI_backend/.env` with SMTP settings.
+If those settings are missing, Django falls back to the console email backend, which prints the message in the terminal instead of delivering it to Gmail.
+
+Recommended setup for Resend SMTP:
+
+```env
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.resend.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
+EMAIL_HOST_USER=resend
+EMAIL_HOST_PASSWORD=re_your_resend_api_key
+DEFAULT_FROM_EMAIL=ICMS <your-verified-sender@yourdomain.com>
+RESEND_API_KEY=re_your_resend_api_key
+RESEND_FROM_EMAIL=ICMS <your-verified-sender@yourdomain.com>
+PASSWORD_RESET_OTP_LENGTH=6
+PASSWORD_RESET_OTP_EXPIRE_MINUTES=10
+```
+
+Notes:
+
+- Resend uses `resend` as the SMTP username and your Resend API key as the password.
+- Make sure `RESEND_FROM_EMAIL` is a sender address from a verified Resend domain.
+- The frontend sends the email to the backend, and the backend emails a 6-digit OTP.
+- The user enters that OTP on the same forgot-password form, then chooses a new password.
+
+If you prefer Gmail SMTP, keep the same structure but swap the host and credentials:
+
+```env
+EMAIL_HOST=smtp.gmail.com
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-gmail-app-password
+DEFAULT_FROM_EMAIL=ICMS <your-email@gmail.com>
+```
+
+For Gmail, use a Google App Password, not your normal Gmail login password.
+
 ## 14. Recommended team improvement
 
 To make onboarding reliable, commit a backend `requirements.txt` file to Git. Otherwise new collaborators may clone the project successfully but still fail to run it because Python dependencies are not documented in a machine-readable way.

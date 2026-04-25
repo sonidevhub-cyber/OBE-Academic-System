@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
-import authService from "../api/authService";
 import ForgotPassword from "../components/forms/ForgotPassword";
 
 const Login = () => {

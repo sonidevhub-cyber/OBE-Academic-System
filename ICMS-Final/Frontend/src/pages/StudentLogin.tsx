@@ -6,7 +6,7 @@ const StudentLogin = () => {
   const { login, error: authError, loading } = useAuth();
   const navigate = useNavigate();
   
-  // ✅ use registration_number instead of username
+  // use registration_number instead of username
   const [form, setForm] = useState({ identifier: "", password: "" });
   const [isAnimating, setIsAnimating] = useState(true);
 
@@ -14,7 +14,7 @@ const StudentLogin = () => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  // ✅ login using registration_number
+  // login using registration_number
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {

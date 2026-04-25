@@ -126,8 +126,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'icms_db',
-        'USER': 'postgres',
-        'PASSWORD': '12345678',
+        'USER': 'icms_user',
+        'PASSWORD': 'admin.123',
         'HOST': 'localhost',
         'PORT': '5432',
         'OPTIONS': {
@@ -193,6 +193,36 @@ if DEBUG:
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'register.User'
+
+# Email configuration for password reset OTPs
+_email_backend = os.getenv("EMAIL_BACKEND")
+_resend_api_key = os.getenv("RESEND_API_KEY", "")
+_smtp_user = os.getenv("EMAIL_HOST_USER", "")
+_smtp_password = os.getenv("EMAIL_HOST_PASSWORD", "")
+_smtp_configured = bool(_resend_api_key or (_smtp_user and _smtp_password))
+_default_from_email = os.getenv("DEFAULT_FROM_EMAIL", "")
+_resend_from_email = os.getenv("RESEND_FROM_EMAIL", "")
+
+EMAIL_HOST = os.getenv(
+    "EMAIL_HOST",
+    "smtp.resend.com" if _resend_api_key else "smtp.gmail.com",
+)
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes", "on")
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() in ("1", "true", "yes", "on")
+EMAIL_HOST_USER = os.getenv(
+    "EMAIL_HOST_USER",
+    "resend" if _resend_api_key else "",
+)
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", _resend_api_key)
+EMAIL_BACKEND = _email_backend or (
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG and not _smtp_configured
+    else "django.core.mail.backends.smtp.EmailBackend"
+)
+DEFAULT_FROM_EMAIL = _default_from_email or _resend_from_email or EMAIL_HOST_USER or "no-reply@localhost"
+PASSWORD_RESET_OTP_LENGTH = int(os.getenv("PASSWORD_RESET_OTP_LENGTH", "6"))
+PASSWORD_RESET_OTP_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_OTP_EXPIRE_MINUTES", "10"))
 
 # URL settings
 APPEND_SLASH = True

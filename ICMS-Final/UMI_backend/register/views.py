@@ -1,5 +1,5 @@
 import logging
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, generics
@@ -205,6 +205,7 @@ def _build_login_response_for_user(user):
 # Public Registration API - No authentication required
 @csrf_exempt
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def register(request):
     logger.warning("Registration attempt blocked: registration disabled.")
@@ -242,6 +243,7 @@ def get_user_registrations(request):
 
 @csrf_exempt
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def login(request):
     print("=== LOGIN VIEW CALLED ===")

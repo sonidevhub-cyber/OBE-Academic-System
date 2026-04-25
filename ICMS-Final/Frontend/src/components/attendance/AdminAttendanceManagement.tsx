@@ -236,8 +236,8 @@ const AdminAttendanceManagement: React.FC = () => {
       className="space-y-6"
     >
       <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Super Admin Attendance Management</h2>
-        <p className="text-gray-600 mb-6">Handle instructor attendance update requests and manage attendance records.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">Admin Attendance Management</h2>
+        <p className="text-gray-600 mb-6">Handle routine attendance updates. Principal monitors analytics and risks.</p>
         
         {/* Tab Navigation */}
         <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">

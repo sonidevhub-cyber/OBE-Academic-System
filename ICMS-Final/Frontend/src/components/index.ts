@@ -20,8 +20,6 @@ export { default as ProfessionalFeedbackViewer } from './feedback/ProfessionalFe
 
 // ==================== FORM COMPONENTS ====================
 export { default as FeedbackButton } from './forms/FeedbackButton';
-export { default as ForgotPassword } from './forms/ForgotPassword';
-export { default as ResetPassword } from './forms/ResetPassword';
 
 // ==================== WIDGET COMPONENTS ====================
 export { default as DashboardStats } from './widgets/DashboardStats';

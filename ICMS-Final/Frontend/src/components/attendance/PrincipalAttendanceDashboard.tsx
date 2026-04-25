@@ -42,15 +42,37 @@ interface TopPerformers {
   }>;
 }
 
+interface LowSemesterInsight {
+  semester_id: number;
+  semester_name: string;
+  department_name: string;
+  total_records: number;
+  present_count: number;
+  absent_count: number;
+  attendance_rate: number;
+}
+
+interface LowFacultyInsight {
+  name: string;
+  role: string;
+  department: string;
+  total_days: number;
+  present_days: number;
+  absent_days: number;
+  attendance_rate: number;
+}
+
 interface PrincipalAttendanceDashboardProps {
   className?: string;
 }
 
 const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> = ({ className = '' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'departments' | 'performance'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'departments' | 'performance' | 'insights'>('overview');
   const [institutionStats, setInstitutionStats] = useState<InstitutionStats | null>(null);
   const [departmentComparison, setDepartmentComparison] = useState<DepartmentComparison[]>([]);
   const [topPerformers, setTopPerformers] = useState<TopPerformers | null>(null);
+  const [lowSemesters, setLowSemesters] = useState<LowSemesterInsight[]>([]);
+  const [lowFaculty, setLowFaculty] = useState<LowFacultyInsight[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('30'); // days
 
@@ -61,6 +83,8 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
       fetchDepartmentComparison();
     } else if (activeTab === 'performance') {
       fetchTopPerformers();
+    } else if (activeTab === 'insights') {
+      fetchInsights();
     }
   }, [activeTab, selectedPeriod]);
 
@@ -160,6 +184,39 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
     }
   };
 
+  const fetchInsights = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('auth') || sessionStorage.getItem('auth');
+      const authData = token ? JSON.parse(token) : null;
+      const accessToken = authData?.access_token;
+
+      if (!accessToken) {
+        console.error('No access token found');
+        return;
+      }
+
+      const response = await fetch(`http://127.0.0.1:8000/api/attendance/principal/insights/?period=${selectedPeriod}`, {
+        headers: {
+          'Authorization': `Token ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setLowSemesters(data.lowest_semesters || []);
+        setLowFaculty(data.lowest_faculty || []);
+      } else {
+        console.error('Failed to fetch principal insights:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching principal insights:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getRiskColor = (risk: string) => {
     switch (risk) {
       case 'high': return 'text-red-600 bg-red-100';
@@ -179,9 +236,9 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
 
   const getRankIcon = (rank: number) => {
     switch (rank) {
-      case 1: return '🥇';
-      case 2: return '🥈';
-      case 3: return '🥉';
+      case 1: return 'Top 1';
+      case 2: return 'Top 2';
+      case 3: return 'Top 3';
       default: return `#${rank}`;
     }
   };
@@ -200,7 +257,8 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
           {[
             { id: 'overview', label: 'Institution Overview', icon: BarChart3 },
             { id: 'departments', label: 'Department Comparison', icon: Building },
-            { id: 'performance', label: 'Top Performers', icon: Award }
+            { id: 'performance', label: 'Top Performers', icon: Award },
+            { id: 'insights', label: 'Risk Insights', icon: AlertTriangle }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -486,7 +544,7 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
                     >
                       <div className="flex-1">
                         <div className="font-medium text-gray-900">{course.name}</div>
-                        <div className="text-sm text-gray-500">{course.code} • {course.instructor}</div>
+                        <div className="text-sm text-gray-500">{course.code} - {course.instructor}</div>
                       </div>
                       <span className="text-lg font-bold text-green-600">{course.attendance_rate}%</span>
                     </motion.div>
@@ -520,6 +578,94 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
               </div>
             </div>
           )}
+
+          {activeTab === 'insights' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                    <AlertTriangle className="w-5 h-5 mr-2 text-amber-500" />
+                    Lowest Attendance Semesters
+                  </h3>
+                  <span className="text-sm text-gray-500">Last {selectedPeriod} days</span>
+                </div>
+                {lowSemesters.length === 0 ? (
+                  <div className="text-sm text-gray-500">No semester data available.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {lowSemesters.map((sem, index) => (
+                      <motion.div
+                        key={`${sem.semester_id}-${index}`}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="p-4 border border-gray-100 rounded-lg"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-medium text-gray-900">{sem.semester_name}</div>
+                            <div className="text-xs text-gray-500">{sem.department_name}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold text-red-600">{sem.attendance_rate}%</div>
+                            <div className="text-xs text-gray-500">{sem.present_count}/{sem.total_records} present</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2 rounded-full bg-gray-100">
+                          <div
+                            className="h-2 rounded-full bg-red-500"
+                            style={{ width: `${Math.min(Math.max(sem.attendance_rate, 0), 100)}%` }}
+                          />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                    <Users className="w-5 h-5 mr-2 text-indigo-500" />
+                    Lowest Attendance Staff
+                  </h3>
+                  <span className="text-sm text-gray-500">Last {selectedPeriod} days</span>
+                </div>
+                {lowFaculty.length === 0 ? (
+                  <div className="text-sm text-gray-500">No faculty data available.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {lowFaculty.map((faculty, index) => (
+                      <motion.div
+                        key={`${faculty.name}-${index}`}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="p-4 border border-gray-100 rounded-lg"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-medium text-gray-900">{faculty.name}</div>
+                            <div className="text-xs text-gray-500">{faculty.role} - {faculty.department}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold text-red-600">{faculty.attendance_rate}%</div>
+                            <div className="text-xs text-gray-500">{faculty.present_days}/{faculty.total_days} present</div>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2 rounded-full bg-gray-100">
+                          <div
+                            className="h-2 rounded-full bg-indigo-500"
+                            style={{ width: `${Math.min(Math.max(faculty.attendance_rate, 0), 100)}%` }}
+                          />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -527,3 +673,5 @@ const PrincipalAttendanceDashboard: React.FC<PrincipalAttendanceDashboardProps> 
 };
 
 export default PrincipalAttendanceDashboard;
+
+

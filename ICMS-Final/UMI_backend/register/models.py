@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 class User(AbstractUser):
     role = models.CharField(
@@ -74,6 +75,12 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
+
+    def get_full_name(self):
+        # Prefer the custom profile name, then fall back to Django's default name fields.
+        if self.name:
+            return self.name.strip()
+        return super().get_full_name().strip()
     
     def save(self, *args, **kwargs):
         # If this user is a Django superuser, ensure they have super_admin role and flags
@@ -166,3 +173,31 @@ class PrincipalRegistrationRequest(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)    
+
+
+class PasswordResetOTP(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_reset_otps',
+    )
+    email = models.EmailField()
+    otp_hash = models.CharField(max_length=128)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Password reset OTP for {self.email}"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_active(self):
+        return self.used_at is None and not self.is_expired

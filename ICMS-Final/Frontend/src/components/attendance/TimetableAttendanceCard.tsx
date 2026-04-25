@@ -168,7 +168,7 @@ const TimetableAttendanceCard: React.FC = () => {
   const finalizeAttendance = async () => {
     if (!selectedSlot) return;
 
-    if (!window.confirm('Are you sure you want to finalize attendance? This will lock all records and require admin approval for any changes.')) {
+    if (!window.confirm('Are you sure you want to finalize attendance? This will lock all records and require HOD/Coordinator approval for any changes.')) {
       return;
     }
 

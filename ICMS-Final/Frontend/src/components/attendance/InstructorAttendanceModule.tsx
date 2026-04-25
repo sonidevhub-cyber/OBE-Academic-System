@@ -236,7 +236,7 @@ const InstructorAttendanceModule: React.FC = () => {
               <ul className="list-disc list-inside space-y-1">
                 <li>Attendance can only be marked during your assigned time slots</li>
                 <li>Your attendance is automatically marked as "Present" when you mark student attendance</li>
-                <li>Once submitted, attendance is locked and requires admin approval to edit</li>
+                <li>Once submitted, attendance is locked and requires HOD/Coordinator approval to edit</li>
                 <li>Time slots are strictly enforced for professional accuracy</li>
               </ul>
             </div>

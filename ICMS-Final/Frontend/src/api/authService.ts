@@ -24,6 +24,17 @@ interface InstructorLoginData {
   password: string;
 }
 
+interface PasswordResetRequestData {
+  email: string;
+}
+
+interface PasswordResetConfirmData {
+  email: string;
+  otp: string;
+  new_password: string;
+  confirm_password?: string;
+}
+
 interface AuthResponse {
   user: any;
   role?: string;
@@ -46,6 +57,10 @@ interface BackendResponse {
   request_id?: number;
 }
 
+interface PasswordResetResponse {
+  message: string;
+}
+
 // Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_URL,
@@ -58,6 +73,23 @@ const register = async (_data: RegisterData): Promise<AuthResponse> => {
   console.warn('Registration attempt blocked: registrations are disabled.');
   // Always reject to make registration impossible from the frontend
   throw new Error('Registration is disabled. Please contact an administrator to create an account.');
+};
+
+const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as {
+      message?: string;
+      detail?: string;
+      error?: string;
+    } | undefined;
+    return data?.message || data?.detail || data?.error || fallback;
+  }
+
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+
+  return fallback;
 };
 
 const login = async (data: LoginData): Promise<AuthResponse> => {
@@ -130,6 +162,28 @@ const instructorLogin = async (data: InstructorLoginData): Promise<AuthResponse>
       throw error.response.data;
     }
     throw new Error('Instructor login failed');
+  }
+};
+
+const requestPasswordReset = async (data: PasswordResetRequestData): Promise<PasswordResetResponse> => {
+  try {
+    const response = await apiClient.post<PasswordResetResponse>('register/password-reset-otp/', {
+      email: data.email
+    });
+
+    return response.data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to send reset email.'));
+  }
+};
+
+const confirmPasswordReset = async (data: PasswordResetConfirmData): Promise<PasswordResetResponse> => {
+  try {
+    const response = await apiClient.post<PasswordResetResponse>('register/password-reset-confirm-otp/', data);
+
+    return response.data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Unable to reset password.'));
   }
 };
 
@@ -225,6 +279,8 @@ const authService = {
   register,
   login,
   instructorLogin,
+  requestPasswordReset,
+  confirmPasswordReset,
   logout,
   getCurrentUser,
   getProfile,

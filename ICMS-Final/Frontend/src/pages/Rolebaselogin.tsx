@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
-import logo from "../assets/logo.png";
+import logo from "../assets/logo2.png";
 import welcomeImg from "../assets/welcome.jpg";
 
 import {
@@ -56,7 +56,7 @@ export default function CUIPortalPage() {
         {/* BADGE */}
         <div className="absolute top-10 left-10 z-[999]">
           <div className="text-white bg-[#5b2fc1] px-6 py-2 rounded-full text-sm font-semibold shadow-lg tracking-wide">
-            FG Postgraduate College Wah Cantt
+            FG Postgraduate College for Women Wah Cantt
           </div>
         </div>
 
@@ -71,10 +71,30 @@ export default function CUIPortalPage() {
           shadow-[0_25px_60px_rgba(0,0,0,.18)]
           border border-white/60
           ring-4 ring-[#a88bff40] flex items-center justify-center"
+          style={{
+            perspective: 1200,
+          }}
         >
-          <div className="w-40 h-40 rounded-full bg-white shadow-inner flex items-center justify-center">
+          <motion.div
+            className="w-40 h-40 rounded-full bg-white shadow-inner flex items-center justify-center"
+            animate={{
+              rotateX: [0, 18, 0, -18, 0],
+              rotateY: [0, 180, 360],
+              rotateZ: [0, 6, 0, -6, 0],
+              scale: [1, 1.08, 1, 1.08, 1],
+            }}
+            transition={{
+              duration: 6,
+              repeat: Infinity,
+              repeatDelay: 0,
+              ease: "easeInOut",
+            }}
+            style={{
+              transformStyle: "preserve-3d",
+            }}
+          >
             <img src={logo} alt="Logo" className="w-[68%] h-auto" />
-          </div>
+          </motion.div>
         </motion.div>
 
         {/* RIGHT PANEL */}

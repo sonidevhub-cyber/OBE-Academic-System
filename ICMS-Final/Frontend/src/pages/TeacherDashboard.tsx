@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bar, Line } from 'react-chartjs-2';
 import { courseService, studentService } from '../api/apiService';
 import { api } from '../api/api';
-import ResultUpload from '../components/ResultUpload';
 import InstructorProfileModal from '../components/ui/modals/InstructorProfileModal';
 import InstructorProfile from '../components/InstructorProfile';
 import InstructorTimetable from '../components/InstructorTimetable';
@@ -530,10 +529,6 @@ const TeacherDashboard = () => {
               >
                 <InstructorAttendanceDashboard />
               </motion.div>
-            )}
-
-            {activeTab === 'results' && (
-              <ResultUpload />
             )}
           </AnimatePresence>
         </main>
