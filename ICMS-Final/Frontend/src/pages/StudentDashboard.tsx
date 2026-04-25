@@ -29,6 +29,7 @@ import AttendanceAnalytics from "../components/analytics/AttendanceAnalytics";
 import StudentTimetable from "../components/timetable/StudentTimetable";
 import { FeedbackButton } from "../components/feedback";
 import TopbarProfileMenu from "../components/TopbarProfileMenu";
+import DateSheetModule from "../views/modules/DateSheetModule";
 
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -173,6 +174,7 @@ const StudentDashboard: React.FC = () => {
     { name: "Results", icon: <GraduationCap size={18} /> },
     { name: "Attendance", icon: <CalendarDays size={18} /> },
     { name: "Timetable", icon: <CalendarDays size={18} /> },
+    { name: "DateSheet", icon: <CalendarDays size={18} /> },
 
     { name: "Events", icon: <Megaphone size={18} /> },
     { name: "Announcements", icon: <Bell size={18} /> },
@@ -449,6 +451,16 @@ const StudentDashboard: React.FC = () => {
                   <p className="text-yellow-800">Student ID not available. Please contact administration.</p>
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* DateSheet */}
+          {activeTab === "DateSheet" && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <DateSheetModule role="student" />
             </motion.div>
           )}
 

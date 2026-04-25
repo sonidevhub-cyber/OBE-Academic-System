@@ -8,6 +8,7 @@ from .views import (
 )
 from students.views import StudentDashboardView
 from .viewsets import DepartmentViewSet, SemesterViewSet, CourseViewSet
+from .datesheet_views import DateSheetViewSet, StudentEligibilityViewSet, DateSheetNotificationViewSet
 from .hod_views import HODTimetableView, HODDashboardView, HODAnalyticsView
 from .class_management_views import ClassFormDataView, FilteredDataView
 from .simple_data_view import SimpleDataView
@@ -41,6 +42,9 @@ router = DefaultRouter()
 router.register(r'departments', DepartmentViewSet)
 router.register(r'semesters', SemesterViewSet)
 router.register(r'courses', CourseViewSet)
+router.register(r'datesheets', DateSheetViewSet, basename='datesheet')
+router.register(r'datesheet-eligibility', StudentEligibilityViewSet, basename='datesheet-eligibility')
+router.register(r'datesheet-notifications', DateSheetNotificationViewSet, basename='datesheet-notifications')
 
 urlpatterns = [
     path('', include(router.urls)),

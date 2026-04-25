@@ -25,6 +25,35 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+def _user_matches_role_filter(user, role):
+    """Support instructor filtering for HOD/Coordinator who can act as instructors."""
+    if not role:
+        return True
+
+    normalized_role = str(role).strip().lower()
+    if normalized_role != 'instructor':
+        return (user.role or '').lower() == normalized_role
+
+    # Direct instructor role/profile users.
+    if getattr(user, 'role', '').lower() == 'instructor':
+        return True
+    if hasattr(user, 'instructor_profile'):
+        return True
+    if hasattr(user, 'has_role') and user.has_role('instructor'):
+        return True
+
+    # HOD or Coordinator users allowed to act as instructor.
+    coordinator_profile = getattr(user, 'coordinator_profile', None)
+    if coordinator_profile and getattr(coordinator_profile, 'can_act_as_instructor', False):
+        return True
+
+    hod_profile = getattr(user, 'hod_profile', None)
+    if hod_profile and getattr(hod_profile, 'can_act_as_instructor', False):
+        return True
+
+    return False
+
+
 def _build_login_response(user, user_payload, token_key):
     ensure_base_roles()
     role_code = resolve_user_role_code(user)
@@ -217,12 +246,11 @@ def register(request):
 def get_user_registrations(request):
     role = request.GET.get('role')
     logger.info(f"GET request received for role: {role}")
-    
+
+    users = User.objects.all().select_related('coordinator_profile', 'hod_profile', 'instructor_profile')
     if role:
-        users = User.objects.filter(role=role)
-    else:
-        users = User.objects.all()
-    
+        users = [user for user in users if _user_matches_role_filter(user, role)]
+
     data = []
     for user in users:
         user_data = {
@@ -629,11 +657,10 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
 @require_permission('manage_jsc_users')
 def get_registrations(request):
     role = request.GET.get('role')
+    users = User.objects.all().select_related('coordinator_profile', 'hod_profile', 'instructor_profile')
     if role:
-        users = User.objects.filter(role=role)
-    else:
-        users = User.objects.all()
-    
+        users = [user for user in users if _user_matches_role_filter(user, role)]
+
     data = []
     for user in users:
         data.append({

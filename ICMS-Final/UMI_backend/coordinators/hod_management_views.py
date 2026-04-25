@@ -473,6 +473,25 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         
         try:
             hod = HOD.objects.get(user=request.user)
+            # Keep instructor records in sync for department users who can act as instructor.
+            # This guarantees visibility in instructor tabs for HOD/Coordinator dual-role users.
+            for dept_hod in HOD.objects.filter(department=hod.department, can_act_as_instructor=True).select_related('user'):
+                if dept_hod.user and not hasattr(dept_hod.user, 'instructor_profile'):
+                    try:
+                        MultiRoleService.enable_instructor_role_for_hod(dept_hod.user)
+                    except Exception:
+                        pass
+
+            for dept_coordinator in Coordinator.objects.filter(
+                department=hod.department,
+                can_act_as_instructor=True,
+            ).select_related('user'):
+                if dept_coordinator.user and not hasattr(dept_coordinator.user, 'instructor_profile'):
+                    try:
+                        MultiRoleService.enable_instructor_role_for_coordinator(dept_coordinator.user)
+                    except Exception:
+                        pass
+
             # Get all instructors in the department (including those who are coordinators)
             instructors = Instructor.objects.filter(department=hod.department).select_related('user')
             

@@ -23,6 +23,7 @@ import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
+import DateSheetPage from './pages/DateSheetModule';
 
 
 // Use the full AdminDashboard component from pages/AdminDashboard.tsx
@@ -84,6 +85,7 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />
         <Route path="/student-dashboard" element={<Navigate to="/student" />} />
+        <Route path="/student/datesheet" element={<DateSheetPage />} />
       </Route>
       
       {/* Student Profile Route - accessible by multiple roles */}
@@ -101,11 +103,13 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['coordinator']} />}>
         <Route path="/coordinator" element={<ModularCoordinatorDashboard />} />
         <Route path="/coordinator-dashboard" element={<Navigate to="/coordinator" />} />
+        <Route path="/coordinator/datesheet" element={<DateSheetPage />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['hod']} />}>
         <Route path="/hod" element={<ModularHODDashboard />} />
         <Route path="/hod-dashboard" element={<Navigate to="/hod" />} />
+        <Route path="/hod/datesheet" element={<DateSheetPage />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director']} />}>

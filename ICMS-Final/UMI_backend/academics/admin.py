@@ -1,5 +1,17 @@
 from django.contrib import admin
-from .models import Department, Semester, Course, Timetable, Attendance, Result, Scholarship
+from .models import (
+    Department,
+    Semester,
+    Course,
+    Timetable,
+    Attendance,
+    Result,
+    Scholarship,
+    DateSheet,
+    DateSheetItem,
+    StudentEligibility,
+    DateSheetNotification,
+)
 
 @admin.register(Department)
 class DepartmentAdmin(admin.ModelAdmin):
@@ -41,3 +53,30 @@ class ResultAdmin(admin.ModelAdmin):
 class ScholarshipAdmin(admin.ModelAdmin):
     list_display = ['name', 'amount']
     search_fields = ['name']
+
+
+class DateSheetItemInline(admin.TabularInline):
+    model = DateSheetItem
+    extra = 0
+
+
+@admin.register(DateSheet)
+class DateSheetAdmin(admin.ModelAdmin):
+    list_display = ['datesheet_id', 'department', 'semester', 'status', 'created_by', 'submitted_at', 'reviewed_at']
+    list_filter = ['status', 'department', 'semester']
+    search_fields = ['department__name', 'semester__name', 'created_by__username']
+    inlines = [DateSheetItemInline]
+
+
+@admin.register(StudentEligibility)
+class StudentEligibilityAdmin(admin.ModelAdmin):
+    list_display = ['eligibility_id', 'student', 'course', 'datesheet', 'attendance_percentage', 'is_eligible', 'overridden_by_hod']
+    list_filter = ['is_eligible', 'overridden_by_hod', 'datesheet__department', 'semester']
+    search_fields = ['student__name', 'student__student_id', 'course__name']
+
+
+@admin.register(DateSheetNotification)
+class DateSheetNotificationAdmin(admin.ModelAdmin):
+    list_display = ['notification_id', 'user', 'datesheet', 'is_read', 'created_at']
+    list_filter = ['is_read', 'created_at']
+    search_fields = ['user__username', 'message']
