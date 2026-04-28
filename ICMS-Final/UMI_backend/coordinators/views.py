@@ -20,7 +20,7 @@ from .serializers import (
 )
 from academics.models import Course, Semester, Timetable
 
-from hods.models import HOD
+from hods.models import HOD, HODRegistrationRequest
 
 def _is_hod_user(user):
     # Support multi-role users: allow HOD permissions when an HOD profile exists,
@@ -32,7 +32,35 @@ def _is_hod_user(user):
     if current_role == 'hod' or getattr(user, 'role', None) == 'hod':
         return True
 
-    return HOD.objects.filter(user=user).exists()
+    if HOD.objects.filter(user=user).exists():
+        return True
+
+    return HODRegistrationRequest.objects.filter(
+        email=getattr(user, 'email', ''),
+        hod_request_status='account_created',
+    ).exists()
+
+
+def _get_hod_for_user(user):
+    hod = HOD.objects.filter(user=user).first()
+    if hod:
+        return hod
+
+    if hasattr(user, 'email'):
+        hod = HOD.objects.filter(email=user.email).first()
+        if hod:
+            return hod
+
+    hod_request = HODRegistrationRequest.objects.filter(
+        email=getattr(user, 'email', ''),
+        hod_request_status='account_created',
+    ).first()
+    return hod_request
+
+
+def _get_hod_department_for_user(user):
+    hod = _get_hod_for_user(user)
+    return getattr(hod, 'department', None) if hod else None
 
 def _get_coordinator_for_user(user):
     if hasattr(user, 'coordinator_profile'):
@@ -123,8 +151,10 @@ class CoordinatorViewSet(viewsets.ModelViewSet):
         if coordinator:
             return Coordinator.objects.filter(id=coordinator.id)
         elif user.has_role('hod') or user.role == 'hod':
-            hod = HOD.objects.get(user=user)
-            return Coordinator.objects.filter(department=hod.department)
+            department = _get_hod_department_for_user(user)
+            if department:
+                return Coordinator.objects.filter(department=department)
+            return Coordinator.objects.none()
         return Coordinator.objects.all()
     
     @action(detail=False, methods=['get'])
@@ -499,47 +529,40 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         current_role = user.get_current_role() if hasattr(user, 'get_current_role') else getattr(user, 'active_role', None) or getattr(user, 'role', None)
+        coordinator = _get_coordinator_for_user(user)
 
         # Prioritize HOD visibility for HOD users (including multi-role users).
         if _is_hod_user(user):
-            try:
-                hod = HOD.objects.get(user=user)
-                return CourseAllocation.objects.filter(coordinator__department=hod.department)
-            except HOD.DoesNotExist:
-                return CourseAllocation.objects.none()
+            department = _get_hod_department_for_user(user)
+            if department:
+                return CourseAllocation.objects.filter(coordinator__department=department)
+            return CourseAllocation.objects.none()
 
-        # If user is currently acting as instructor, only show their own allocations.
+        # Coordinator access (either primary role or multi-role) should show the
+        # whole department scope, not just approved allocations.
+        if coordinator and (
+            current_role == 'coordinator'
+            or user.role == 'coordinator'
+            or hasattr(user, 'coordinator_profile')
+        ):
+            return CourseAllocation.objects.filter(coordinator=coordinator)
+
+        # If the user is currently acting as instructor, show only their own allocations.
         if current_role == 'instructor' or user.role == 'instructor':
             instructor = InstructorModel.objects.filter(user=user).first()
             if instructor:
-               return CourseAllocation.objects.filter(
-    instructor=instructor,
-    status__in=['approved', 'active']
-)
+                return CourseAllocation.objects.filter(
+                    instructor=instructor,
+                    status__in=['approved', 'active']
+                )
 
             # Fallback for multi-role mappings by employee ID.
-            coordinator = Coordinator.objects.filter(user=user).first()
             if coordinator and coordinator.employee_id:
                 mapped_instructor = InstructorModel.objects.filter(employee_id=coordinator.employee_id).first()
                 if mapped_instructor:
                     return CourseAllocation.objects.filter(instructor=mapped_instructor)
 
             return CourseAllocation.objects.none()
-
-        # Coordinator access (either primary role or multi-role)
-        if current_role == 'coordinator' or user.role == 'coordinator' or hasattr(user, 'coordinator_profile'):
-            try:
-                coordinator = Coordinator.objects.get(user=user)
-                return CourseAllocation.objects.filter(coordinator=coordinator)
-            except Coordinator.DoesNotExist:
-                # Check by employee_id for multi-role users
-                try:
-                    from instructors.models import Instructor
-                    instructor = Instructor.objects.get(user=user)
-                    coordinator = Coordinator.objects.get(employee_id=instructor.employee_id)
-                    return CourseAllocation.objects.filter(coordinator=coordinator)
-                except (Instructor.DoesNotExist, Coordinator.DoesNotExist):
-                    return CourseAllocation.objects.none()
         return CourseAllocation.objects.all()
     
     def get_serializer_class(self):
@@ -592,14 +615,14 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
         allocation = self.get_object()
         if allocation.status != 'proposed':
             return Response({'error': 'Only proposed allocations can be approved'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            hod = HOD.objects.get(user=request.user)
-        except HOD.DoesNotExist:
+        hod = _get_hod_for_user(request.user)
+        if not hod or not getattr(hod, 'department', None):
             return Response({'error': 'HOD profile not found'}, status=status.HTTP_404_NOT_FOUND)
         
         allocation.status = 'approved'
         allocation.approved_at = timezone.now()
-        allocation.approved_by = hod
+        if isinstance(hod, HOD):
+            allocation.approved_by = hod
         allocation.hod_comments = request.data.get('comments', '')
         allocation.save()
         
@@ -618,14 +641,14 @@ class CourseAllocationViewSet(viewsets.ModelViewSet):
         allocation = self.get_object()
         if allocation.status != 'proposed':
             return Response({'error': 'Only proposed allocations can be rejected'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            hod = HOD.objects.get(user=request.user)
-        except HOD.DoesNotExist:
+        hod = _get_hod_for_user(request.user)
+        if not hod or not getattr(hod, 'department', None):
             return Response({'error': 'HOD profile not found'}, status=status.HTTP_404_NOT_FOUND)
         
         allocation.status = 'rejected'
         allocation.approved_at = timezone.now()
-        allocation.approved_by = hod
+        if isinstance(hod, HOD):
+            allocation.approved_by = hod
         allocation.hod_comments = request.data.get('comments', '')
         allocation.rejection_reason = request.data.get('rejection_reason', '')
         allocation.save()

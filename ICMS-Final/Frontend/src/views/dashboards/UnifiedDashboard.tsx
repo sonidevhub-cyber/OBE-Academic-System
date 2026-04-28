@@ -18,7 +18,7 @@ import AnalyticsModule from '../modules/AnalyticsModule';
 type TabId = 'dashboard' | 'schedule' | 'attendance' | 'results' | 'announcements' | 'profile';
 
 const UnifiedDashboard: React.FC = () => {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [userProfile, setUserProfile] = useState<any>(null);
   const [currentRole, setCurrentRole] = useState<string>('');
@@ -184,7 +184,7 @@ const UnifiedDashboard: React.FC = () => {
       case 'results':
         return <ResultsModule token={token} />;
       case 'announcements':
-        return <AnnouncementModule token={token} canCreate={true} />;
+        return <AnnouncementModule token={token} canCreate={hasPermission('manage_announcements')} />;
       case 'profile':
         return <ProfileModule profileData={userProfile} userType={currentRole === 'coordinator' ? 'instructor' : currentRole as "student" | "admin" | "principal" | "instructor" | "hod"} />;
       default:

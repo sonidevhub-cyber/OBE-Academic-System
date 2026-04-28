@@ -16,7 +16,24 @@ ELIGIBILITY_THRESHOLD = 75.0
 def get_user_role(user) -> str:
     if not user or not getattr(user, "is_authenticated", False):
         return ""
-    return str(getattr(user, "effective_role", None) or getattr(user, "active_role", None) or getattr(user, "role", "")).lower()
+    current_role = str(getattr(user, "effective_role", None) or getattr(user, "active_role", None) or getattr(user, "role", "")).lower()
+
+    # Prefer a concrete profile-based role when the stored active role is stale.
+    # This keeps multi-role users working even if a previous tab left them in a
+    # different active role in local storage.
+    if current_role in {"student", "coordinator", "hod", "admin", "super_admin", "principal"}:
+        return current_role
+
+    if hasattr(user, "coordinator_profile"):
+        return "coordinator"
+    if hasattr(user, "hod_profile"):
+        return "hod"
+    if hasattr(user, "student"):
+        return "student"
+    if hasattr(user, "instructor_profile"):
+        return "instructor"
+
+    return current_role
 
 
 def get_user_department(user):

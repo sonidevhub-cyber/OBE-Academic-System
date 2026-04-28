@@ -57,7 +57,12 @@ const ModularHODDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const authData = localStorage.getItem('auth');
-  const token = authData ? JSON.parse(authData).access_token || JSON.parse(authData).token : null;
+  const auth = authData ? JSON.parse(authData) : {};
+  const token = authData ? auth.access_token || auth.token : null;
+  const canManageAnnouncements = Boolean(
+    auth?.permissions?.includes('manage_announcements') ||
+    auth?.user?.permissions?.includes?.('manage_announcements')
+  );
   const API_BASE = 'http://localhost:8000/api/academics';
 
   const tabs = [
@@ -353,7 +358,7 @@ const ModularHODDashboard: React.FC = () => {
         );
 
       case 'announcements':
-        return <AnnouncementModule token={token || ''} canCreate={true} />;
+        return <AnnouncementModule token={token || ''} canCreate={canManageAnnouncements} />;
 
       default:
         return <div>Content for {activeTab}</div>;

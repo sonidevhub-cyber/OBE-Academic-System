@@ -12,6 +12,14 @@ from hods.models import HOD
 from register.multi_role_service import MultiRoleService
 from register.identifiers import generate_employee_id
 
+def _is_hod_user(user):
+    if hasattr(user, 'hod_profile'):
+        return True
+    current_role = user.get_current_role() if hasattr(user, 'get_current_role') else getattr(user, 'role', None)
+    if current_role == 'hod' or getattr(user, 'role', None) == 'hod':
+        return True
+    return HOD.objects.filter(user=user).exists()
+
 class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     queryset = Coordinator.objects.all()
     serializer_class = CoordinatorSerializer
@@ -23,9 +31,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         print(f"\n=== DEPARTMENT COORDINATORS DEBUG ===")
         print(f"User: {request.user.username}, Role: {request.user.role}")
         
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             print(f"Access denied - user role is {request.user.role}, not hod")
             return Response({'error': 'Only HOD can view coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
@@ -90,9 +96,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def inactive_coordinators(self, request):
         """Get only inactive coordinators for HOD's department"""
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can view coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -180,9 +184,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         })
     
     def get_queryset(self):
-        if self.request.user.has_role('hod') if hasattr(self.request.user, 'has_role') else self.request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(self.request.user):
             return Coordinator.objects.none()
         
         try:
@@ -198,9 +200,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def promote_instructor_to_coordinator(self, request):
         """HOD promotes an instructor to coordinator"""
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             return Response({'error': f'Only HOD can promote instructors. Your role: {request.user.role}'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -281,7 +281,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def create_new_coordinator(self, request):
         """HOD creates a new coordinator directly"""
-        if request.user.role != 'hod':
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can create coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -467,7 +467,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def department_instructors(self, request):
         """Get all instructors for HOD"""
-        if request.user.role != 'hod':
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can view instructors'}, 
                           status=status.HTTP_403_FORBIDDEN)
         

@@ -45,8 +45,8 @@ const HODCoordinatorManagementModule: React.FC = () => {
     try {
       setLoading(true);
       // Fetch coordinators and instructors
-      const coordinatorsRes = await api.get('coordinators/api/hod-management/department_coordinators/');
-      const instructorsRes = await api.get('coordinators/api/hod-management/department_instructors/');
+      const coordinatorsRes = await api.get('coordinators/hod-management/department_coordinators/');
+      const instructorsRes = await api.get('coordinators/hod-management/department_instructors/');
 
       setCoordinators(coordinatorsRes.data || []);
       setInstructors(instructorsRes.data || []);
@@ -65,7 +65,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
 
   const handlePromoteInstructor = async (instructorId: number, canActAsInstructor: boolean) => {
     try {
-      await api.post('coordinators/api/hod-management/promote_instructor_to_coordinator/', {
+      await api.post('coordinators/hod-management/promote_instructor_to_coordinator/', {
         instructor_id: instructorId,
         can_act_as_instructor: canActAsInstructor
       });
@@ -80,7 +80,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
 
   const handleToggleInstructorRole = async (coordinatorId: number) => {
     try {
-      await api.post(`coordinators/api/hod-management/${coordinatorId}/toggle_instructor_permission/`);
+      await api.post(`coordinators/hod-management/${coordinatorId}/toggle_instructor_permission/`);
       fetchData();
     } catch (error) {
       console.error('Error toggling instructor role:', error);
@@ -91,7 +91,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
     if (!window.confirm('Are you sure you want to remove this coordinator?')) return;
     
     try {
-      await api.delete(`coordinators/api/hod-management/${coordinatorId}/remove_coordinator/`);
+      await api.delete(`coordinators/hod-management/${coordinatorId}/remove_coordinator/`);
       fetchData();
     } catch (error) {
       console.error('Error removing coordinator:', error);
@@ -206,7 +206,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
         <CreateCoordinatorModal
           onSubmit={async (data) => {
             try {
-              const res = await api.post('coordinators/api/hod-management/create_new_coordinator/', data);
+              const res = await api.post('coordinators/hod-management/create_new_coordinator/', data);
               const createdEmployeeId = res?.data?.employee_id;
               if (createdEmployeeId) {
                 alert(`Coordinator created successfully!\nEmployee ID: ${createdEmployeeId}`);

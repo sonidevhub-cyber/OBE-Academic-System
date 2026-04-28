@@ -12,10 +12,7 @@ from .permissions import IsAdminUser
 from django.contrib.auth import get_user_model
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404
-
 User = get_user_model()
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def hod_dashboard(request):
@@ -115,7 +112,7 @@ def hod_profile(request):
         
         print(f"Found HOD: {hod.name}, Department: {hod.department}")
         if hod.department:
-            print(f"Department fields: {dir(hod.department)}")
+            print(f"Department details: id={hod.department.department_id}, name={hod.department.name}, code={hod.department.code}, description={hod.department.description}, num_semesters={hod.department.num_semesters}")
         
         # Manual serialization to avoid serializer issues
         data = {

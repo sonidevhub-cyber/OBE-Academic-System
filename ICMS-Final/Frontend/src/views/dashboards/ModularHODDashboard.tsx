@@ -89,7 +89,7 @@ type TabId = 'dashboard' | 'attendance' | 'allocations' | 'allocation-pending' |
 
 const ModularHODDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [department, setDepartment] = useState<Department | null>(null);
   const [semesters, setSemesters] = useState<Semester[]>([]);
@@ -734,7 +734,7 @@ const ModularHODDashboard: React.FC = () => {
         return <FeedbackViewer />;
 
       case 'announcements':
-        return <AnnouncementModule token={token || ''} canCreate={true} />;
+        return <AnnouncementModule token={token || ''} canCreate={hasPermission('manage_announcements')} />;
 
       case 'datesheet':
         return <DateSheetModule role="hod" />;

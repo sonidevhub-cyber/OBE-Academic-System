@@ -100,7 +100,7 @@ def _get_period_bounds(period_days):
 @permission_classes([IsAuthenticated])
 def instructor_classes(request):
     user = request.user
-    if _current_role(user) != 'instructor' and not _is_admin_user(user):
+    if not (_current_role(user) == 'instructor' or _is_admin_user(user) or hasattr(user, 'instructor_profile')):
         return Response({'error': 'Only active instructor role can access classes'}, status=status.HTTP_403_FORBIDDEN)
 
     instructor = _get_instructor_for_user(user)
@@ -172,7 +172,7 @@ def instructor_classes(request):
 @permission_classes([IsAuthenticated])
 def mark_class(request):
     user = request.user
-    if _current_role(user) != 'instructor' and not _is_admin_user(user):
+    if not (_current_role(user) == 'instructor' or _is_admin_user(user) or hasattr(user, 'instructor_profile')):
         return Response({'error': 'Only active instructor role can mark attendance'}, status=status.HTTP_403_FORBIDDEN)
 
     instructor = _get_instructor_for_user(user)
@@ -254,7 +254,7 @@ def mark_class(request):
 @permission_classes([IsAuthenticated])
 def request_attendance_update(request):
     user = request.user
-    if _current_role(user) != 'instructor' and not _is_admin_user(user):
+    if not (_current_role(user) == 'instructor' or _is_admin_user(user) or hasattr(user, 'instructor_profile')):
         return Response({'error': 'Only active instructor role can request attendance updates'}, status=status.HTTP_403_FORBIDDEN)
 
     instructor = _get_instructor_for_user(user)
@@ -428,7 +428,7 @@ def _department_faculty_records(department, start_date, end_date):
 @permission_classes([IsAuthenticated])
 def coordinator_overview(request):
     user = request.user
-    if _current_role(user) != 'coordinator' and not _is_admin_user(user):
+    if not (_is_coordinator_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active coordinator role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     coordinator = _get_coordinator_for_user(user)
@@ -461,7 +461,7 @@ def coordinator_overview(request):
 @permission_classes([IsAuthenticated])
 def coordinator_courses(request):
     user = request.user
-    if _current_role(user) != 'coordinator' and not _is_admin_user(user):
+    if not (_is_coordinator_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active coordinator role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     coordinator = _get_coordinator_for_user(user)
@@ -506,7 +506,7 @@ def coordinator_courses(request):
 @permission_classes([IsAuthenticated])
 def coordinator_faculty(request):
     user = request.user
-    if _current_role(user) != 'coordinator' and not _is_admin_user(user):
+    if not (_is_coordinator_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active coordinator role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     coordinator = _get_coordinator_for_user(user)
@@ -562,7 +562,7 @@ def coordinator_faculty(request):
 @permission_classes([IsAuthenticated])
 def hod_stats(request):
     user = request.user
-    if _current_role(user) != 'hod' and not _is_admin_user(user):
+    if not (_is_hod_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active HOD role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     hod = _get_hod_for_user(user)
@@ -606,7 +606,7 @@ def hod_stats(request):
 @permission_classes([IsAuthenticated])
 def hod_courses(request):
     user = request.user
-    if _current_role(user) != 'hod' and not _is_admin_user(user):
+    if not (_is_hod_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active HOD role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     hod = _get_hod_for_user(user)
@@ -662,7 +662,7 @@ def hod_courses(request):
 @permission_classes([IsAuthenticated])
 def hod_requests(request):
     user = request.user
-    if _current_role(user) != 'hod' and not _is_admin_user(user):
+    if not (_is_hod_user(user) or _is_admin_user(user)):
         return Response({'error': 'Only active HOD role can access this view'}, status=status.HTTP_403_FORBIDDEN)
 
     hod = _get_hod_for_user(user)

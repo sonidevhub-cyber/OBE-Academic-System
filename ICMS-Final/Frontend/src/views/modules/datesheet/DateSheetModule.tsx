@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CalendarDays, CheckCircle2, Clock3, RefreshCw, Send, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
-import { datesheetService, DateSheetApiRecord, DateSheetEligibilityRecord } from '../../../api/datesheetService';
+import { datesheetService, DateSheetApiRecord, DateSheetEligibilityRecord, DateSheetStatusApi } from '../../../api/datesheetService';
 import { api } from '../../../api/api';
 
 type RoleType = 'coordinator' | 'hod' | 'student';
@@ -59,6 +59,7 @@ const DateSheetModule: React.FC<DateSheetModuleProps> = ({ role }) => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [currentStudentRollNo, setCurrentStudentRollNo] = useState<string>('');
+  const [sheetStatusFilter, setSheetStatusFilter] = useState<DateSheetStatusApi | 'all'>('all');
 
   const showCoordinatorForm = role === 'coordinator';
   const showReviewActions = role === 'hod';
@@ -97,7 +98,7 @@ const DateSheetModule: React.FC<DateSheetModuleProps> = ({ role }) => {
     const params: any = {};
     if (departmentId) params.department = departmentId;
     if (semesterId) params.semester = semesterId;
-    if (role === 'hod') params.status = 'pending';
+    if (role === 'hod' && sheetStatusFilter !== 'all') params.status = sheetStatusFilter;
     if (role === 'student') params.status = 'approved';
     const res = await datesheetService.list(params);
     setSheets(res.data || []);
@@ -170,7 +171,7 @@ const DateSheetModule: React.FC<DateSheetModuleProps> = ({ role }) => {
 
   useEffect(() => {
     refreshAll();
-  }, [departmentId, semesterId, role]);
+  }, [departmentId, semesterId, role, sheetStatusFilter]);
 
   useEffect(() => {
     fetchCourses(semesterId);
@@ -302,6 +303,13 @@ const DateSheetModule: React.FC<DateSheetModuleProps> = ({ role }) => {
     }
   };
 
+  const statusFilterButtons: { key: DateSheetStatusApi | 'all'; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'pending', label: 'Pending' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'rejected', label: 'Rejected' },
+  ];
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -377,7 +385,6 @@ const DateSheetModule: React.FC<DateSheetModuleProps> = ({ role }) => {
       )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"><Clock3 className="h-5 w-5 text-blue-600" /> DateSheets</h3>
         {loading ? (
           <div className="py-10 text-center text-slate-500">Loading DateSheets...</div>
         ) : sheets.length === 0 ? (
