@@ -12,7 +12,6 @@ import PrincipalManagement from '../views/pages/PrincipalManagement';
 import StudentManagement from '../views/pages/StudentManagement';
 import DepartmentManagement from '../views/pages/DepartmentManagement';
 import TeacherManagement from '../views/pages/TeacherManagement';
-import EventManagement from '../views/pages/EventManagement';
 import AdminManagement from '../views/pages/AdminManagement';
 import { fetchCurrentProfile } from '../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../utils/profileHelpers';
@@ -244,26 +243,13 @@ const ModularAdminDashboard = () => {
         return <StudentManagement activeTab={activeTab} />;
 
       case 'instructors':
-        return <TeacherManagement activeTab={activeTab} />;
+        return <Instructor Management activeTab={activeTab} />;
 
       case 'departments':
         return <DepartmentManagement activeTab={activeTab} />;
 
       case 'admin-management':
         return <AdminManagement activeTab={activeTab} />;
-
-      case 'events':
-        return (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="bg-white p-6 rounded-xl shadow-lg border border-gray-100"
-          >
-            <EventManagement />
-          </motion.div>
-        );
-
       default:
         return <div>Content for {activeTab}</div>;
     }
