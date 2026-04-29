@@ -243,7 +243,7 @@ const ModularAdminDashboard = () => {
         return <StudentManagement activeTab={activeTab} />;
 
       case 'instructors':
-        return <Instructor Management activeTab={activeTab} />;
+        return <TeacherManagement activeTab={activeTab} />;
 
       case 'departments':
         return <DepartmentManagement activeTab={activeTab} />;
