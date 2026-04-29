@@ -1,109 +1,254 @@
-import React, { useState } from 'react';
-import CLOGAMappingMatrix from '../../components/obe/CLOGAMappingMatrix';
+import React, { useState, useEffect } from "react";
+import { api } from "../../api/api";
+import { motion } from "framer-motion";
+import { instructorCourseService } from "../../api/instructorCourseService";
+import ManageClass from "views/pages/ManageClass";
+import OBEReport from "views/pages/OBEReport";
+import AttainmentAnalysis from "views/pages/AttainmentAnalysis";
+// TYPES
+type Student = {
+  student_id: number;
+  name: string;
+};
+
+type CLO = {
+  id: number;
+  clo_number: string;
+  name: string;
+  level: string;
+};
+
+type Question = {
+  clo: number | "";
+  description: string;
+  level: string;
+};
 
 interface Props {
   departmentId: number;
 }
 
 const OBEModule: React.FC<Props> = ({ departmentId }) => {
-  const [activeTab, setActiveTab] = useState('mapping');
+
+  const [activeTab, setActiveTab] = useState("assessment"); // ✅ FIX
   const [selectedCourse, setSelectedCourse] = useState<number | undefined>();
+  const [courses, setCourses] = useState<any[]>([]);
+
+  // 🔥 STATES
+  const [type, setType] = useState("");
+  const [title, setTitle] = useState("");
+  const [totalMarks, setTotalMarks] = useState("");
+  const [date, setDate] = useState("");
+
+  const [questions, setQuestions] = useState<Question[]>([
+    { clo: "", description: "", level: "" }
+  ]);
+
+  const [students, setStudents] = useState<Student[]>([]);
+  const [clos, setClos] = useState<CLO[]>([]);
+  const [marks, setMarks] = useState<{ [key: number]: number }>({});
+
+  // FETCH COURSES
+  useEffect(() => {
+    instructorCourseService.getMyCourses()
+      .then(res => {
+        // console.log("API DATA:",res.data);
+        setCourses(res.data.courses);
+      })
+      .catch(err => console.error(err));
+  }, []);
+
+  // FETCH DATA WHEN COURSE SELECTED
+  useEffect(() => {
+    if (!selectedCourse) return;
+
+    api.get(`/obe/clos-by-course/?course=${selectedCourse}`)
+      .then(res => setClos(res.data));
+
+    api.get(`/students/?course=${selectedCourse}`)
+      .then(res => setStudents(res.data));
+
+  }, [selectedCourse]);
+
+  // WEIGHTAGE
+  const getWeightage = () => {
+    switch (type) {
+      case "quiz": return 5;
+      case "assignment": return 5;
+      case "presentation": return 5;
+      case "midterm": return 25;
+      case "final": return 50;
+      case "lab": return 10;
+      default: return 0;
+    }
+  };
+
+  // CLO SELECT
+  const handleCLOChange = (value: number, index: number) => {
+    const selected = clos.find((c) => c.id === value);
+    if (!selected) return;
+
+    const updated = [...questions];
+    updated[index].clo = value;
+    updated[index].description = selected.name;
+    updated[index].level = selected.level;
+
+    setQuestions(updated);
+  };
+
+  const addCLO = () => {
+    setQuestions([...questions, { clo: "", description: "", level: "" }]);
+  };
+
+  // MARKS
+  const handleMarksChange = (studentId: number, value: string) => {
+    const num = Number(value);
+
+    if (num > Number(totalMarks)) {
+      alert("Marks cannot exceed total marks");
+      return;
+    }
+
+    setMarks({
+      ...marks,
+      [studentId]: num
+    });
+  };
+
+  // SUBMIT
+  const handleSubmit = async () => {
+    try {
+
+      if (!selectedCourse) {
+        alert("Select course first");
+        return;
+      }
+
+      if (!title || !type || !totalMarks || !date) {
+        alert("Fill all fields");
+        return;
+      }
+
+      const validCLOs = questions.filter(q => q.clo !== "");
+
+      if (type !== "final" && validCLOs.length === 0) {
+        alert("Select at least one CLO");
+        return;
+      }
+
+      const cloWeight = validCLOs.length > 0
+        ? +(100 / validCLOs.length).toFixed(2)
+        : 0;
+
+      // CREATE ASSESSMENT
+      const res = await api.post("/obe/assessments/", {
+        course: selectedCourse,
+        title,
+        assessment_type: type,
+        total_marks: totalMarks,
+        assessment_date: date,
+        weightage: getWeightage()
+      });
+
+      const assessmentId = res.data.assessment_id;
+
+      // CLO MAPPING
+      if (type === "final") {
+        await api.post("/obe/assessment-clo-mappings/auto-map-final/", {
+          assessment: assessmentId
+        });
+      } else {
+        await api.post("/obe/assessment-clo-mappings/bulk-create/", {
+          mappings: validCLOs.map(q => ({
+            assessment: assessmentId,
+            clo: q.clo,
+            weightage: cloWeight
+          }))
+        });
+      }
+
+      // STUDENT MARKS
+      await api.post("/obe/student-assessments/bulk-create/", {
+        records: students.map(s => ({
+          student: s.student_id,
+          assessment: assessmentId,
+          marks: ((marks[s.student_id] || 0) / Number(totalMarks)) * 100
+        }))
+      });
+
+      alert("Saved Successfully!");
+
+      // RESET
+      setTitle("");
+      setType("");
+      setTotalMarks("");
+      setDate("");
+      setQuestions([{ clo: "", description: "", level: "" }]);
+      setMarks({});
+
+    } catch (err) {
+      console.error(err);
+      alert("Error saving");
+    }
+  };
 
   const tabs = [
-    { id: 'mapping', label: 'CLO-GA Mapping' },
-    { id: 'attainment', label: 'Attainment Analysis' },
-    { id: 'reports', label: 'OBE Reports' }
+    { id: "assessment", label: "Assessment" },
+    { id: "reports", label: "OBE Reports" },
+    { id: "attainment", label: "Attainment Analysis" }
   ];
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
+
+      {/* HEADER */}
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">OBE Management</h2>
-        <div className="flex gap-2">
-          <select 
-            className="px-3 py-2 border rounded-md"
-            value={selectedCourse || ''}
-            onChange={(e) => setSelectedCourse(e.target.value ? Number(e.target.value) : undefined)}
+        <h2 className="text-2xl font-bold">OBE Management</h2>
+
+       <select
+    className="px-3 py-2 border rounded-md"
+    value={selectedCourse || ""}
+    onChange={(e) =>
+      setSelectedCourse(e.target.value ? Number(e.target.value) : undefined)
+    }
+  >
+    <option value="">Select Course</option>
+
+    {courses.map((c) => (
+      <option key={c.course_id} value={c.course_id}>
+        {c.course_code} - {c.course_name}
+      </option>
+    ))}
+  </select>
+</div>
+
+      {/* TABS */}
+      <div className="border-b mb-6">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`mr-6 pb-2 ${
+              activeTab === tab.id ? "border-b-2 border-blue-500 text-blue-600" : ""
+            }`}
           >
-            <option value="">All Courses</option>
-            <option value="1">CS101 - Programming</option>
-            <option value="2">CS201 - Data Structures</option>
-          </select>
-        </div>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="-mb-px flex space-x-8">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === tab.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      {/* ✅ ASSESSMENT TAB */}
+      {activeTab === "assessment" && selectedCourse && (
+        <ManageClass courseId={selectedCourse} />
+      )}
 
-      <div className="tab-content">
-        {activeTab === 'mapping' && (
-          <CLOGAMappingMatrix 
-            courseId={selectedCourse} 
-            departmentId={departmentId} 
-          />
-        )}
-        
-        {activeTab === 'attainment' && (
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <h3 className="text-lg font-semibold mb-4">Attainment Analysis</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white p-4 rounded-lg shadow">
-                <h4 className="font-medium text-gray-700">CLO Attainment</h4>
-                <p className="text-2xl font-bold text-green-600">78.5%</p>
-              </div>
-              <div className="bg-white p-4 rounded-lg shadow">
-                <h4 className="font-medium text-gray-700">GA Attainment</h4>
-                <p className="text-2xl font-bold text-blue-600">82.3%</p>
-              </div>
-              <div className="bg-white p-4 rounded-lg shadow">
-                <h4 className="font-medium text-gray-700">Overall Score</h4>
-                <p className="text-2xl font-bold text-purple-600">80.4%</p>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {activeTab === 'reports' && (
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <h3 className="text-lg font-semibold mb-4">OBE Reports</h3>
-            <div className="space-y-3">
-              <div className="bg-white p-4 rounded-lg shadow flex justify-between items-center">
-                <div>
-                  <h4 className="font-medium">CLO Attainment Report - Fall 2024</h4>
-                  <p className="text-sm text-gray-600">Generated on Dec 15, 2024</p>
-                </div>
-                <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                  Download
-                </button>
-              </div>
-              <div className="bg-white p-4 rounded-lg shadow flex justify-between items-center">
-                <div>
-                  <h4 className="font-medium">GA Assessment Report - Fall 2024</h4>
-                  <p className="text-sm text-gray-600">Generated on Dec 10, 2024</p>
-                </div>
-                <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                  Download
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* OBEReport */}
+      {activeTab === "reports" && selectedCourse && (
+      <OBEReport courseId={selectedCourse} />
+      )}
+      {activeTab === "attainment" && selectedCourse && (
+      <AttainmentAnalysis courseId={selectedCourse} />
+      )}
     </div>
   );
 };
