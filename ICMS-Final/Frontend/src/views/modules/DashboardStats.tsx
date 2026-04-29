@@ -1,6 +1,5 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-
 interface StatsProps {
   stats: {
     totalStudents: number;
@@ -10,11 +9,9 @@ interface StatsProps {
   };
   onNavigate?: (tab: 'students' | 'instructors' | 'hod' | 'admin-management') => void;
 }
-
 const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
   const cardBase =
     'bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300';
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
       <motion.button
@@ -37,7 +34,6 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
           </div>
         </div>
       </motion.button>
-
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}
@@ -58,7 +54,6 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
           </div>
         </div>
       </motion.button>
-
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}
@@ -79,7 +74,6 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
           </div>
         </div>
       </motion.button>
-
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}
@@ -103,5 +97,4 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
     </div>
   );
 };
-
 export default DashboardStats;

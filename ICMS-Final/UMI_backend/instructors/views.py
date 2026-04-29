@@ -13,6 +13,9 @@ from .permissions import IsAdminOrReadOnly, CanViewInstructors
 from register.access_control import can_access_department, get_user_assigned_department_id, is_department_scoped_admin
 from rbac.permissions import HasRBACPermission
 from rbac.services import user_has_permission
+from register.multi_role_service import MultiRoleService
+from coordinators.models import Coordinator
+from hods.models import HOD
 
 logger = logging.getLogger(__name__)
 
@@ -29,18 +32,56 @@ class InstructorViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), CanViewInstructors()]
         return [IsAuthenticated(), HasRBACPermission()]
 
+    def _sync_acting_instructor_profiles(self, department_id=None):
+        """
+        Ensure HOD/Coordinator users with can_act_as_instructor=True
+        have an Instructor profile so they appear in Instructor listings.
+        """
+        coordinator_qs = Coordinator.objects.filter(can_act_as_instructor=True).select_related('user', 'department')
+        hod_qs = HOD.objects.filter(can_act_as_instructor=True).select_related('user', 'department')
+
+        if department_id:
+            coordinator_qs = coordinator_qs.filter(department_id=department_id)
+            hod_qs = hod_qs.filter(department_id=department_id)
+
+        for coordinator in coordinator_qs:
+            user = getattr(coordinator, 'user', None)
+            if not user or hasattr(user, 'instructor_profile'):
+                continue
+            try:
+                MultiRoleService.enable_instructor_role_for_coordinator(user)
+            except Exception as exc:
+                logger.warning("Failed syncing coordinator as instructor for user=%s: %s", user.id, exc)
+
+        for hod in hod_qs:
+            user = getattr(hod, 'user', None)
+            if not user or hasattr(user, 'instructor_profile'):
+                continue
+            try:
+                MultiRoleService.enable_instructor_role_for_hod(user)
+            except Exception as exc:
+                logger.warning("Failed syncing HOD as instructor for user=%s: %s", user.id, exc)
+
     def get_queryset(self):
         # Show all instructors, including those who are also coordinators
         queryset = Instructor.objects.all()
         user = self.request.user
+        scope_department_id = None
+
         if hasattr(user, 'coordinator_profile') and user.coordinator_profile and user.coordinator_profile.department:
-            queryset = queryset.filter(department=user.coordinator_profile.department)
+            scope_department_id = user.coordinator_profile.department_id
+            queryset = queryset.filter(department_id=scope_department_id)
         elif hasattr(user, 'hod_profile') and user.hod_profile and user.hod_profile.department:
-            queryset = queryset.filter(department=user.hod_profile.department)
+            scope_department_id = user.hod_profile.department_id
+            queryset = queryset.filter(department_id=scope_department_id)
         if is_department_scoped_admin(self.request.user):
             assigned_department_id = get_user_assigned_department_id(self.request.user)
-            queryset = queryset.filter(department_id=assigned_department_id)
-        return queryset
+            if assigned_department_id:
+                scope_department_id = assigned_department_id
+                queryset = queryset.filter(department_id=assigned_department_id)
+
+        self._sync_acting_instructor_profiles(scope_department_id)
+        return queryset.order_by('name')
 
     def create(self, request, *args, **kwargs):
         try:

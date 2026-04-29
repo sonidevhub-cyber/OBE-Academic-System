@@ -4,10 +4,34 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from .models import Timetable, Course, Department, Semester
 from instructors.models import Instructor
+from students.models import Student
 from register.models import User
 from hods.models import HODRegistrationRequest, HOD
 from django.db.models import Count
 from django.utils import timezone
+
+
+def _resolve_hod_department(hod_user):
+    """Resolve the department for an authenticated HOD-style user."""
+    hod_department = None
+    hod_profile = HOD.objects.filter(user=hod_user, is_active=True).first()
+    if hod_profile:
+        return hod_profile.department
+
+    try:
+        hod_instructor = Instructor.objects.get(user=hod_user)
+        hod_department = hod_instructor.department
+    except Instructor.DoesNotExist:
+        try:
+            hod_request = HODRegistrationRequest.objects.get(
+                employee_id=hod_user.username,
+                hod_request_status='account_created'
+            )
+            hod_department = hod_request.department
+        except HODRegistrationRequest.DoesNotExist:
+            return None
+
+    return hod_department
 
 class HODDashboardView(APIView):
     """
@@ -19,27 +43,9 @@ class HODDashboardView(APIView):
         """Get HOD dashboard data"""
         hod_user = request.user
 
-        # Get HOD's department - prefer HOD profile, fallback to instructor or request
-        hod_department = None
-        hod_profile = HOD.objects.filter(user=hod_user, is_active=True).first()
-        if hod_profile:
-            hod_department = hod_profile.department
-        else:
-            try:
-                hod_instructor = Instructor.objects.get(user=hod_user)
-                hod_department = hod_instructor.department
-            except Instructor.DoesNotExist:
-                try:
-                    hod_request = HODRegistrationRequest.objects.get(
-                        employee_id=hod_user.username,
-                        hod_request_status='account_created'
-                    )
-                    hod_department = hod_request.department
-                except HODRegistrationRequest.DoesNotExist:
-                    return Response({'error': 'HOD profile not found'}, status=status.HTTP_404_NOT_FOUND)
-
+        hod_department = _resolve_hod_department(hod_user)
         if not hod_department:
-            return Response({'error': 'HOD department not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'HOD profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
         # Get statistics
         courses = Course.objects.select_related('semester__department').filter(
@@ -131,6 +137,42 @@ class HODDashboardView(APIView):
                 'email': hod_user.email,
                 'role': hod_user.role
             }
+        }, status=status.HTTP_200_OK)
+
+
+class HODStudentsView(APIView):
+    """
+    HOD department student listing used by the dashboard.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        hod_department = _resolve_hod_department(request.user)
+        if not hod_department:
+            return Response({'error': 'HOD department not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        queryset = Student.objects.select_related('department', 'semester', 'user').filter(
+            semester__department=hod_department
+        ).order_by('name')
+
+        semester_id = request.GET.get('semester_id')
+        if semester_id:
+            queryset = queryset.filter(semester__semester_id=semester_id)
+
+        students_data = []
+        for student in queryset:
+            students_data.append({
+                'id': student.id,
+                'name': student.name,
+                'student_id': student.student_id,
+                'email': student.email,
+                'semester_name': student.semester.name if student.semester else 'N/A',
+                'department_name': student.department.name if student.department else 'N/A',
+            })
+
+        return Response({
+            'students': students_data,
+            'count': len(students_data),
         }, status=status.HTTP_200_OK)
 
 

@@ -12,8 +12,9 @@ import AnalyticsModule from '../modules/AnalyticsModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import Timetable from '../../components/timetable/Timetable';
 import { getProfileImageUrl } from '../../utils/profileHelpers';
+import DateSheetModule from '../modules/DateSheetModule';
 
-type TabId = 'Dashboard' | 'Results' | 'Attendance' | 'Timetable' | 'Events' | 'Announcements' | 'Profile' | 'Feedback';
+type TabId = 'Dashboard' | 'Results' | 'Attendance' | 'Timetable' | 'DateSheet' | 'Events' | 'Announcements' | 'Profile' | 'Feedback';
 
 const ModularStudentDashboard: React.FC = () => {
   const [studentData, setStudentData] = useState<any>(null);
@@ -29,6 +30,7 @@ const ModularStudentDashboard: React.FC = () => {
     { name: 'Results', icon: <GraduationCap size={18} /> },
     { name: 'Attendance', icon: <CalendarDays size={18} /> },
     { name: 'Timetable', icon: <CalendarDays size={18} /> },
+    { name: 'DateSheet', icon: <CalendarDays size={18} /> },
     { name: 'Feedback', icon: <Bell size={18} /> },
     { name: 'Events', icon: <Megaphone size={18} /> },
     { name: 'Announcements', icon: <Bell size={18} /> },
@@ -66,6 +68,8 @@ const ModularStudentDashboard: React.FC = () => {
         return <AttendanceModule token={token} userType="student" darkMode={darkMode} />;
       case 'Timetable':
         return <Timetable darkMode={darkMode} />;
+      case 'DateSheet':
+        return <DateSheetModule role="student" />;
       case 'Announcements':
         return <AnnouncementModule token={token} canCreate={false} />;
       case 'Events':

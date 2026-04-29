@@ -17,6 +17,11 @@ const ModularPrincipalDashboard: React.FC = () => {
   const navigate = useNavigate();
 
   const token = JSON.parse(localStorage.getItem("auth") || "{}")?.access_token;
+  const authData = JSON.parse(localStorage.getItem("auth") || "{}");
+  const canManageAnnouncements = Boolean(
+    authData?.permissions?.includes('manage_announcements') ||
+    authData?.user?.permissions?.includes?.('manage_announcements')
+  );
 
   const stats = {
     totalStudents: 512,
@@ -53,7 +58,7 @@ const ModularPrincipalDashboard: React.FC = () => {
       case 'Events':
         return <EventsModule token={token} userType="principal" canApprove={true} />;
       case 'Announcements':
-        return <AnnouncementModule token={token} canCreate={true} />;
+        return <AnnouncementModule token={token} canCreate={canManageAnnouncements} />;
       case 'Teachers':
         return (
           <div className="bg-white p-6 rounded-2xl shadow-lg">

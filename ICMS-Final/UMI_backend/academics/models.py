@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from datetime import date
 
@@ -398,3 +399,112 @@ class StudentAcademicHistory(models.Model):
 
     def __str__(self):
         return f"{self.student.name} - {self.semester.name} - GPA: {self.gpa}, CGPA: {self.cgpa}"
+
+
+# ---------- DateSheet Module ----------
+class DateSheet(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_PENDING, "Pending Approval"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    datesheet_id = models.AutoField(primary_key=True)
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="datesheets")
+    semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name="datesheets")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_datesheets")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    review_comment = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_datesheets",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"DateSheet {self.datesheet_id} - {self.department.name} - {self.semester.name}"
+
+
+class DateSheetItem(models.Model):
+    EXAM_MID = "Mid"
+    EXAM_FINAL = "Final"
+    EXAM_TYPE_CHOICES = [
+        (EXAM_MID, "Mid"),
+        (EXAM_FINAL, "Final"),
+    ]
+
+    datesheet_item_id = models.AutoField(primary_key=True)
+    datesheet = models.ForeignKey(DateSheet, on_delete=models.CASCADE, related_name="items")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="datesheet_items")
+    exam_date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    exam_type = models.CharField(max_length=10, choices=EXAM_TYPE_CHOICES, default=EXAM_MID)
+
+    class Meta:
+        ordering = ["exam_date", "start_time"]
+        unique_together = ["datesheet", "course", "exam_date", "start_time"]
+
+    def __str__(self):
+        return f"{self.course.name} - {self.exam_date} {self.start_time}-{self.end_time}"
+
+
+class StudentEligibility(models.Model):
+    eligibility_id = models.AutoField(primary_key=True)
+    datesheet = models.ForeignKey(DateSheet, on_delete=models.CASCADE, related_name="eligibility_records")
+    student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="datesheet_eligibility")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="datesheet_eligibility")
+    semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name="datesheet_eligibility")
+    attendance_percentage = models.FloatField(default=0)
+    is_eligible = models.BooleanField(default=False)
+    overridden_by_hod = models.BooleanField(default=False)
+    hod_reason = models.TextField(blank=True)
+    overridden_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="eligibility_overrides",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["student__name", "course__name"]
+        unique_together = ["datesheet", "student", "course"]
+
+    def __str__(self):
+        return f"{self.student.name} - {self.course.name} ({self.attendance_percentage}%)"
+
+
+class DateSheetNotification(models.Model):
+    notification_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="datesheet_notifications")
+    datesheet = models.ForeignKey(DateSheet, on_delete=models.CASCADE, related_name="notifications")
+    message = models.CharField(max_length=255)
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ["user", "datesheet", "message"]
+
+    def __str__(self):
+        return f"Notification for {self.user.username} - {self.message}"

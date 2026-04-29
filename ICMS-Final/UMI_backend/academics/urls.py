@@ -8,7 +8,8 @@ from .views import (
 )
 from students.views import StudentDashboardView
 from .viewsets import DepartmentViewSet, SemesterViewSet, CourseViewSet
-from .hod_views import HODTimetableView, HODDashboardView, HODAnalyticsView
+from .datesheet_views import DateSheetViewSet, StudentEligibilityViewSet, DateSheetNotificationViewSet
+from .hod_views import HODTimetableView, HODDashboardView, HODAnalyticsView, HODStudentsView
 from .class_management_views import ClassFormDataView, FilteredDataView
 from .simple_data_view import SimpleDataView
 from attendance.views import (
@@ -41,6 +42,9 @@ router = DefaultRouter()
 router.register(r'departments', DepartmentViewSet)
 router.register(r'semesters', SemesterViewSet)
 router.register(r'courses', CourseViewSet)
+router.register(r'datesheets', DateSheetViewSet, basename='datesheet')
+router.register(r'datesheet-eligibility', StudentEligibilityViewSet, basename='datesheet-eligibility')
+router.register(r'datesheet-notifications', DateSheetNotificationViewSet, basename='datesheet-notifications')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -61,6 +65,7 @@ urlpatterns = [
     # HOD Dashboard and Timetable
     path("hod/test/", TestHODView.as_view(), name="hod-test"),
     path("hod/dashboard/", HODDashboardView.as_view(), name="hod-dashboard"),
+    path("hod/students/", HODStudentsView.as_view(), name="hod-students"),
     path("hod/analytics/", HODAnalyticsView.as_view(), name="hod-analytics"),
     path("hod/timetable/", HODTimetableView.as_view(), name="hod-timetable"),
     path("hod/timetable/<int:timetable_id>/", HODTimetableView.as_view(), name="hod-timetable-detail"),

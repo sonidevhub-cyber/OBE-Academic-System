@@ -12,6 +12,14 @@ from hods.models import HOD
 from register.multi_role_service import MultiRoleService
 from register.identifiers import generate_employee_id
 
+def _is_hod_user(user):
+    if hasattr(user, 'hod_profile'):
+        return True
+    current_role = user.get_current_role() if hasattr(user, 'get_current_role') else getattr(user, 'role', None)
+    if current_role == 'hod' or getattr(user, 'role', None) == 'hod':
+        return True
+    return HOD.objects.filter(user=user).exists()
+
 class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     queryset = Coordinator.objects.all()
     serializer_class = CoordinatorSerializer
@@ -23,9 +31,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         print(f"\n=== DEPARTMENT COORDINATORS DEBUG ===")
         print(f"User: {request.user.username}, Role: {request.user.role}")
         
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             print(f"Access denied - user role is {request.user.role}, not hod")
             return Response({'error': 'Only HOD can view coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
@@ -90,9 +96,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def inactive_coordinators(self, request):
         """Get only inactive coordinators for HOD's department"""
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can view coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -180,9 +184,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
         })
     
     def get_queryset(self):
-        if self.request.user.has_role('hod') if hasattr(self.request.user, 'has_role') else self.request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(self.request.user):
             return Coordinator.objects.none()
         
         try:
@@ -198,9 +200,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def promote_instructor_to_coordinator(self, request):
         """HOD promotes an instructor to coordinator"""
-        if request.user.has_role('hod') if hasattr(request.user, 'has_role') else request.user.role == 'hod':
-            pass
-        else:
+        if not _is_hod_user(request.user):
             return Response({'error': f'Only HOD can promote instructors. Your role: {request.user.role}'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -281,7 +281,7 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def create_new_coordinator(self, request):
         """HOD creates a new coordinator directly"""
-        if request.user.role != 'hod':
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can create coordinators'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -467,12 +467,31 @@ class HODCoordinatorManagementViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def department_instructors(self, request):
         """Get all instructors for HOD"""
-        if request.user.role != 'hod':
+        if not _is_hod_user(request.user):
             return Response({'error': 'Only HOD can view instructors'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
         try:
             hod = HOD.objects.get(user=request.user)
+            # Keep instructor records in sync for department users who can act as instructor.
+            # This guarantees visibility in instructor tabs for HOD/Coordinator dual-role users.
+            for dept_hod in HOD.objects.filter(department=hod.department, can_act_as_instructor=True).select_related('user'):
+                if dept_hod.user and not hasattr(dept_hod.user, 'instructor_profile'):
+                    try:
+                        MultiRoleService.enable_instructor_role_for_hod(dept_hod.user)
+                    except Exception:
+                        pass
+
+            for dept_coordinator in Coordinator.objects.filter(
+                department=hod.department,
+                can_act_as_instructor=True,
+            ).select_related('user'):
+                if dept_coordinator.user and not hasattr(dept_coordinator.user, 'instructor_profile'):
+                    try:
+                        MultiRoleService.enable_instructor_role_for_coordinator(dept_coordinator.user)
+                    except Exception:
+                        pass
+
             # Get all instructors in the department (including those who are coordinators)
             instructors = Instructor.objects.filter(department=hod.department).select_related('user')
             
