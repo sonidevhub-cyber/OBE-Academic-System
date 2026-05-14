@@ -362,7 +362,7 @@ const StudentDashboard: React.FC = () => {
                 }`}
               >
                 <h3 className="text-lg font-semibold mb-3 text-blue-600">
-                  AI Performance Insight 🤖
+                  Performance 
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-300 leading-relaxed">
                   {aiFeedback}

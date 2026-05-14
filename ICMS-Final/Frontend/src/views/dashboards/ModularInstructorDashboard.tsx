@@ -3,10 +3,11 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAllocations } from '../../context/AllocationContext';
-import InstructorOBEModule from '../modules/InstructorOBEModule';
+import OBEModule from '../modules/OBEModule';
 import InstructorTimetable from '../../components/InstructorTimetable';
 import InstructorAttendanceDashboard from '../../components/attendance/InstructorAttendanceDashboard';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
+import MyCoursesModule from '../modules/MyCoursesModule';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
@@ -27,6 +28,7 @@ const ModularInstructorDashboard: React.FC = () => {
   );
   const instructorCourses = getInstructorAllocations(currentInstructorId);
 
+<<<<<<< HEAD
   useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'instructor');
@@ -55,10 +57,13 @@ const ModularInstructorDashboard: React.FC = () => {
   const handleViewCourseDetails = (course: any) => {
   navigate(`/teacher/course-details/${course.allocation_id}`);
 };
+=======
+  
+>>>>>>> 6fd3ad6 (obe updated)
 
   const handleManageClass = (course: any) => {
-    alert(`Managing class for ${course.course_name}`);
-  };
+  navigate(`/manage-class/${course.allocation_id}`);
+};
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -169,7 +174,7 @@ const ModularInstructorDashboard: React.FC = () => {
                 <div className="border-t border-blue-200 pt-4">
                   <div className="flex gap-2">
                     <button 
-                      onClick={() => handleViewCourseDetails(course)}
+                      onClick={() => setActiveTab('courses')}
                       className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                     >
                       View Details
@@ -289,7 +294,7 @@ const ModularInstructorDashboard: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case 'courses':
-        return renderMyCourses();
+        return <MyCoursesModule />;
       case 'dashboard':
         return renderDashboard();
       case 'attendance':
@@ -297,7 +302,7 @@ const ModularInstructorDashboard: React.FC = () => {
       case 'schedule':
         return <InstructorTimetable instructorId={currentInstructorId.toString()} darkMode={false} />;
       case 'obe':
-        return <InstructorOBEModule instructorId={currentInstructorId} />;
+        return <OBEModule departmentId={currentUser?.department_id || 0} />;
       default:
         return renderDashboard();
     }
