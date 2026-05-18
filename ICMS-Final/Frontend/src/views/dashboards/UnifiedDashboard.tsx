@@ -11,8 +11,6 @@ import RoleSwitcher from '../../components/RoleSwitcher';
 import ProfileModule from '../modules/ProfileModule';
 import AttendanceModule from '../modules/AttendanceModule';
 import AnnouncementModule from '../modules/AnnouncementModule';
-import TimetableModule from '../modules/TimetableModule';
-import ResultsModule from '../modules/ResultsModule';
 import AnalyticsModule from '../modules/AnalyticsModule';
 
 type TabId = 'dashboard' | 'schedule' | 'attendance' | 'results' | 'announcements' | 'profile';
@@ -177,12 +175,6 @@ const UnifiedDashboard: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <AnalyticsModule token={token} userType={currentRole === 'coordinator' ? 'instructor' : currentRole as "student" | "admin" | "instructor" | "hod"} />;
-      case 'schedule':
-        return <TimetableModule token={token} />;
-      case 'attendance':
-        return <AttendanceModule token={token} userType={currentRole === 'coordinator' ? 'instructor' : currentRole as "student" | "instructor"} canMark={true} />;
-      case 'results':
-        return <ResultsModule token={token} />;
       case 'announcements':
         return <AnnouncementModule token={token} canCreate={hasPermission('manage_announcements')} />;
       case 'profile':

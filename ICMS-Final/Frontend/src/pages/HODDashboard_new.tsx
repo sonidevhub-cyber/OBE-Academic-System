@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { instructorService } from '../api/studentInstructorService';
 import { coordinatorService } from '../api/coordinatorService';
-import TimetableManagement from '../components/TimetableManagement';
 import { FeedbackViewer, NotificationBell, NotificationToast } from '../components/feedback';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAllocations } from '../context/AllocationContext';

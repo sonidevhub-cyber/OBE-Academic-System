@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { coordinatorService } from '../api/coordinatorService';
+import { useAuth } from './AuthContext';
 
 interface CourseAllocation {
   allocation_id: number;
@@ -34,6 +35,7 @@ interface AllocationContextType {
 const AllocationContext = createContext<AllocationContextType | undefined>(undefined);
 
 export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { currentUser, loading: authLoading } = useAuth();
   const [allocations, setAllocations] = useState<CourseAllocation[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -41,8 +43,15 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
     try {
       setLoading(true);
       const response = await coordinatorService.getCourseAllocations();
-      if (response.data) {
-        setAllocations(response.data || []);
+      // Ensure we are setting an array even if the response is not as expected
+      const data = response.data;
+      if (Array.isArray(data)) {
+        setAllocations(data);
+      } else if (data && typeof data === 'object' && 'results' in data && Array.isArray((data as any).results)) {
+        setAllocations((data as any).results);
+      } else {
+        console.warn('Expected array for allocations, received:', data);
+        setAllocations([]);
       }
     } catch (error) {
       console.error('Error fetching allocations:', error);
@@ -54,8 +63,10 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    fetchAllocations();
-  }, []);
+    if (currentUser && !authLoading) {
+      fetchAllocations();
+    }
+  }, [currentUser, authLoading]);
 
   const addAllocation = (allocation: CourseAllocation) => {
     setAllocations(prev => [...prev, allocation]);

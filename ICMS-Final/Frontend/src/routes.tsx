@@ -8,22 +8,19 @@ import { useAuth } from './context/AuthContext';
 import AdminDashboard from './roles/admin/AdminDashboard';
 import StudentDashboard from './roles/student/StudentDashboard';
 import StudentProfile from './components/ui/EnhancedStudentProfile';
-import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
-import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
-import ModularHODDashboard from './roles/hod/HODDashboard';
-import PrincipalDashboardComponent from './roles/principal/PrincipalDashboard';
-
-import ResultManagement from './views/pages/ResultManagement';
-import ProfessionalResultManagement from './views/pages/ResultManagement';
-import EventManagement from './views/pages/EventManagement';
-// import CourseDetails from 'views/pages/CourseDetails';
-import CreateEvent from "./views/pages/CreateEvent";
-import ActiveHODRecordsPage from './pages/ActiveHODRecordsPage';
+import ModularInstructorDashboard from './views/dashboards/ModularInstructorDashboard';
+import ModularCoordinatorDashboard from './views/dashboards/ModularCoordinatorDashboard';
+import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
+import SacProgramSetup from './views/pages/SacProgramSetup';
+import Batches from './views/pages/Batches';
+import ManagePromotion from './views/pages/ManagePromotion';
+import PendingTransfers from './views/pages/PendingTransfers';
+import Users from './pages/sac/Users';
+import TeacherManagement from './views/pages/TeacherManagement';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
-import DateSheetPage from "./pages/DateSheetModule";
 
 
 //import TransportManagement from './components/pages/TransportManagement';
@@ -88,7 +85,6 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />
         <Route path="/student-dashboard" element={<Navigate to="/student" />} />
-        <Route path="/student/datesheet" element={<DateSheetPage />} />
       </Route>
       
       {/* Student Profile Route - accessible by multiple roles */}
@@ -106,28 +102,26 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['coordinator']} />}>
         <Route path="/coordinator" element={<ModularCoordinatorDashboard />} />
         <Route path="/coordinator-dashboard" element={<Navigate to="/coordinator" />} />
-        <Route path="/coordinator/datesheet" element={<DateSheetPage />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['hod']} />}>
         <Route path="/hod" element={<ModularHODDashboard />} />
         <Route path="/hod-dashboard" element={<Navigate to="/hod" />} />
-        <Route path="/hod/datesheet" element={<DateSheetPage />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin-dashboard" element={<Navigate to="/admin" />} />
+        <Route path="/sac/programs" element={<SacProgramSetup />} />
+        <Route path="/sac/programs/:programId/batches" element={<Batches />} />
+        <Route path="/sac/programs/:programId/batches/:batchId/promotion" element={<ManagePromotion />} />
+        <Route path="/sac/users" element={<Users />} />
+        <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
       </Route>
       <Route element={<ProtectedRoute allowedRoles={['principal']} />}>
-  <Route path="/principal" element={<PrincipalDashboardComponent />} />
 </Route>
        <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}>
-  <Route path="/event-management" element={<EventManagement />} />
-  <Route path="/active-hod-records" element={<ActiveHODRecordsPage />} />
 </Route>
-{/* events */}
-      <Route path="/create-event" element={<CreateEvent />} />
       
       {/* Fallback route */}
       <Route path="*" element={<Navigate to="/login" />} />

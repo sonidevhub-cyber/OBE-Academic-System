@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { instructorService, departmentService, Instructor, Department } from '../../api/studentInstructorService';
+
+// Extension of Instructor interface to include user information if needed locally
+// Note: Ideally this should be updated in the service file
+interface InstructorWithUser extends Instructor {
+  user?: any;
+}
 import InstructorModal from '../../components/ui/modals/InstructorModal';
 import InstructorProfileModal from '../../components/ui/modals/InstructorProfileModal';
 
@@ -15,14 +21,14 @@ interface TeacherManagementProps {
 }
 
 const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [instructors, setInstructors] = useState<InstructorWithUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState<boolean>(false);
-  const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(null);
+  const [editingInstructor, setEditingInstructor] = useState<InstructorWithUser | null>(null);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
-  const [viewingInstructor, setViewingInstructor] = useState<Instructor | null>(null);
+  const [viewingInstructor, setViewingInstructor] = useState<InstructorWithUser | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
 
@@ -60,11 +66,11 @@ const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
     }
   }, [activeTab, fetchInstructors, fetchDepartments]);
 
-  const handleInstructorDelete = useCallback(async (instructorId: number) => {
+  const handleInstructorDelete = useCallback(async (instructorId: string | number) => {
     if (window.confirm('Are you sure you want to delete this instructor?')) {
       try {
         await instructorService.deleteInstructor(instructorId);
-        setInstructors(prev => prev.filter(instructor => instructor.id !== instructorId));
+        setInstructors(prev => prev.filter(instructor => String(instructor.id) !== String(instructorId)));
       } catch (err: any) {
         setError(err.response?.data?.message || 'Failed to delete instructor');
       }
@@ -251,8 +257,9 @@ const TeacherManagement: React.FC<TeacherManagementProps> = ({ activeTab }) => {
                             </div>
                           )}
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{instructor.name || 'N/A'}</div>
+                        <div className="ml-4 min-w-0 flex-1">
+                          <div className="text-sm font-medium text-gray-900 truncate">{instructor.name || 'N/A'}</div>
+                          <div className="text-sm text-gray-500 truncate">ID: {instructor.custom_id || instructor.id}</div>
                           <div className="text-sm text-gray-500">{(() => {
                             // Try multiple possible email sources
                             let email = null;

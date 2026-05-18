@@ -1,6 +1,5 @@
 import React from 'react';
 import { AuthProvider } from './context/AuthContext';
-import { DepartmentProvider } from './context/DepartmentContext';
 import { AllocationProvider } from './context/AllocationContext';
 import AppRoutes from './routes';
 
@@ -14,11 +13,9 @@ const App = () => {
       <SmoothScroll />
 
       <AuthProvider>
-        <DepartmentProvider>
-          <AllocationProvider>
-            <AppRoutes />
-          </AllocationProvider>
-        </DepartmentProvider>
+        <AllocationProvider>
+          <AppRoutes />
+        </AllocationProvider>
       </AuthProvider>
     </>
   );

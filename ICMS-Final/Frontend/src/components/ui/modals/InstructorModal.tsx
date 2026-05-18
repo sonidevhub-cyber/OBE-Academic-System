@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { instructorService, departmentService } from '../../../api/studentInstructorService';
+import { instructorService, departmentService, Instructor } from '../../../api/studentInstructorService';
+import { getFullImageUrl } from '../../../utils/imageHelpers';
 
 interface InstructorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  instructorId?: number;
+  instructorId?: string | number;
   onSuccess: () => void;
 }
 
@@ -165,28 +166,29 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
       }
 
       // Prepare data for submission
-      let dataToSend: FormData | any;
+      let dataToSend: FormData | Instructor;
       
       // Use FormData only if we have a new image file
       if (imageFile && imageFile instanceof File) {
-        dataToSend = new FormData();
+        const formDataObj = new FormData();
         
         // Add all form fields
-        dataToSend.append('name', formData.name);
-        dataToSend.append('user_email', formData.email);
-        dataToSend.append('phone', formData.phone);
-        dataToSend.append('department_id', formData.department_id);
-        dataToSend.append('employment_type', formData.employment_type);
+        formDataObj.append('name', formData.name);
+        formDataObj.append('user_email', formData.email);
+        formDataObj.append('phone', formData.phone);
+        formDataObj.append('department_id', formData.department_id);
+        formDataObj.append('employment_type', formData.employment_type);
         
-        if (formData.designation) dataToSend.append('designation', formData.designation);
-        if (formData.specialization) dataToSend.append('specialization', formData.specialization);
-        if (formData.experience_years) dataToSend.append('experience_years', formData.experience_years);
-        if (formData.hire_date) dataToSend.append('hire_date', formData.hire_date);
-        if (formData.address) dataToSend.append('address', formData.address);
-        if (formData.password) dataToSend.append('password', formData.password);
+        if (formData.designation) formDataObj.append('designation', formData.designation);
+        if (formData.specialization) formDataObj.append('specialization', formData.specialization);
+        if (formData.experience_years) formDataObj.append('experience_years', formData.experience_years);
+        if (formData.hire_date) formDataObj.append('hire_date', formData.hire_date);
+        if (formData.address) formDataObj.append('address', formData.address);
+        if (formData.password) formDataObj.append('password', formData.password);
         
         // Add the new image file
-        dataToSend.append('image', imageFile);
+        formDataObj.append('image', imageFile);
+        dataToSend = formDataObj;
       } else {
         // Use regular JSON data when no image is being uploaded
         dataToSend = {
@@ -201,7 +203,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
           ...(formData.hire_date && { hire_date: formData.hire_date }),
           ...(formData.address && { address: formData.address }),
           ...(formData.password && { password: formData.password })
-        };
+        } as Instructor;
       }
 
       console.log('Data to send:', dataToSend);
@@ -211,7 +213,7 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
         // For updates, handle image separately if present
         if (imageFile && imageFile instanceof File) {
           // First update instructor data without image
-          const instructorDataWithoutImage = {
+          const instructorDataWithoutImage: Instructor = {
             name: formData.name,
             user_email: formData.email,
             phone: formData.phone,
@@ -295,7 +297,11 @@ const InstructorModal: React.FC<InstructorModalProps> = ({ isOpen, onClose, inst
                   <div className="flex flex-col items-center">
                     <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden mb-2">
                       {imagePreview ? (
-                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                        <img 
+                          src={imagePreview.startsWith('blob:') ? imagePreview : (getFullImageUrl(imagePreview) || imagePreview)} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover" 
+                        />
                       ) : (
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

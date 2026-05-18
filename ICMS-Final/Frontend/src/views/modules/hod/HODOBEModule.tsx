@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../../../api/api';
 import CLOGAMappingMatrix from '../../../components/obe/CLOGAMappingMatrix';
-import obeService from '../../../api/obeService';
+import { obeService, GA } from '../../../api/obeService';
+
+import { toast } from 'react-toastify';
 
 interface Props {
   departmentId: number;
@@ -8,7 +11,7 @@ interface Props {
 
 const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [gas, setGas] = useState([]);
+  const [gas, setGas] = useState<GA[]>([]);
   const [courses, setCourses] = useState([]);
   const [attainmentData, setAttainmentData] = useState({
     avgCLO: 0,
@@ -30,8 +33,14 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
 
   const loadDepartmentData = async () => {
     try {
-      const gaData = await obeService.getGraduateAttributes(departmentId);
-      setGas(gaData);
+      if (departmentId) {
+        const programResponse = await api.get(`/programs/?department_id=${departmentId}`);
+        if (programResponse.data.length > 0) {
+          const programId = programResponse.data[0].id;
+          const gaResponse = await obeService.getGAs(programId);
+          setGas(gaResponse.data);
+        }
+      }
       
       // Mock attainment data
       setAttainmentData({
@@ -45,24 +54,38 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
     }
   };
 
-  const GAManagement = () => {
-    const [newGA, setNewGA] = useState({
-      code: '',
-      title: '',
-      description: ''
-    });
+    const GAManagement = () => {
+      const [newGA, setNewGA] = useState<Omit<GA, 'id' | 'program' | 'created_at'>>({
+        code: '',
+        title: '',
+        description: '',
+        order_number: 1,
+        is_active: true,
+      });
+
 
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-        await obeService.createGA({
-          ...newGA,
-          department: departmentId
-        });
-        setNewGA({ code: '', title: '', description: '' });
-        loadDepartmentData();
+        if (departmentId) {
+          const programResponse = await api.get(`/programs/?department_id=${departmentId}`);
+          if (programResponse.data.length > 0) {
+            const programId = programResponse.data[0].id;
+                        await obeService.createGA(programId, newGA);
+            setNewGA({
+              code: '',
+              title: '',
+              description: '',
+              order_number: 1,
+              is_active: true,
+            });
+            loadDepartmentData();
+            toast.success('Graduate Attribute created successfully!');
+          }
+        }
       } catch (error) {
-        console.error('Failed to create GA:', error);
+                console.error('Failed to create GA:', error);
+        toast.error('Failed to create Graduate Attribute.');
       }
     };
 
@@ -76,10 +99,11 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
                 type="text"
                 placeholder="GA Code (e.g., GA1)"
                 value={newGA.code}
-                onChange={(e) => setNewGA({...newGA, code: e.target.value})}
+                onChange={(e) => setNewGA({ ...newGA, code: e.target.value })}
                 className="px-3 py-2 border rounded-md"
                 required
               />
+
               <input
                 type="text"
                 placeholder="GA Title"
@@ -263,7 +287,7 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
       <div>
         {activeTab === 'overview' && <OverviewDashboard />}
         {activeTab === 'gas' && <GAManagement />}
-        {activeTab === 'mapping' && <CLOGAMappingMatrix departmentId={departmentId} />}
+        {activeTab === 'mapping' && <CLOGAMappingMatrix />}
         {activeTab === 'reports' && <ReportsSection />}
       </div>
     </div>

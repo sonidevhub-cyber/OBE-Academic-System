@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { coordinatorService } from '../api/coordinatorService';
-import CoordinatorTimetableModule from '../views/modules/CoordinatorTimetableModule';
-import CoordinatorAttendanceDashboard from '../components/attendance/CoordinatorAttendanceDashboard';
 import RoleSwitchButton from '../components/RoleSwitchButton';
 
 type TabId = 'dashboard' | 'timetable' | 'attendance' | 'courses' | 'instructors' | 'proposals';
@@ -258,10 +256,6 @@ const CoordinatorDashboard = () => {
     switch (activeTab) {
       case 'dashboard':
         return renderDashboard();
-      case 'timetable':
-        return <CoordinatorTimetableModule />;
-      case 'attendance':
-        return <CoordinatorAttendanceDashboard />;
       case 'courses':
         return (
           <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6">

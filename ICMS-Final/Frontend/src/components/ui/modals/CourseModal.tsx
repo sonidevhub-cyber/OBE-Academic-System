@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { departmentService, courseService } from '../../../api/apiService';
-import obeService from '../../../api/obeService';
+import { obeService } from '../../../api/obeService';
+import { toast } from 'react-toastify';
 
 interface CourseModalProps {
   isOpen: boolean;
@@ -10,6 +11,8 @@ interface CourseModalProps {
   preSelectedDepartment?: number;
   preSelectedSemester?: number;
   canDefineCLO?: boolean;
+  programId?: number;
+  batchId?: number;
 }
 
 interface Department {
@@ -39,10 +42,12 @@ interface CLOInput {
 }
 
 interface GAOption {
-  id: number;
-  code: string;
-  description: string;
+  id: string;
+  title?: string;
+  code?: string;
+  description?: string;
 }
+
 
 interface MappingInput {
   clo_number: number;
@@ -57,7 +62,9 @@ const CourseModal: React.FC<CourseModalProps> = ({
   editingCourse,
   preSelectedDepartment,
   preSelectedSemester,
-  canDefineCLO = false
+  canDefineCLO = false,
+  programId,
+  batchId
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'clos' | 'mapping'>('details');
   const [formData, setFormData] = useState({
@@ -88,11 +95,11 @@ const CourseModal: React.FC<CourseModalProps> = ({
       if (preSelectedDepartment) {
         fetchSemesters(preSelectedDepartment);
       }
-      if (canDefineCLO) {
+      if (canDefineCLO && programId) {
         loadGraduateAttributes();
       }
     }
-  }, [isOpen, preSelectedDepartment]);
+  }, [isOpen, preSelectedDepartment, programId, canDefineCLO]);
 
   useEffect(() => {
     if (editingCourse) {
@@ -174,11 +181,13 @@ const CourseModal: React.FC<CourseModalProps> = ({
   };
 
   const loadGraduateAttributes = async () => {
+    if (!programId) return;
     try {
-      const data = await obeService.getGraduateAttributes();
-      setGaOptions(Array.isArray(data) ? data : data?.results || []);
+      const response = await obeService.getGAs(programId.toString());
+      setGaOptions(response.data.map(ga => ({ id: ga.id, title: ga.title })));
     } catch (error: any) {
       console.error('Error loading graduate attributes:', error);
+      toast.error(error.response?.data?.detail || 'Failed to load GAs');
     }
   };
 
@@ -204,7 +213,11 @@ const CourseModal: React.FC<CourseModalProps> = ({
   const addMapping = () => {
     setMappingInputs((prev) => [
       ...prev,
-      { clo_number: cloInputs[0]?.clo_number || 1, ga_id: gaOptions[0]?.id || 0, weightage: 1 }
+      {
+        clo_number: cloInputs[0]?.clo_number || 1,
+        ga_id: Number(gaOptions[0]?.id || 0) as number,
+        weightage: 1
+      }
     ]);
   };
 
@@ -265,6 +278,12 @@ const CourseModal: React.FC<CourseModalProps> = ({
     setLoading(true);
     setError(null);
 
+    if (canDefineCLO && (!programId || !batchId)) {
+      setError('Program and Batch must be selected to define CLOs.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const courseData = {
         ...formData,
@@ -277,44 +296,45 @@ const CourseModal: React.FC<CourseModalProps> = ({
       const response = await onSubmit(courseData);
       const courseId = response?.data?.course_id || response?.data?.id || response?.course_id || response?.id;
 
-      if (!editingCourse && canDefineCLO) {
+      if (courseId && !editingCourse && canDefineCLO && batchId) {
         const validCLOs = cloInputs.filter((clo) => clo.description.trim());
         if (validCLOs.length > 0) {
-          const createdCLOs = await Promise.all(
+          const createdCLOResponses = await Promise.all(
             validCLOs.map((clo) =>
-              obeService.createCLO({
-                course: courseId,
-                clo_number: clo.clo_number,
+              obeService.createCLO(courseId.toString(), batchId.toString(), {
                 description: clo.description,
-                bloom_level: clo.bloom_level
+                order_number: clo.clo_number
               })
             )
           );
 
           const cloIdByNumber = new Map<number, number>();
-          createdCLOs.forEach((clo: any) => {
-            if (clo?.clo_number && clo?.id) {
-              cloIdByNumber.set(clo.clo_number, clo.id);
+          createdCLOResponses.forEach((res: any) => {
+            const cloData = res.data;
+            if (cloData?.order_number && cloData?.id) {
+              cloIdByNumber.set(cloData.order_number, cloData.id);
             }
           });
 
           const validMappings = mappingInputs
             .filter((m) => m.ga_id && cloIdByNumber.has(m.clo_number))
             .map((m) => ({
-              clo: cloIdByNumber.get(m.clo_number) as number,
-              ga: Number(m.ga_id),
-              weightage: Number(m.weightage || 1)
+              clo_id: (cloIdByNumber.get(m.clo_number) as number).toString(),
+              ga_id: Number(m.ga_id).toString(),
+              weight: Number(m.weightage || 1)
             }));
 
           if (validMappings.length > 0) {
-            await obeService.bulkCreateCLOGAMappings({ mappings: validMappings });
+            await obeService.saveCLOGAMatrix(courseId.toString(), batchId.toString(), validMappings);
           }
         }
       }
 
       onClose();
     } catch (error: any) {
-      setError(error.message || 'Failed to save course');
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to save course';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }

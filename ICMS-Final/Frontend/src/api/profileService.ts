@@ -7,7 +7,8 @@ export type ProfileRole =
   | 'coordinator'
   | 'admin'
   | 'principal'
-  | 'super_admin';
+  | 'super_admin'
+  | 'SAC';
 
 const PROFILE_ENDPOINTS: Record<ProfileRole, string> = {
   student: 'students/profile/',
@@ -17,6 +18,7 @@ const PROFILE_ENDPOINTS: Record<ProfileRole, string> = {
   admin: 'admin/profile/',
   principal: 'principal/profile/',
   super_admin: 'admin/profile/',
+  SAC: 'admin/profile/',
 };
 
 export const getProfileEndpoint = (role?: string | null): string | null => {
@@ -33,3 +35,6 @@ export const fetchCurrentProfile = async (role?: string | null) => {
   return api.get(endpoint);
 };
 
+export const updateProfile = async (data: any) => {
+  return api.put('auth/users/profile/update/', data);
+};

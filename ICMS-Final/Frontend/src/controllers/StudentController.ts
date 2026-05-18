@@ -19,7 +19,7 @@ export class StudentController {
     }
   }
 
-  static async updateStudent(id: number, studentData: any) {
+  static async updateStudent(id: string | number, studentData: any) {
     try {
       const response = await studentService.update(id, studentData);
       return { success: true, data: response };
@@ -28,7 +28,7 @@ export class StudentController {
     }
   }
 
-  static async deleteStudent(id: number) {
+  static async deleteStudent(id: string | number) {
     try {
       await studentService.delete(id);
       return { success: true };

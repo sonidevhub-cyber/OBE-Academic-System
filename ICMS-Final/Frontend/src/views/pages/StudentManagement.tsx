@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { studentService, courseService, departmentService } from '../../api/apiService';
+import { studentService } from '../../api/apiService';
+import batchService, { Batch } from '../../api/batchService';
+import academicStructureService, { Program } from '../../api/academicStructureService';
 import StudentModal from '../../components/ui/modals/StudentModal';
 import EnhancedStudentProfile from '../../components/ui/EnhancedStudentProfile';
+import { getFullImageUrl } from '../../utils/imageHelpers';
 
 // Custom scrollbar styling
 const scrollbarStyle = `
@@ -36,18 +39,25 @@ interface Department {
 }
 
 interface Student {
-  student_id: number;
-  id?: number;
+  student_id: string;
+  custom_id?: string;
+  registration_number?: string;
+  id?: string;
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  user_email?: string;
+  phone?: string;
+  role?: string;
   department?: Department | null;
-  semester?: { semester_id: number; name: string; semester_code: string } | null;
+  semester?: { semester_id: string; name: string; semester_code: string } | null;
   batch?: string;
-  father_guardian: string;
+  batch_id?: string;
+  program_id?: string;
+  batch_name?: string;
+  father_guardian?: string;
   image?: string;
-  attendance_percentage: number;
-  gpa: number;
+  attendance_percentage?: number;
+  gpa?: number;
   performance_notes?: string;
 }
 
@@ -57,7 +67,6 @@ interface StudentManagementProps {
 
 const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
   const [students, setStudents] = useState<Student[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showStudentModal, setShowStudentModal] = useState<boolean>(false);
@@ -65,8 +74,23 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showStudentProfile, setShowStudentProfile] = useState<boolean>(false);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState<number | null>(null);
-  const [selectedSemester, setSelectedSemester] = useState<number | null>(null);
+  
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+
+  const fetchProgramsAndBatches = useCallback(async () => {
+    try {
+      const progRes = await academicStructureService.getPrograms();
+      setPrograms(progRes.data);
+      
+      const batchRes = await batchService.getAllBatches();
+      setBatches(batchRes.data as any);
+    } catch (err) {
+      console.error('Failed to fetch programs/batches', err);
+    }
+  }, []);
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -82,27 +106,18 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
     }
   }, []);
 
-  const fetchDepartments = useCallback(async () => {
-    try {
-      const response = await departmentService.getAllDepartments();
-      setDepartments(response.data);
-    } catch (error: any) {
-      console.error('Failed to fetch departments:', error);
-    }
-  }, []);
-
   useEffect(() => {
     if (activeTab === 'students') {
       fetchStudents();
-      fetchDepartments();
+      fetchProgramsAndBatches();
     }
-  }, [activeTab, fetchStudents, fetchDepartments]);
+  }, [activeTab, fetchStudents, fetchProgramsAndBatches]);
 
-  const handleDeleteStudent = useCallback(async (id: number) => {
+  const handleDeleteStudent = useCallback(async (id: string | number) => {
     if (window.confirm('Are you sure you want to delete this student?')) {
       try {
         await studentService.deleteStudent(id);
-        setStudents(prev => prev.filter(student => student.student_id !== id));
+        setStudents(prev => prev.filter(student => String(student.student_id) !== String(id)));
       } catch (error: any) {
         setError(error.message || 'Failed to delete student');
       }
@@ -112,75 +127,67 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
   const filteredStudents = useMemo(() => {
     if (!Array.isArray(students)) return [];
     
-    let filtered = students;
+    // Only show active students (not alumni) in the Student Management tab
+    let filtered = students.filter(student => student.role === 'student' || !student.role);
     
-    if (selectedDepartment) {
-      filtered = filtered.filter(student => {
-        const deptId = student.department?.id || student.department?.department_id;
-        return deptId === selectedDepartment;
-      });
+    if (selectedProgramId) {
+      filtered = filtered.filter(student => student.program_id === selectedProgramId);
     }
-    
-    if (selectedSemester) {
-      filtered = filtered.filter(student => {
-        if (!student.semester) return false;
-        const semesterName = student.semester.name;
-        return semesterName === `Semester ${selectedSemester}` || 
-               semesterName === `${selectedSemester}` ||
-               student.semester.semester_id === selectedSemester;
-      });
+
+    if (selectedBatchId) {
+      filtered = filtered.filter(student => student.batch_id === selectedBatchId);
     }
     
     if (searchTerm) {
       filtered = filtered.filter(student =>
         student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.department?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.semester?.name.toLowerCase().includes(searchTerm.toLowerCase())
+        (student.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (student.semester?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false)
       );
     }
     
     return filtered;
-  }, [students, searchTerm, selectedDepartment, selectedSemester]);
+  }, [students, searchTerm, selectedProgramId, selectedBatchId]);
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: scrollbarStyle }} />
       <div className="min-h-screen w-full bg-[#E8EFF8] p-4 md:p-6 custom-scrollbar">
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 space-y-4 lg:space-y-0">
-        <h2 className="text-2xl font-bold text-gray-800">Students</h2>
+        <h2 className="text-2xl font-bold text-gray-800">Student Management</h2>
         <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
           <input
             type="text"
             placeholder="Search students..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
           />
           <select
-            value={selectedDepartment || ''}
-            onChange={(e) => setSelectedDepartment(e.target.value ? parseInt(e.target.value) : null)}
+            value={selectedProgramId || ''}
+            onChange={(e) => {
+              setSelectedProgramId(e.target.value || null);
+              setSelectedBatchId(null); // Reset batch when program changes
+            }}
             className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="">All Departments</option>
-            {departments.map(dept => (
-              <option key={dept.id} value={dept.id}>{dept.name}</option>
+            <option value="">All Programs</option>
+            {programs.map(p => (
+              <option key={p.id} value={p.id}>{p.code}</option>
             ))}
           </select>
           <select
-            value={selectedSemester || ''}
-            onChange={(e) => setSelectedSemester(e.target.value ? parseInt(e.target.value) : null)}
+            value={selectedBatchId || ''}
+            onChange={(e) => setSelectedBatchId(e.target.value || null)}
             className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="">All Semesters</option>
-            {(() => {
-              const maxSemesters = selectedDepartment 
-                ? departments.find(d => d.id === selectedDepartment)?.num_semesters || 8
-                : 8;
-              return Array.from({length: maxSemesters}, (_, i) => i + 1).map(sem => (
-                <option key={sem} value={sem}>Semester {sem}</option>
-              ));
-            })()}
+            <option value="">All Batches</option>
+            {batches
+              .filter(b => !selectedProgramId || (b as any).program === selectedProgramId)
+              .map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))
+            }
           </select>
           <button
             onClick={() => {
@@ -202,29 +209,15 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-xl shadow-lg border border-blue-200 hover:shadow-xl transition-all duration-300">
+        <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 p-6 rounded-xl shadow-lg border border-indigo-200 hover:shadow-xl transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-blue-600 mb-1">Total Students</p>
-              <p className="text-3xl font-bold text-blue-900">{students.length}</p>
+              <p className="text-sm font-medium text-indigo-600 mb-1">Total Students</p>
+              <p className="text-3xl font-bold text-indigo-900">{students.length}</p>
             </div>
-            <div className="p-3 bg-blue-500 rounded-full shadow-lg">
+            <div className="p-3 bg-indigo-500 rounded-full shadow-lg">
               <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
-              </svg>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-xl shadow-lg border border-green-200 hover:shadow-xl transition-all duration-300">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-green-600 mb-1">Departments</p>
-              <p className="text-3xl font-bold text-green-900">{departments.length}</p>
-            </div>
-            <div className="p-3 bg-green-500 rounded-full shadow-lg">
-              <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4zM18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9z"/>
+                <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a.5.5 0 00-.5-.5h-11a.5.5 0 00-.5.5v3h12z"/>
               </svg>
             </div>
           </div>
@@ -234,13 +227,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-purple-600 mb-1">
-                {selectedDepartment || selectedSemester ? (
-                  <>
-                    {selectedDepartment && departments.find(d => d.id === selectedDepartment)?.code}
-                    {selectedDepartment && selectedSemester && ' - '}
-                    {selectedSemester && `Sem ${selectedSemester}`}
-                  </>
-                ) : 'Filtered Results'}
+                {selectedBatchId ? `Batch: ${batches.find(b => b.id === selectedBatchId)?.name}` : selectedProgramId ? `Program: ${programs.find(p => p.id === selectedProgramId)?.code}` : 'Filtered Results'}
               </p>
               <p className="text-3xl font-bold text-purple-900">{filteredStudents.length}</p>
             </div>
@@ -286,8 +273,8 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Student</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Department</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Semester</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Role</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Batch</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">Contact</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Performance</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Actions</th>
@@ -300,7 +287,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
                           {student.image ? (
-                            <img className="h-10 w-10 rounded-full object-cover" src={student.image} alt={student.name} />
+                            <img className="h-10 w-10 rounded-full object-cover" src={getFullImageUrl(student.image)} alt={student.name} />
                           ) : (
                             <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center">
                               <span className="text-white font-medium text-sm">{student.name.charAt(0)}</span>
@@ -309,18 +296,24 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                         </div>
                         <div className="ml-4 min-w-0 flex-1">
                           <div className="text-sm font-medium text-gray-900 truncate">{student.name}</div>
-                          <div className="text-sm text-gray-500 truncate">ID: {student.student_id}</div>
+                          <div className="text-sm text-gray-500 truncate">ID: {student.registration_number || student.custom_id || student.student_id}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-4 text-sm text-gray-900">
-                      <div className="truncate">{student.department?.name || 'Not assigned'}</div>
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800`}>
+                        {student.role || 'student'}
+                      </span>
                     </td>
                     <td className="px-4 py-4 text-sm text-gray-900">
-                      <div className="truncate">{student.semester?.name || 'Not assigned'}</div>
+                      <div className="truncate">
+                        {(student.role === 'student' || student.role === 'alumni' || !student.role) 
+                          ? (student.batch_name || student.batch || '-') 
+                          : '-'}
+                      </div>
                     </td>
                     <td className="px-4 py-4">
-                      <div className="text-sm text-gray-900 truncate">{student.email}</div>
+                      <div className="text-sm text-gray-900 truncate">{student.user_email || student.email}</div>
                       <div className="text-sm text-gray-500 truncate">{student.phone}</div>
                     </td>
                     <td className="px-4 py-4">
@@ -399,13 +392,15 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
       {showStudentProfile && viewingStudent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
           <div className="bg-white rounded-lg max-w-7xl w-full max-h-[95vh] overflow-y-auto">
-            <EnhancedStudentProfile
-              studentId={viewingStudent.student_id}
-              onClose={() => {
-                setShowStudentProfile(false);
-                setViewingStudent(null);
-              }}
-            />
+            {viewingStudent && (
+                    <EnhancedStudentProfile 
+                      studentId={viewingStudent.student_id} 
+                      onClose={() => {
+                        setShowStudentProfile(false);
+                        setViewingStudent(null);
+                      }}
+                    />
+                  )}
           </div>
         </div>
       )}

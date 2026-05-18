@@ -29,6 +29,7 @@ interface ProfileData {
   semester?: { name?: string; semester_code?: string } | string | null;
   semester_name?: string;
   registration_number?: string;
+  custom_id?: string;
   batch?: string;
   date_of_birth?: string;
   gender?: string;
@@ -54,7 +55,7 @@ interface ProfileData {
 
 interface ProfileModuleProps {
   profileData: ProfileData | null;
-  userType: 'student' | 'instructor' | 'hod' | 'admin' | 'principal';
+  userType: 'student' | 'instructor' | 'hod' | 'admin' | 'principal' | 'sac';
   darkMode?: boolean;
 }
 
@@ -64,6 +65,7 @@ interface ProfileSection {
 }
 
 const ROLE_LABELS: Record<string, string> = {
+  sac: 'SAC',
   student: 'Student',
   instructor: 'Instructor',
   hod: 'Head of Department',
@@ -72,6 +74,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const ROLE_ACCENTS: Record<string, string> = {
+  sac: 'from-indigo-500 via-blue-500 to-indigo-700',
   student: 'from-sky-500 via-blue-500 to-indigo-600',
   instructor: 'from-violet-500 via-purple-500 to-indigo-600',
   hod: 'from-emerald-500 via-teal-500 to-cyan-600',
@@ -107,6 +110,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ profileData, userType, da
 
     const identity: Array<{ label: string; value: string }> = [];
     addField(identity, 'Full Name', displayName);
+    addField(identity, 'Identity ID', profile.custom_id || profile.registration_number || profile.employee_id);
     addField(identity, 'Username', profile.username);
     addField(identity, 'Role', roleLabel);
     addField(identity, 'Status', statusLabel);
@@ -127,7 +131,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ profileData, userType, da
       addField(academicOrProfessional, 'Date of Birth', formatProfileDate(profile.date_of_birth));
       addField(academicOrProfessional, 'Guardian Name', profile.guardian_name || profile.father_guardian);
       addField(academicOrProfessional, 'Guardian Contact', profile.guardian_contact);
-    } else {
+    } else if (userType !== 'sac' && userType !== 'admin') {
       addField(academicOrProfessional, 'Employee ID', profile.employee_id);
       addField(academicOrProfessional, 'Designation', profile.designation);
       addField(academicOrProfessional, 'Rank', profile.rank);
@@ -167,12 +171,12 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ profileData, userType, da
 
   const heroCards = [
     {
-      label: userType === 'student' ? 'Registration No.' : 'Employee ID',
-      value: (userType === 'student' ? profile.registration_number : profile.employee_id) || 'Not available',
+      label: (userType === 'sac' || userType === 'admin') ? 'Primary ID' : (userType === 'student' ? 'Registration No.' : 'Employee ID'),
+      value: (profile.custom_id || profile.registration_number || profile.employee_id) || 'Not available',
     },
     {
-      label: 'Department',
-      value: departmentLabel || 'Not available',
+      label: 'Email',
+      value: profile.email || profile.user_email || 'Not available',
     },
     {
       label: 'Contact',
@@ -215,7 +219,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ profileData, userType, da
                     {statusLabel}
                   </span>
                 )}
-                {departmentLabel && (
+                {(userType !== 'sac' && userType !== 'admin') && departmentLabel && (
                   <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-medium">
                     {departmentLabel}
                   </span>

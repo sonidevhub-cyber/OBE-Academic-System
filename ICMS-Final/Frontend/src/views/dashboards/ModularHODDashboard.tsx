@@ -2,16 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import TimetableManagement from '../../components/TimetableManagement';
 import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
-import HODCoordinatorManagementModule from '../modules/hod/HODCoordinatorManagementModule';
 import HODCourseAllocationModule from '../modules/HODCourseAllocationModule';
-import HODInstructorManagementModule from '../modules/hod/HODInstructorManagementModule';
 import HODInstructorOnlyModule from '../modules/hod/HODInstructorOnlyModule';
 import HODCoordinatorOnlyModule from '../modules/hod/HODCoordinatorOnlyModule';
-import HODAttendanceDashboard from '../../components/attendance/HODAttendanceDashboard';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { FeedbackViewer } from '../../components/feedback';
@@ -19,7 +15,6 @@ import { multiRoleService } from '../../api/multiRoleService';
 import { coordinatorService } from '../../api/coordinatorService';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
-import DateSheetModule from '../modules/DateSheetModule';
 
 interface Department {
   id: number;
@@ -126,7 +121,6 @@ const ModularHODDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
-    fetchTimetableProposals();
   }, []);
 
   useEffect(() => {
@@ -203,370 +197,6 @@ const ModularHODDashboard: React.FC = () => {
       console.error('Error fetching students:', error);
     }
   };
-
-  const fetchTimetableProposals = async () => {
-    try {
-      const response = await coordinatorService.getTimetableProposals();
-      setTimetableProposals(response.data || []);
-    } catch (err) {
-      console.error('Error fetching timetable proposals:', err);
-      setTimetableProposals([]);
-    }
-  };
-
-  const fetchTimetableAudit = async () => {
-    try {
-      const response = await coordinatorService.getTimetablePublishAudit();
-      setTimetableAudit(response.data || null);
-    } catch (err) {
-      console.error('Error fetching timetable publish audit:', err);
-      setTimetableAudit(null);
-    }
-  };
-
-  const handleTimetableDecision = async (
-    proposalId: number,
-    action: 'approve' | 'reject',
-    comments: string = ''
-  ) => {
-    try {
-      if (action === 'approve') {
-        await coordinatorService.approveTimetableProposal(proposalId, { comments });
-      } else {
-        await coordinatorService.rejectTimetableProposal(proposalId, { comments });
-      }
-
-      const now = new Date().toISOString();
-      setTimetableProposals((prev) =>
-        prev.map((proposal) =>
-          proposal.proposal_id === proposalId
-            ? {
-                ...proposal,
-                status: action === 'approve' ? 'implemented' : 'rejected',
-                reviewed_at: now,
-                hod_comments: comments
-              }
-            : proposal
-        )
-      );
-      await fetchTimetableProposals();
-      await fetchTimetableAudit();
-    } catch (err: any) {
-      console.error(`Failed to ${action} timetable proposal:`, err);
-      alert(err?.response?.data?.error || `Failed to ${action} timetable proposal`);
-      await fetchTimetableProposals();
-    }
-  };
-
-  const renderTimetableProposals = (mode: 'pending' | 'approved' | 'rejected') => {
-    const proposals = timetableProposals.filter((p) => {
-      if (mode === 'pending') return p.status === 'submitted' || p.status === 'draft';
-      if (mode === 'approved') return p.status === 'approved' || p.status === 'implemented';
-      return p.status === 'rejected';
-    });
-
-    const titleMap = {
-      pending: 'Pending Timetables',
-      approved: 'Approved Timetables',
-      rejected: 'Rejected Timetables'
-    };
-
-    return (
-      <div className="space-y-6">
-        {mode === 'approved' && timetableAudit?.summary && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-lg shadow border border-gray-100">
-              <p className="text-xs text-gray-500">Implemented Proposals</p>
-              <p className="text-xl font-semibold text-blue-700">{timetableAudit.summary.implemented_proposals}</p>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow border border-gray-100">
-              <p className="text-xs text-gray-500">Total Slots</p>
-              <p className="text-xl font-semibold text-gray-900">{timetableAudit.summary.total_slots}</p>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow border border-gray-100">
-              <p className="text-xs text-gray-500">Published Slots</p>
-              <p className="text-xl font-semibold text-green-700">{timetableAudit.summary.published_slots}</p>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow border border-gray-100">
-              <p className="text-xs text-gray-500">Unpublished Slots</p>
-              <p className="text-xl font-semibold text-red-700">{timetableAudit.summary.unpublished_slots}</p>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-xl font-semibold mb-4">{titleMap[mode]}</h3>
-          {proposals.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">No {mode} timetable proposals found.</div>
-          ) : (
-            <div className="space-y-4">
-              {proposals.map((proposal) => (
-                <div key={proposal.proposal_id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h4 className="font-semibold text-gray-900">{proposal.title}</h4>
-                      <p className="text-sm text-gray-600">{proposal.description || 'No description'}</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Semester: {proposal.semester_name || 'N/A'} | Coordinator: {proposal.coordinator_name || 'N/A'}
-                      </p>
-                      {proposal.hod_comments && (
-                        <p className="text-sm text-blue-700 mt-2">HOD Comments: {proposal.hod_comments}</p>
-                      )}
-                      {mode === 'approved' && timetableAudit?.audit && (
-                        <p className="text-sm text-gray-600 mt-2">
-                          Published Slots:{' '}
-                          {timetableAudit.audit.find((a) => a.proposal_id === proposal.proposal_id)?.published_slots || 0}
-                          {' / '}
-                          {timetableAudit.audit.find((a) => a.proposal_id === proposal.proposal_id)?.total_slots || 0}
-                        </p>
-                      )}
-                    </div>
-
-                    {mode === 'pending' && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleTimetableDecision(proposal.proposal_id, 'approve')}
-                          className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => {
-                            const reason = window.prompt('Enter rejection reason for coordinator:') || '';
-                            if (!reason.trim()) return;
-                            handleTimetableDecision(proposal.proposal_id, 'reject', reason.trim());
-                          }}
-                          className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  useEffect(() => {
-    if (activeTab === 'students' || activeTab === 'feedback') {
-      fetchStudents(selectedSemester || undefined);
-    }
-  }, [activeTab, selectedSemester]);
-
-  useEffect(() => {
-    if (
-      activeTab === 'timetable-pending' ||
-      activeTab === 'timetable-approved' ||
-      activeTab === 'timetable-rejected'
-    ) {
-      fetchTimetableProposals();
-      fetchTimetableAudit();
-
-      const intervalId = window.setInterval(() => {
-        fetchTimetableProposals();
-        fetchTimetableAudit();
-      }, 10000);
-
-      return () => window.clearInterval(intervalId);
-    }
-  }, [activeTab]);
-
-  const renderTabs = () => (
-    <div className="w-64 bg-gradient-to-b from-blue-600 via-indigo-700 to-purple-800 text-white p-4 space-y-2 min-h-screen shadow-xl">
-      <div className="mb-8 text-center">
-        <div className="h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-2 flex items-center justify-center border border-white/30">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3z" />
-          </svg>
-        </div>
-        <h3 className="text-lg font-semibold text-white">HOD Portal</h3>
-        <p className="text-xs text-blue-200">{department?.name || 'Department'}</p>
-      </div>
-
-      <nav>
-        <ul className="space-y-1">
-          {tabs.filter(tab => tab.id !== 'allocations' && tab.id !== 'timetable' && tab.id !== 'faculty').map((tab) => (
-            <li key={tab.id}>
-              <button
-                onClick={() => setActiveTab(tab.id as TabId)}
-                className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 ${
-                  activeTab === tab.id 
-                    ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30' 
-                    : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
-                </svg>
-                <span>{tab.label}</span>
-              </button>
-            </li>
-          ))}
-          
-          {/* Faculty Section with Dropdown */}
-          <li>
-            <button
-              onClick={() => setFacultyExpanded(!facultyExpanded)}
-              className="w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-blue-100 hover:bg-white/10 hover:text-white"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <span>Faculty</span>
-              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ml-auto transition-transform ${facultyExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {facultyExpanded && (
-              <ul className="ml-8 mt-1 space-y-1">
-                <li>
-                  <button
-                    onClick={() => setActiveTab('instructors')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'instructors'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Instructors
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('coordinators')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'coordinators'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Coordinators
-                  </button>
-                </li>
-              </ul>
-            )}
-          </li>
-          
-          {/* Course Allocations Section */}
-          <li>
-            <button
-              onClick={() => setAllocationExpanded(!allocationExpanded)}
-              className="w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-blue-100 hover:bg-white/10 hover:text-white"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-              <span>Course Allocations</span>
-              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ml-auto transition-transform ${allocationExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {allocationExpanded && (
-              <ul className="ml-8 mt-1 space-y-1">
-                <li>
-                  <button
-                    onClick={() => setActiveTab('allocation-pending')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'allocation-pending'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Pending Allocations
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('allocation-approved')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'allocation-approved'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Approved Allocations
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('allocation-rejected')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'allocation-rejected'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Rejected Allocations
-                  </button>
-                </li>
-              </ul>
-            )}
-          </li>
-
-          {/* Timetable Section */}
-          <li>
-            <button
-              onClick={() => setTimetableExpanded(!timetableExpanded)}
-              className="w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-blue-100 hover:bg-white/10 hover:text-white"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>Timetable</span>
-              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ml-auto transition-transform ${timetableExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {timetableExpanded && (
-              <ul className="ml-8 mt-1 space-y-1">
-                <li>
-                  <button
-                    onClick={() => setActiveTab('timetable-pending')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'timetable-pending'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Pending Timetables
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('timetable-approved')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'timetable-approved'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Approved Timetables
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('timetable-rejected')}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                      activeTab === 'timetable-rejected'
-                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
-                        : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    Rejected Timetables
-                  </button>
-                </li>
-              </ul>
-            )}
-          </li>
-
-        </ul>
-      </nav>
-      
       {/* Logout Button */}
       <div className="mt-auto pt-4 border-t border-white/20">
         <button
@@ -583,8 +213,6 @@ const ModularHODDashboard: React.FC = () => {
           <span>Logout</span>
         </button>
       </div>
-    </div>
-  );
 
   const renderContent = () => {
     if (loading) return <div className="p-4">Loading HOD Dashboard...</div>;
@@ -652,9 +280,6 @@ const ModularHODDashboard: React.FC = () => {
           </motion.div>
         );
 
-      case 'attendance':
-        return <HODAttendanceDashboard />;
-
       case 'instructors':
         return <HODInstructorOnlyModule />;
 
@@ -672,15 +297,6 @@ const ModularHODDashboard: React.FC = () => {
 
       case 'allocation-rejected':
         return <HODCourseAllocationModule view="rejected" />;
-
-      case 'timetable-pending':
-        return renderTimetableProposals('pending');
-
-      case 'timetable-approved':
-        return renderTimetableProposals('approved');
-
-      case 'timetable-rejected':
-        return renderTimetableProposals('rejected');
 
 
 
@@ -735,14 +351,14 @@ const ModularHODDashboard: React.FC = () => {
 
       case 'announcements':
         return <AnnouncementModule token={token || ''} canCreate={hasPermission('manage_announcements')} />;
-
-      case 'datesheet':
-        return <DateSheetModule role="hod" />;
-
       default:
         return <div>Content for {activeTab}</div>;
     }
   };
+
+  function renderTabs(): React.ReactNode {
+    throw new Error('Function not implemented.');
+  }
 
   return (
     <div className="flex min-h-screen w-full bg-[#E8EFF8]">
@@ -774,7 +390,7 @@ const ModularHODDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={hodProfile || currentUser} label="HOD" />
+              <TopbarProfileMenu userData={hodProfile || currentUser} />
             </div>
           </motion.div>
         </header>

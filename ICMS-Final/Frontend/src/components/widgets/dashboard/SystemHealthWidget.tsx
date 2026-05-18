@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import axios from 'axios';
+import { api } from '../../../api/api';
+import { useAuth } from '../../../context/AuthContext';
 
 interface SystemMetrics {
   serverStatus: 'online' | 'offline' | 'warning';
@@ -14,6 +15,7 @@ interface SystemMetrics {
 }
 
 const SystemHealthWidget: React.FC = () => {
+  const { currentUser, loading: authLoading } = useAuth();
   const [metrics, setMetrics] = useState<SystemMetrics>({
     serverStatus: 'online',
     databaseStatus: 'online',
@@ -27,18 +29,35 @@ const SystemHealthWidget: React.FC = () => {
 
   const fetchMetrics = async () => {
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000'}/api/monitoring/health/`);
-      setMetrics(response.data);
+      const response = await api.get(
+        '/monitoring/health/'
+      );
+      // Normalize/validate backend response to avoid runtime crashes.
+      const d = response?.data as Partial<SystemMetrics> | undefined;
+      if (!d) return;
+
+      setMetrics({
+        serverStatus: (d.serverStatus as any) ?? 'online',
+        databaseStatus: (d.databaseStatus as any) ?? 'online',
+        apiResponseTime: Number(d.apiResponseTime ?? 0),
+        memoryUsage: Number(d.memoryUsage ?? 0),
+        cpuUsage: Number(d.cpuUsage ?? 0),
+        activeUsers: Number(d.activeUsers ?? 0),
+        totalRequests: Number(d.totalRequests ?? 0),
+        errorRate: Number(d.errorRate ?? 0),
+      });
     } catch (error) {
       console.error('Failed to fetch system health metrics:', error);
     }
   };
 
   useEffect(() => {
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    if (currentUser && !authLoading) {
+      fetchMetrics();
+      const interval = setInterval(fetchMetrics, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser, authLoading]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -122,7 +141,8 @@ const SystemHealthWidget: React.FC = () => {
 
         {/* Active Users */}
         <div className="text-center">
-          <div className="text-xl font-bold text-blue-600">{metrics.activeUsers.toLocaleString()}</div>
+          <div className="text-xl font-bold text-blue-600">{Number.isFinite(metrics.activeUsers) ? metrics.activeUsers.toLocaleString() : '0'}</div>
+
           <div className="text-sm text-gray-600">Active Users</div>
           <div className="text-xs text-green-600 mt-1">+12% from yesterday</div>
         </div>

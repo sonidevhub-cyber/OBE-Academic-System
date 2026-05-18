@@ -1,12 +1,13 @@
 import { createContext, useState, useContext, ReactNode, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { api } from "../api/api";
 import authService from "../api/authService";
 
 // Define types
 interface User {
   id: number;
-  role: "student" | "staff" | "admin" | "principal" | "director" | "instructor" | "hod" | "coordinator" | "super_admin";
+  role: "student" | "staff" | "admin" | "principal" | "director" | "instructor" | "hod" | "coordinator" | "super_admin" | "SAC";
   rbac_role?: string;
   permissions?: string[];
   roles?: string[]; // Multi-role support
@@ -65,6 +66,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (authData.access_token) {
           axios.defaults.headers.common['Authorization'] = `Token ${authData.access_token}`;
+          api.defaults.headers.common['Authorization'] = `Token ${authData.access_token}`;
         }
         
         // Store in sessionStorage for this tab
@@ -165,6 +167,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem('auth', authString);
       sessionStorage.setItem('auth', authString);
       axios.defaults.headers.common['Authorization'] = `Token ${authData.access_token}`;
+      api.defaults.headers.common['Authorization'] = `Token ${authData.access_token}`;
+      console.log('Login: Token set on both axios and api instances');
       
       // ✅ Role-based redirect based on effective role
       const activeRole = authData.user.effective_role;
@@ -185,7 +189,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else if (activeRole === "instructor") {
         console.log('Navigating to instructor dashboard');
         navigate("/teacher");
-      } else if (authData.user.role === "admin" || authData.user.role === "principal" || authData.user.role === "director" || authData.user.role === "super_admin" || authData.user.is_superuser) {
+      } else if (authData.user.role === "admin" || authData.user.role === "principal" || authData.user.role === "director" || authData.user.role === "super_admin" || authData.user.is_superuser || authData.user.role === "SAC") {
         navigate("/admin");
       } else if (authData.user.role === "staff") {
         navigate("/staff");
@@ -254,7 +258,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         navigate("/coordinator");
       } else if (newRole === "instructor") {
         navigate("/teacher");
-      } else if (newRole === "admin" || newRole === "principal" || newRole === "director" || newRole === "super_admin") {
+      } else if (newRole === "admin" || newRole === "principal" || newRole === "director" || newRole === "super_admin" || newRole === "SAC") {
         navigate("/admin");
       } else if (newRole === "staff") {
         navigate("/staff");
@@ -271,6 +275,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Only clear sessionStorage for this tab, keep localStorage for other tabs
     sessionStorage.removeItem('auth');
     delete axios.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common['Authorization'];
     navigate("/login");
   };
 
@@ -280,6 +285,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem('auth');
     localStorage.clear();
     delete axios.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common['Authorization'];
     navigate("/login");
   };
 
@@ -334,20 +340,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
-  const normalizeAuthData = (authData: AuthData): AuthData => {
-    const normalizedPermissions =
-      authData.permissions ||
-      authData.user.permissions ||
-      [];
 
-    return {
-      ...authData,
-      role: authData.role || authData.user.rbac_role,
+const normalizeAuthData = (authData: AuthData): AuthData => {
+  const normalizedPermissions =
+    authData.permissions ||
+    authData.user.permissions ||
+    [];
+
+  return {
+    ...authData,
+    role: authData.role || authData.user.rbac_role,
+    permissions: normalizedPermissions,
+    user: {
+      ...authData.user,
+      rbac_role: authData.user.rbac_role || authData.role,
       permissions: normalizedPermissions,
-      user: {
-        ...authData.user,
-        rbac_role: authData.user.rbac_role || authData.role,
-        permissions: normalizedPermissions,
-      },
-    };
+    },
   };
+};

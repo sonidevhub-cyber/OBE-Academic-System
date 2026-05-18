@@ -1,5 +1,8 @@
 import { getFullImageUrl } from './imageHelpers';
 
+// Fallback backend URL for cases where getFullImageUrl doesn't handle the path
+const BACKEND_URL = 'http://localhost:8000';
+
 export type ProfileLike = Record<string, any> | null | undefined;
 
 const hasText = (value: unknown): value is string =>
@@ -20,6 +23,7 @@ const toTitleCase = (value: string): string =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const ROLE_LABELS: Record<string, string> = {
+  sac: 'SAC',
   student: 'Student',
   instructor: 'Instructor',
   coordinator: 'Coordinator',
@@ -94,7 +98,16 @@ export const getProfileImageUrl = (profile: ProfileLike): string | null => {
 
   if (!raw) return null;
 
-  return getFullImageUrl(raw) ?? (raw.startsWith('/') ? `http://127.0.0.1:8000${raw}` : raw);
+  // Try to use the utility function first
+  const fullUrl = getFullImageUrl(raw);
+  if (fullUrl) return fullUrl;
+
+  // Fallback for paths that don't start with /media/ or http
+  if (raw.startsWith('/')) {
+    return `${BACKEND_URL}${raw}`;
+  }
+
+  return raw;
 };
 
 export const getDepartmentLabel = (department: any): string | null => {

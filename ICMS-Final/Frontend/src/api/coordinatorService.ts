@@ -272,7 +272,7 @@ export const coordinatorService = {
     }),
   
   getInstructors: () =>
-    api.get('instructors/instructor/'),
+    api.get('instructors/instructor'),
 
   // Rooms
   getRooms: () =>

@@ -3,14 +3,11 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { instructorService } from '../api/studentInstructorService';
 import { coordinatorService } from '../api/coordinatorService';
-import TimetableManagement from '../components/TimetableManagement';
 import { FeedbackViewer, NotificationBell, NotificationToast } from '../components/feedback';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAllocations } from '../context/AllocationContext';
 import RoleSwitchButton from '../components/RoleSwitchButton';
 import UniversalRoleSwitcher from '../components/UniversalRoleSwitcher';
-import HODAttendanceDashboard from '../components/attendance/HODAttendanceDashboard';
-
 type TabId = 'dashboard' | 'attendance' | 'instructors' | 'coordinators' | 'allocations' | 'allocation-list' | 'timetable-approvals' | 'feedback';
 type AllocationTab = 'pending' | 'approved' | 'rejected';
 type TimetableTab = 'pending' | 'approved' | 'rejected';
@@ -758,8 +755,6 @@ const HODDashboard = () => {
     switch (activeTab) {
       case 'dashboard':
         return renderDashboard();
-      case 'attendance':
-        return <HODAttendanceDashboard />;
       case 'allocations':
         return renderCourseAllocations();
       case 'instructors':
