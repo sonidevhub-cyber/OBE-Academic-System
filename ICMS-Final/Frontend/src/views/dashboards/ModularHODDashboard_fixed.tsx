@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import TimetableModule from '../modules/TimetableModule';
 import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
@@ -273,10 +272,6 @@ const ModularHODDashboard: React.FC = () => {
                 </select>
               </div>
             </div>
-            <TimetableModule 
-              token={token || ''} 
-              semesterId={selectedSemester || undefined}
-            />
           </div>
         );
 

@@ -3,16 +3,17 @@ import { AxiosResponse } from 'axios';
 
 // User Interface
 export interface User {
-  id: number;
-  username: string;
+  id: string;
+  custom_id?: string;
+  username?: string;
   email: string;
   name?: string;
-  role: string;
+  role?: string;
 }
 
 // Department Interface
 export interface Department {
-  id?: number;
+  id?: string | number;
   name: string;
   description: string;
   code: string; // Required field that was missing
@@ -20,23 +21,24 @@ export interface Department {
 
 // Semester Interface
 export interface Semester {
-  id?: number;
+  id?: string | number;
   name: string;
   semester_code: string;
   program: string;
   capacity: number;
-  department: number;
+  department: string;
 }
 
 // Instructor Interface
 export interface Instructor {
-  id?: number;
-  user?: User | number;
+  id?: string | number;
+  custom_id?: string;
+  user?: User | string;
   name?: string;
   email?: string;
   phone?: string;
-  department?: Department | number;
-  department_id?: number;
+  department?: Department | string;
+  department_id?: string | number;
   department_name?: string;
   employment_type?: 'PERMANENT' | 'VISITING' | 'INTERNEE';
   qualification?: string;
@@ -55,24 +57,25 @@ export interface Instructor {
 
 // Subject Interface
 export interface Subject {
-  id?: number;
+  id?: string | number;
   name: string;
   code: string;
-  department: number;
+  department: string;
 }
 
 // Course Interface
 export interface Course {
-  course_id: number;
+  course_id: string | number;
+  custom_id?: string;
   name: string;
   code: string;
   description?: string;
   semester_details?: {
-    semester_id: number;
+    semester_id: string | number;
     name: string;
     semester_code: string;
     department: {
-      department_id: number;
+      department_id: string | number;
       name: string;
       code: string;
     };
@@ -81,73 +84,73 @@ export interface Course {
 
 // InstructorAssignment Interface
 export interface InstructorAssignment {
-  id?: number;
-  instructor: number;
-  semester: number;
-  subject: number;
+  id?: string | number;
+  instructor: string;
+  semester: string;
+  subject: string;
 }
 
 // Department Service
 export const departmentService = {
   // Department methods
   getAllDepartments: (): Promise<AxiosResponse<any>> => api.get('academics/departments/'),
-  getDepartmentById: (id: number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${id}/`),
+  getDepartmentById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${id}/`),
   createDepartment: (data: Department): Promise<AxiosResponse<any>> => api.post('academics/departments/', data),
-  updateDepartment: (id: number, data: Department): Promise<AxiosResponse<any>> => api.put(`academics/departments/${id}/`, data),
-  deleteDepartment: (id: number): Promise<AxiosResponse<any>> => api.delete(`academics/departments/${id}/`),
+  updateDepartment: (id: string | number, data: Department): Promise<AxiosResponse<any>> => api.put(`academics/departments/${id}/`, data),
+  deleteDepartment: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`academics/departments/${id}/`),
 
   // Semester methods
   getAllSemesters: (): Promise<AxiosResponse<any>> => api.get('academics/semesters/'),
-  getSemesterById: (id: number): Promise<AxiosResponse<any>> => api.get(`academics/semesters/${id}/`),
-  getSemestersByDepartment: (departmentId: number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${departmentId}/semesters/`),
+  getSemesterById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`academics/semesters/${id}/`),
+  getSemestersByDepartment: (departmentId: string | number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${departmentId}/semesters/`),
   createSemester: (data: any): Promise<AxiosResponse<any>> => api.post('academics/semesters/', data),
-  updateSemester: (id: number, data: any): Promise<AxiosResponse<any>> => api.put(`academics/semesters/${id}/`, data),
-  deleteSemester: (id: number): Promise<AxiosResponse<any>> => api.delete(`academics/semesters/${id}/`),
+  updateSemester: (id: string | number, data: any): Promise<AxiosResponse<any>> => api.put(`academics/semesters/${id}/`, data),
+  deleteSemester: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`academics/semesters/${id}/`),
 };
 
 // Instructor Service
 export const instructorService = {
   // Using the correct endpoint path that matches the backend URL configuration
   getAllInstructors: (): Promise<AxiosResponse<any>> => api.get('instructors/instructor/'),
-  getInstructorById: (id: number): Promise<AxiosResponse<any>> => api.get(`instructors/instructor/${id}/`),
+  getInstructorById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`instructors/instructor/${id}/`),
   getInstructorProfile: (): Promise<AxiosResponse<any>> => api.get('instructors/profile/'),
   createInstructor: (data: Instructor | FormData): Promise<AxiosResponse<any>> => api.post('instructors/instructor/', data),
-  updateInstructor: (id: number, data: Instructor | FormData): Promise<AxiosResponse<any>> => api.put(`instructors/instructor/${id}/`, data),
-  deleteInstructor: (id: number): Promise<AxiosResponse<any>> => api.delete(`instructors/instructor/${id}/`),
-  uploadInstructorImage: (id: number, imageData: FormData): Promise<AxiosResponse<any>> => api.post(`instructors/instructor/${id}/upload-image/`, imageData),
+  updateInstructor: (id: string | number, data: Instructor | FormData): Promise<AxiosResponse<any>> => api.put(`instructors/instructor/${id}/`, data),
+  deleteInstructor: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`instructors/instructor/${id}/`),
+  uploadInstructorImage: (id: string | number, imageData: FormData): Promise<AxiosResponse<any>> => api.post(`instructors/instructor/${id}/upload-image/`, imageData),
   getAllDepartments: (): Promise<AxiosResponse<any>> => api.get('academics/departments/'),
 };
 
 // Instructor Assignment Service
 export const instructorAssignmentService = {
   getAllAssignments: (): Promise<AxiosResponse<any>> => api.get('instructor-assignments/'),
-  getAssignmentById: (id: number): Promise<AxiosResponse<any>> => api.get(`instructor-assignments/${id}/`),
+  getAssignmentById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`instructor-assignments/${id}/`),
   createAssignment: (data: InstructorAssignment): Promise<AxiosResponse<any>> => api.post('instructor-assignments/', data),
-  updateAssignment: (id: number, data: InstructorAssignment): Promise<AxiosResponse<any>> => api.put(`instructor-assignments/${id}/`, data),
-  deleteAssignment: (id: number): Promise<AxiosResponse<any>> => api.delete(`instructor-assignments/${id}/`),
+  updateAssignment: (id: string | number, data: InstructorAssignment): Promise<AxiosResponse<any>> => api.put(`instructor-assignments/${id}/`, data),
+  deleteAssignment: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`instructor-assignments/${id}/`),
 };
 
 // Subject Service
 export const subjectService = {
   getAllSubjects: (): Promise<AxiosResponse<any>> => api.get('academics/subjects/'),
-  getSubjectById: (id: number): Promise<AxiosResponse<any>> => api.get(`academics/subjects/${id}/`),
+  getSubjectById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`academics/subjects/${id}/`),
   createSubject: (data: Subject): Promise<AxiosResponse<any>> => api.post('academics/subjects/', data),
-  updateSubject: (id: number, data: Subject): Promise<AxiosResponse<any>> => api.put(`academics/subjects/${id}/`, data),
-  deleteSubject: (id: number): Promise<AxiosResponse<any>> => api.delete(`academics/subjects/${id}/`),
-  getSubjectsByDepartment: (departmentId: number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${departmentId}/subjects/`),
+  updateSubject: (id: string | number, data: Subject): Promise<AxiosResponse<any>> => api.put(`academics/subjects/${id}/`, data),
+  deleteSubject: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`academics/subjects/${id}/`),
+  getSubjectsByDepartment: (departmentId: string | number): Promise<AxiosResponse<any>> => api.get(`academics/departments/${departmentId}/subjects/`),
 };
 
 // Course Service
 export const courseService = {
   getAllCourses: (): Promise<AxiosResponse<any>> => api.get('academics/courses/'),
-  getCourseById: (id: number): Promise<AxiosResponse<any>> => api.get(`academics/courses/${id}/`),
+  getCourseById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`academics/courses/${id}/`),
   createCourse: (data: any): Promise<AxiosResponse<any>> => api.post('academics/courses/', data),
-  updateCourse: (id: number, data: any): Promise<AxiosResponse<any>> => api.put(`academics/courses/${id}/`, data),
-  deleteCourse: (id: number): Promise<AxiosResponse<any>> => api.delete(`academics/courses/${id}/`),
-  getCoursesBySemester: (semesterId: number): Promise<AxiosResponse<any>> => api.get(`academics/semesters/${semesterId}/courses/`),
+  updateCourse: (id: string | number, data: any): Promise<AxiosResponse<any>> => api.put(`academics/courses/${id}/`, data),
+  deleteCourse: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`academics/courses/${id}/`),
+  getCoursesBySemester: (semesterId: string | number): Promise<AxiosResponse<any>> => api.get(`academics/semesters/${semesterId}/courses/`),
 };
 
 // Student Service (for instructor use)
 export const studentService = {
-  getStudentCourses: (studentId: string): Promise<AxiosResponse<any>> => api.get(`students/${studentId}/courses/`),
+  getStudentCourses: (studentId: string | number): Promise<AxiosResponse<any>> => api.get(`students/${studentId}/courses/`),
 };

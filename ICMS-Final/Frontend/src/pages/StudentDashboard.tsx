@@ -25,11 +25,8 @@ import {
   Bell,
 } from "lucide-react";
 import { Department, Semester } from "api/studentInstructorService";
-import AttendanceAnalytics from "../components/analytics/AttendanceAnalytics";
-import StudentTimetable from "../components/timetable/StudentTimetable";
 import { FeedbackButton } from "../components/feedback";
 import TopbarProfileMenu from "../components/TopbarProfileMenu";
-import DateSheetModule from "../views/modules/DateSheetModule";
 
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -377,92 +374,6 @@ const StudentDashboard: React.FC = () => {
           )}
           
 
-          {/* Attendance */}
-          {activeTab === "Attendance" && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <div className={`rounded-2xl shadow-md p-6 ${darkMode ? "bg-gray-800" : "bg-white"}`}>
-                <h3 className="text-lg font-semibold mb-4 text-blue-600">Subject-wise Attendance</h3>
-                {attendanceLoading ? (
-                  <p className="text-sm text-gray-500">Loading attendance...</p>
-                ) : studentAttendanceOverview ? (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="p-4 rounded-lg bg-blue-50">
-                        <p className="text-sm text-gray-600">Overall Attendance</p>
-                        <p className="text-2xl font-bold text-blue-700">{studentAttendanceOverview.overall_attendance_percentage}%</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-green-50">
-                        <p className="text-sm text-gray-600">Attended Classes</p>
-                        <p className="text-2xl font-bold text-green-700">{studentAttendanceOverview.overall?.attended_classes || 0}</p>
-                      </div>
-                      <div className="p-4 rounded-lg bg-red-50">
-                        <p className="text-sm text-gray-600">Missed Classes</p>
-                        <p className="text-2xl font-bold text-red-700">{studentAttendanceOverview.overall?.missed_classes || 0}</p>
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Course</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Section</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Present</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Absent</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Late</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Percentage</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-100">
-                          {(studentAttendanceOverview.subject_wise_attendance || []).map((item: any) => (
-                            <tr key={item.course_id}>
-                              <td className="px-4 py-2 text-sm text-gray-800">{item.course_code} - {item.course_name}</td>
-                              <td className="px-4 py-2 text-sm text-gray-600">{item.section}</td>
-                              <td className="px-4 py-2 text-sm text-green-700">{item.present_classes}</td>
-                              <td className="px-4 py-2 text-sm text-red-700">{item.absent_classes}</td>
-                              <td className="px-4 py-2 text-sm text-yellow-700">{item.late_classes}</td>
-                              <td className="px-4 py-2 text-sm font-semibold text-blue-700">{item.attendance_percentage}%</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ) : (
-                  <AttendanceAnalytics darkMode={darkMode} />
-                )}
-              </div>
-            </motion.div>
-          )}
-
-          {/* Timetable */}
-          {activeTab === "Timetable" && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              {(studentData?.student_id || studentData?.id) ? (
-                <StudentTimetable studentId={studentData.student_id || studentData.id || ''} />
-              ) : (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-                  <p className="text-yellow-800">Student ID not available. Please contact administration.</p>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {/* DateSheet */}
-          {activeTab === "DateSheet" && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <DateSheetModule role="student" />
-            </motion.div>
-          )}
 
           {/* Announcements */}
           {activeTab === "Announcements" && (

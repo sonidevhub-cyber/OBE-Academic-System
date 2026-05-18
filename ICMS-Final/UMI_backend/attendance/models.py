@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from datetime import date, datetime
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.conf import settings
 
 class StudentAttendance(models.Model):
     STATUS_CHOICES = [
@@ -13,7 +14,8 @@ class StudentAttendance(models.Model):
     
     student = models.ForeignKey('students.Student', on_delete=models.CASCADE)
     course = models.ForeignKey('academics.Course', on_delete=models.CASCADE)
-    instructor = models.ForeignKey('instructors.Instructor', on_delete=models.CASCADE)
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    instructor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     timetable = models.ForeignKey('academics.Timetable', on_delete=models.CASCADE)
     date = models.DateField(default=date.today)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Present')
@@ -58,9 +60,8 @@ class FacultyAttendance(models.Model):
         ('Late', 'Late'),
     ]
     
-    instructor = models.ForeignKey('instructors.Instructor', on_delete=models.CASCADE, null=True, blank=True)
-    coordinator = models.ForeignKey('coordinators.Coordinator', on_delete=models.CASCADE, null=True, blank=True)
-    hod = models.ForeignKey('hods.HOD', on_delete=models.CASCADE, null=True, blank=True)
+    # Replaced instructor, coordinator, hod with a single user field
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='attendance_records_faculty')
     date = models.DateField(default=date.today)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Present')
     auto_marked = models.BooleanField(default=False)  # System marked when teaching
@@ -71,42 +72,21 @@ class FacultyAttendance(models.Model):
     
     class Meta:
         ordering = ['-date', '-marked_at']
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(instructor__isnull=False) |
-                    models.Q(coordinator__isnull=False) |
-                    models.Q(hod__isnull=False)
-                ),
-                name='faculty_attendance_has_faculty'
-            )
-        ]
     
     def get_faculty_name(self):
-        if self.instructor:
-            return self.instructor.name
-        elif self.coordinator:
-            return self.coordinator.name
-        elif self.hod:
-            return self.hod.name
+        if self.user:
+            return self.user.full_name if hasattr(self.user, 'full_name') else self.user.email
         return "Unknown"
     
     def get_faculty_type(self):
-        if self.instructor:
-            return "Instructor"
-        elif self.coordinator:
-            return "Coordinator"
-        elif self.hod:
-            return "HOD"
+        if self.user:
+            return self.user.role.title() if hasattr(self.user, 'role') else "Unknown"
         return "Unknown"
     
     def get_department(self):
-        if self.instructor:
-            return self.instructor.department
-        elif self.coordinator:
-            return self.coordinator.department
-        elif self.hod:
-            return self.hod.department
+        # Programs are now the primary grouping instead of departments
+        if self.user and hasattr(self.user, 'programs'):
+            return ", ".join([p.name for p in self.user.programs.all()])
         return None
     
     def __str__(self):
@@ -127,13 +107,13 @@ class AttendanceEditRequest(models.Model):
     request_type = models.CharField(max_length=10, choices=REQUEST_TYPE_CHOICES)
     student_attendance = models.ForeignKey(StudentAttendance, on_delete=models.CASCADE, null=True, blank=True)
     faculty_attendance = models.ForeignKey(FacultyAttendance, on_delete=models.CASCADE, null=True, blank=True)
-    requested_by = models.ForeignKey('register.User', on_delete=models.CASCADE)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     reason = models.TextField()
     proposed_status = models.CharField(max_length=10, choices=StudentAttendance.STATUS_CHOICES)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     requested_at = models.DateTimeField(auto_now_add=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    reviewed_by = models.ForeignKey('register.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_requests')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_attendance_requests')
     admin_notes = models.TextField(blank=True)
     
     class Meta:
@@ -148,14 +128,14 @@ class AttendanceUpdateRequest(models.Model):
         ('used', 'Used'),
     ]
 
-    requested_by = models.ForeignKey('register.User', on_delete=models.CASCADE, related_name='attendance_update_requests')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='attendance_update_requests')
     timetable = models.ForeignKey('academics.Timetable', on_delete=models.CASCADE, related_name='attendance_update_requests')
     attendance_date = models.DateField()
     reason = models.TextField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     admin_notes = models.TextField(blank=True)
     reviewed_by = models.ForeignKey(
-        'register.User',
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -243,7 +223,8 @@ class AttendanceAlert(models.Model):
 
 class BulkAttendanceSession(models.Model):
     """Track bulk attendance marking sessions"""
-    instructor = models.ForeignKey('instructors.Instructor', on_delete=models.CASCADE)
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    instructor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     timetable = models.ForeignKey('academics.Timetable', on_delete=models.CASCADE)
     date = models.DateField()
     total_students = models.IntegerField()
@@ -258,4 +239,4 @@ class BulkAttendanceSession(models.Model):
         unique_together = ['instructor', 'timetable', 'date']
     
     def __str__(self):
-        return f"{self.instructor.name} - {self.timetable.course.name} - {self.date}"
+        return f"{self.instructor.email} - {self.timetable.course.name} - {self.date}"

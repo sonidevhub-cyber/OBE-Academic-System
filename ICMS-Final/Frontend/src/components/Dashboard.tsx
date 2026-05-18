@@ -16,12 +16,10 @@ import {
 
 // Import Views (UI Components)
 import StudentView from '../views/modules/StudentModule';
-import TimetableView from '../views/modules/TimetableModule';
 import FeedbackView from '../views/modules/FeedbackModule';
-import DepartmentView from '../views/modules/DepartmentModule';
 import AttendanceView from '../views/modules/AttendanceModule';
 
-type TabId = 'students' | 'timetable' | 'feedback' | 'departments' | 'attendance' | 'courses' | 'instructors' | 'hods' | 'results' | 'schedules';
+type TabId = 'students' | 'feedback' | 'attendance' | 'courses' | 'instructors' | 'hods' | 'results' | 'schedules';
 
 interface Tab {
   id: TabId;
@@ -36,11 +34,7 @@ const Dashboard: React.FC = () => {
 
   const tabs: Tab[] = [
     { id: 'students', label: 'Students', icon: Users, color: 'text-blue-600' },
-    { id: 'departments', label: 'Departments', icon: Building, color: 'text-indigo-600' },
     { id: 'courses', label: 'Courses', icon: BookOpen, color: 'text-green-600' },
-    { id: 'instructors', label: 'Instructors', icon: UserCheck, color: 'text-purple-600' },
-    { id: 'hods', label: 'HODs', icon: GraduationCap, color: 'text-red-600' },
-    { id: 'timetable', label: 'Timetable', icon: Calendar, color: 'text-emerald-600' },
     { id: 'attendance', label: 'Attendance', icon: CheckCircle, color: 'text-orange-600' },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare, color: 'text-pink-600' },
     { id: 'results', label: 'Results', icon: BarChart3, color: 'text-cyan-600' },
@@ -51,20 +45,13 @@ const Dashboard: React.FC = () => {
     switch (activeTab) {
       case 'students':
         return <StudentView />;
-      case 'timetable':
-        return <TimetableView token="" />;
+
       case 'feedback':
         return <FeedbackView />;
-      case 'departments':
-        return <DepartmentView />;
       case 'attendance':
         return <AttendanceView token="" userType="instructor" />;
       case 'courses':
         return <div className="p-8 text-center text-gray-500">Course View - Coming Soon</div>;
-      case 'instructors':
-        return <div className="p-8 text-center text-gray-500">Instructor View - Coming Soon</div>;
-      case 'hods':
-        return <div className="p-8 text-center text-gray-500">HOD View - Coming Soon</div>;
       case 'results':
         return <div className="p-8 text-center text-gray-500">Results View - Coming Soon</div>;
       case 'schedules':
@@ -117,3 +104,4 @@ const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
+

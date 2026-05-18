@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { api } from '../../../api/api';
+import { useAuth } from '../../../context/AuthContext';
 
 interface Activity {
   id: string;
-  type: 'user' | 'system' | 'academic' | 'financial';
+  type: 'user' | 'system' | 'academic';
   action: string;
   description: string;
   timestamp: Date;
@@ -12,28 +14,20 @@ interface Activity {
 }
 
 const ActivityFeed: React.FC = () => {
+  const { currentUser, loading: authLoading } = useAuth();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchActivities = async () => {
-      const token = JSON.parse(localStorage.getItem("auth") || "{}")?.access_token;
-
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
       try {
         const activities: Activity[] = [];
 
         // Fetch students for user activity
         try {
-          const studentRes = await fetch('http://localhost:8000/api/students/', {
-            headers: { 'Authorization': `Token ${token}`, 'Content-Type': 'application/json' }
-          });
-          if (studentRes.ok) {
-            const studentData = await studentRes.json();
+          const studentRes = await api.get('/students/');
+          if (studentRes.status === 200) {
+            const studentData = studentRes.data;
             const students = studentData.results || [];
             if (students.length > 0) {
               const student = students[0];
@@ -54,11 +48,9 @@ const ActivityFeed: React.FC = () => {
 
         // Fetch instructors for academic activity
         try {
-          const instructorRes = await fetch('http://localhost:8000/api/instructors/instructor/', {
-            headers: { 'Authorization': `Token ${token}`, 'Content-Type': 'application/json' }
-          });
-          if (instructorRes.ok) {
-            const instructorData = await instructorRes.json();
+          const instructorRes = await api.get('/instructors/');
+          if (instructorRes.status === 200) {
+            const instructorData = instructorRes.data;
             const instructors = instructorData.results || [];
             if (instructors.length > 0) {
               const instructor = instructors[0];
@@ -110,15 +102,16 @@ const ActivityFeed: React.FC = () => {
       }
     };
 
-    fetchActivities();
-  }, []);
+    if (currentUser && !authLoading) {
+      fetchActivities();
+    }
+  }, [currentUser, authLoading]);
 
   const getTypeColor = (type: string) => {
     switch (type) {
       case 'user': return 'bg-blue-500';
       case 'system': return 'bg-green-500';
       case 'academic': return 'bg-purple-500';
-      case 'financial': return 'bg-orange-500';
       default: return 'bg-gray-500';
     }
   };

@@ -2,28 +2,18 @@ from django.conf import settings
 from django.db import models
 from datetime import date
 
-# ---------- Department ----------
-class Department(models.Model):
-    department_id = models.AutoField(primary_key=True)
-    name = models.CharField(max_length=100, unique=True)
-    code = models.CharField(max_length=10, unique=True)
-    description = models.TextField(blank=True)
-    num_semesters = models.PositiveIntegerField(default=8)
-
-    def __str__(self):
-        return f"{self.name} ({self.code})"
-
 # ---------- Semester ----------
 class Semester(models.Model):
     semester_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)
     semester_code = models.CharField(max_length=10, unique=True)
-    program = models.CharField(max_length=100)
+    program_old = models.CharField(max_length=100) # Keep for migration if needed
     capacity = models.PositiveIntegerField(default=30)
-    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="semesters")
+    # Replaced Department with Program from academic_structure
+    program = models.ForeignKey('academic_structure.Program', on_delete=models.CASCADE, related_name="academics_semesters", null=True, blank=True)
 
     def __str__(self):
-        return f"{self.name} ({self.semester_code}) - {self.department.name}"
+        return f"{self.name} ({self.semester_code})"
 
     @property
     def is_base_semester(self):
@@ -44,7 +34,7 @@ class Semester(models.Model):
             base_num = semester_num - 1
             base_name = f"Semester {base_num}"
             return Semester.objects.filter(
-                department=self.department,
+                program=self.program,
                 name=base_name
             ).first()
         except (ValueError, IndexError, Semester.DoesNotExist):
@@ -100,14 +90,15 @@ class Timetable(models.Model):
     
     timetable_id = models.AutoField(primary_key=True)
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="timetables")
-    instructor = models.ForeignKey("instructors.Instructor", on_delete=models.CASCADE, related_name="timetables")
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    instructor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="timetables")
     day = models.CharField(max_length=10, choices=DAY_CHOICES)
     start_time = models.TimeField()
     end_time = models.TimeField()
     room = models.CharField(max_length=50, blank=True)
     approval_status = models.CharField(max_length=10, choices=APPROVAL_STATUS_CHOICES, default='draft')
-    created_by = models.ForeignKey("register.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_timetables")
-    approved_by = models.ForeignKey("register.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_timetables")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_timetables")
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_timetables")
     approved_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
     
@@ -128,11 +119,13 @@ class Attendance(models.Model):
     attendance_id = models.AutoField(primary_key=True)
     student = models.ForeignKey("students.Student", on_delete=models.CASCADE, related_name="attendances")
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="attendances", null=True, blank=True)
-    instructor = models.ForeignKey("instructors.Instructor", on_delete=models.CASCADE, related_name="marked_attendances", null=True, blank=True)
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    instructor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="marked_attendances", null=True, blank=True)
     timetable = models.ForeignKey(Timetable, on_delete=models.CASCADE, related_name="attendances", null=True, blank=True)
     date = models.DateField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES)
-    marked_by = models.ForeignKey("instructors.Instructor", on_delete=models.SET_NULL, null=True, blank=True, related_name="attendance_records")
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    marked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="attendance_records")
     is_submitted = models.BooleanField(default=False)
     can_edit = models.BooleanField(default=True)
     admin_approved_edit = models.BooleanField(default=False)
@@ -169,9 +162,8 @@ class FacultyAttendance(models.Model):
     STATUS_CHOICES = [(PRESENT, "Present"), (ABSENT, "Absent"), (LATE, "Late")]
     
     faculty_attendance_id = models.AutoField(primary_key=True)
-    instructor = models.ForeignKey("instructors.Instructor", on_delete=models.CASCADE, related_name="faculty_attendances", null=True, blank=True)
-    coordinator = models.ForeignKey("coordinators.Coordinator", on_delete=models.CASCADE, related_name="faculty_attendances", null=True, blank=True)
-    hod = models.ForeignKey("hods.HOD", on_delete=models.CASCADE, related_name="faculty_attendances", null=True, blank=True)
+    # Replaced Instructor, Coordinator, HOD with settings.AUTH_USER_MODEL
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="faculty_attendances", null=True, blank=True)
     date = models.DateField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PRESENT)
     marked_by_system = models.BooleanField(default=False)  # Auto-marked when teaching
@@ -185,37 +177,19 @@ class FacultyAttendance(models.Model):
     
     class Meta:
         ordering = ["-date", "-marked_at"]
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(instructor__isnull=False) |
-                    models.Q(coordinator__isnull=False) |
-                    models.Q(hod__isnull=False)
-                ),
-                name='faculty_attendance_has_faculty_member'
-            )
-        ]
     
     def __str__(self):
         faculty_name = self.get_faculty_name()
         return f"{faculty_name} - {self.date} ({self.status})"
     
     def get_faculty_name(self):
-        if self.instructor:
-            return self.instructor.name
-        elif self.coordinator:
-            return self.coordinator.name
-        elif self.hod:
-            return self.hod.name
+        if self.user:
+            return self.user.full_name if hasattr(self.user, 'full_name') else self.user.email
         return "Unknown Faculty"
     
     def get_faculty_type(self):
-        if self.instructor:
-            return "Instructor"
-        elif self.coordinator:
-            return "Coordinator"
-        elif self.hod:
-            return "HOD"
+        if self.user:
+            return self.user.role.title() if hasattr(self.user, 'role') else "Unknown"
         return "Unknown"
     
     def is_editable(self):
@@ -231,13 +205,13 @@ class FacultyAttendanceEditPermission(models.Model):
     
     permission_id = models.AutoField(primary_key=True)
     faculty_attendance = models.ForeignKey(FacultyAttendance, on_delete=models.CASCADE, related_name="edit_permissions")
-    requested_by = models.ForeignKey("register.User", on_delete=models.CASCADE, related_name="faculty_edit_requests")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="faculty_edit_requests")
     reason = models.TextField()
     proposed_status = models.CharField(max_length=10, choices=FacultyAttendance.STATUS_CHOICES, null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     requested_at = models.DateTimeField(auto_now_add=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    reviewed_by = models.ForeignKey("register.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_faculty_permissions")
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_faculty_permissions")
     admin_notes = models.TextField(blank=True)
     
     class Meta:
@@ -245,6 +219,7 @@ class FacultyAttendanceEditPermission(models.Model):
     
     def __str__(self):
         return f"Faculty edit request for {self.faculty_attendance.get_faculty_name()} - {self.status}"
+
 class AttendanceEditPermission(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -253,22 +228,22 @@ class AttendanceEditPermission(models.Model):
     ]
     
     permission_id = models.AutoField(primary_key=True)
-    instructor = models.ForeignKey("instructors.Instructor", on_delete=models.CASCADE, related_name="edit_requests")
+    # Replaced Instructor with settings.AUTH_USER_MODEL
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attendance_edit_requests", null=True, blank=True)
     attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name="edit_permissions")
     reason = models.TextField()
     proposed_status = models.CharField(max_length=10, choices=Attendance.STATUS_CHOICES, null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     requested_at = models.DateTimeField(auto_now_add=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    reviewed_by = models.ForeignKey("register.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_permissions")
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_attendance_permissions")
     admin_notes = models.TextField(blank=True)
     
     class Meta:
         ordering = ['-requested_at']
-        unique_together = ['instructor', 'attendance', 'status']
     
     def __str__(self):
-        return f"Edit request by {self.instructor.name} for {self.attendance.student.name} - {self.status}"
+        return f"Edit request for {self.attendance.student.name} - {self.status}"
 
 
 # ---------- Result ----------
@@ -368,11 +343,6 @@ class Result(models.Model):
 
         super().save(*args, **kwargs)
 
-
-
-    
-
-
 # ---------- Scholarship ----------
 class Scholarship(models.Model):
     scholarship_id = models.AutoField(primary_key=True)
@@ -416,7 +386,8 @@ class DateSheet(models.Model):
     ]
 
     datesheet_id = models.AutoField(primary_key=True)
-    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="datesheets")
+    # Replaced Department with Program from academic_structure
+    program = models.ForeignKey('academic_structure.Program', on_delete=models.CASCADE, related_name="datesheets", null=True, blank=True)
     semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name="datesheets")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="created_datesheets")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
@@ -438,7 +409,8 @@ class DateSheet(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"DateSheet {self.datesheet_id} - {self.department.name} - {self.semester.name}"
+        program_name = self.program.name if self.program else "Unknown Program"
+        return f"DateSheet {self.datesheet_id} - {program_name} - {self.semester.name}"
 
 
 class DateSheetItem(models.Model):
@@ -498,13 +470,3 @@ class DateSheetNotification(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="datesheet_notifications")
     datesheet = models.ForeignKey(DateSheet, on_delete=models.CASCADE, related_name="notifications")
     message = models.CharField(max_length=255)
-    is_read = models.BooleanField(default=False)
-    read_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        unique_together = ["user", "datesheet", "message"]
-
-    def __str__(self):
-        return f"Notification for {self.user.username} - {self.message}"

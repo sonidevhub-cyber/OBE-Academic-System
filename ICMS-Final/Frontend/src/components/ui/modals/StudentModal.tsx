@@ -1,49 +1,19 @@
 import React, { useState, useEffect, JSX } from 'react';
-import { studentService, departmentService, semesterService, courseService } from '../../../api/apiService';
-
-interface Semester {
-  id: number;
-  name: string;
-  semester_code: string;
-  department: number;
-  program?: string;
-  capacity?: number;
-}
-
-interface Course {
-  course_id: number;
-  name: string;
-  code: string;
-  semester?: number;
-  semester_details?: {
-    id: number;
-    name: string;
-    semester_code: string;
-  };
-}
+import { studentService } from '../../../api/apiService';
+import batchService, { BatchFlat } from '../../../api/batchService';
+import { getFullImageUrl } from '../../../utils/imageHelpers';
 
 interface StudentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  studentId?: number;
+  studentId?: string | number;
   onSuccess: () => void;
-  preSelectedDepartment?: number; // Optional prop to pre-select department
-  preSelectedSemester?: number; // Optional prop to pre-select semester
 }
 
-interface Department {
-  id: number;
-  name: string;
-  code: string;
-  description?: string;
-}
-
-const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId, onSuccess, preSelectedDepartment }): JSX.Element | null => {
+const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId, onSuccess }): JSX.Element | null => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [semesters, setSemesters] = useState<Semester[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [batches, setBatches] = useState<BatchFlat[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | undefined>(undefined);
 
@@ -53,8 +23,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     email: '',
     password: '',
     registration_number: '',
-    department: 0, // Department field
-    semester: 0, // Semester field
+    role: 'student', // Default role
     batch: '', // Batch field
     guardian_name: '',
     guardian_contact: '',
@@ -65,187 +34,29 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     phone: '',
   });
 
-  // Fetch departments
+  // Fetch batches
   useEffect(() => {
-    const fetchDepartments = async (): Promise<void> => {
+    if (!isOpen) return;
+
+    const fetchBatches = async () => {
       try {
-        setError(null); // Clear any previous errors
-        console.log('Fetching departments...'); // Debug log
-        const response = await departmentService.getAllDepartments();
-        console.log('Departments response:', response); // Debug log
-        console.log('Departments data:', response.data); // Debug log
+        const response = await batchService.getAllBatches();
 
-        if (response && response.data) {
-          let departmentsData: Department[] = [];
+        // DRF can return either an array or {data: [...]}. Normalize here.
+        const payload: any = (response as any).data;
+        const normalized: BatchFlat[] = Array.isArray(payload)
+          ? payload
+          : (payload?.data ?? []);
 
-          if (Array.isArray(response.data)) {
-            departmentsData = response.data;
-          } else if (response.data.results && Array.isArray(response.data.results)) {
-            // Handle paginated response
-            departmentsData = response.data.results;
-          } else {
-            // Try to extract departments from any structure
-            departmentsData = response.data.departments || [];
-          }
-
-          // Validate department data structure
-          const validDepartments = departmentsData.filter(dept =>
-            dept &&
-            typeof dept === 'object' &&
-            dept.id &&
-            dept.name
-          );
-
-          if (validDepartments.length > 0) {
-            setDepartments(validDepartments);
-            console.log('Departments loaded successfully:', validDepartments.length, 'departments');
-
-            // Set pre-selected department if provided
-            if (preSelectedDepartment) {
-              setFormData(prev => ({ ...prev, department: preSelectedDepartment }));
-            }
-          } else {
-            setError('No valid departments found');
-            console.error('No valid departments in response:', response.data);
-          }
-        } else {
-          setError('Failed to load departments: No response data');
-          console.error('No response data received');
-        }
-      } catch (error: any) {
-        console.error('Error fetching departments:', error);
-        console.error('Error response:', error.response);
-        console.error('Error status:', error.response?.status);
-        console.error('Error data:', error.response?.data);
-
-        if (error.response?.status === 401) {
-          setError('Authentication required. Please login first.');
-        } else if (error.response?.status === 403) {
-          setError('Access denied. You do not have permission to view departments.');
-        } else {
-          setError('Failed to load departments. Please check your connection and try again.');
-        }
+        setBatches(normalized);
+      } catch (err) {
+        console.error('Failed to fetch batches:', err);
+        setBatches([]);
       }
     };
 
-    if (isOpen) {
-      fetchDepartments();
-    }
-  }, [preSelectedDepartment, isOpen]);
-
-  // Fetch semesters when department changes
-  useEffect(() => {
-    const fetchSemesters = async () => {
-      if (!formData.department) {
-        setSemesters([]);
-        return;
-      }
-
-      try {
-        setError(null); // Clear any previous errors
-        console.log('Fetching semesters for department:', formData.department);
-        const response = await departmentService.getSemestersByDepartment(formData.department);
-        console.log('Semesters response:', response);
-
-        if (response && response.data) {
-          let semestersData: Semester[] = [];
-
-          // Handle different response formats
-          if (Array.isArray(response.data)) {
-            semestersData = response.data;
-          } else if (response.data.results && Array.isArray(response.data.results)) {
-            semestersData = response.data.results;
-          } else if (response.data.semesters && Array.isArray(response.data.semesters)) {
-            semestersData = response.data.semesters;
-          } else {
-            console.error('Unexpected response format:', response.data);
-            setError('Failed to load semesters: Unexpected response format');
-            setSemesters([]);
-            return;
-          }
-
-          // Filter semesters to only show valid ones (1-8)
-          const filteredSemesters = semestersData.filter((sem: any) => {
-            // Try to extract semester number from name or semester_code
-            const nameMatch = sem.name?.match(/(\d+)/);
-            const codeMatch = sem.semester_code?.match(/(\d+)/);
-
-            let semNumber = null;
-            if (nameMatch) {
-              semNumber = parseInt(nameMatch[1], 10);
-            } else if (codeMatch) {
-              semNumber = parseInt(codeMatch[1], 10);
-            }
-
-            // If we can't extract a number, include it anyway (better to show all than none)
-            if (semNumber === null) {
-              console.log('Could not extract semester number from:', sem);
-              return true; // Include semester if we can't determine the number
-            }
-
-            return semNumber >= 1 && semNumber <= 8;
-          });
-
-          console.log('Filtered semesters:', filteredSemesters);
-          setSemesters(filteredSemesters);
-        } else {
-          setError('Failed to load semesters: No response data');
-          setSemesters([]);
-        }
-      } catch (error: any) {
-        console.error('Error fetching semesters:', error);
-        setError('Failed to load semesters. Please check your connection and try again.');
-        setSemesters([]);
-      }
-    };
-
-    fetchSemesters();
-  }, [formData.department]);
-
-  // Fetch courses when semester changes
-  useEffect(() => {
-    const fetchCourses = async () => {
-      if (formData.semester) {
-        try {
-          setError(null); // Clear any previous errors
-          console.log('Fetching courses for semester:', formData.semester);
-          const response = await courseService.getAllCourses();
-          console.log('Courses response:', response);
-
-          if (response && response.data) {
-            let coursesData: Course[] = [];
-
-            if (Array.isArray(response.data)) {
-              coursesData = response.data;
-            } else if (response.data.results && Array.isArray(response.data.results)) {
-              coursesData = response.data.results;
-            } else {
-              coursesData = response.data.courses || [];
-            }
-
-            // Filter courses by semester
-            const filteredCourses = coursesData.filter((course: Course) => {
-              // Check semester_details first, then semester field
-              const courseSemesterId = course.semester_details?.id || course.semester;
-              return courseSemesterId === formData.semester;
-            });
-
-            console.log('Filtered courses:', filteredCourses);
-            setCourses(filteredCourses);
-          } else {
-            setError('Failed to load courses: No response data');
-          }
-        } catch (error: any) {
-          console.error('Error fetching courses:', error);
-          setError('Failed to load courses. Please check your connection and try again.');
-        }
-      } else {
-        setCourses([]);
-      }
-    };
-
-    fetchCourses();
-  }, [formData.semester]);
+    fetchBatches();
+  }, [isOpen]);
 
   // Reset form when modal opens/closes or studentId changes
   useEffect(() => {
@@ -263,8 +74,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
               email: student.email || '',
               password: '',
               registration_number: student.registration_number || '',
-              department: student.department ? student.department.id : 0,
-              semester: student.semester ? student.semester.id : 0,
+              role: student.role || 'student',
               batch: student.batch || '',
               guardian_name: student.guardian_name || '',
               guardian_contact: student.guardian_contact || '',
@@ -279,7 +89,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
               setImagePreview(student.image);
             }
           } catch (error) {
-            setError('Failed to fetch student data');
+            setError('Failed to fetch user data');
           } finally {
             setIsLoading(false);
           }
@@ -287,15 +97,14 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
         fetchStudentData();
       } else {
-        // Reset form for new student
+        // Reset form for new user
         setFormData({
           first_name: '',
           last_name: '',
           email: '',
           password: '',
           registration_number: '',
-          department: preSelectedDepartment || 0,
-          semester: 0,
+          role: 'student',
           batch: '',
           guardian_name: '',
           guardian_contact: '',
@@ -310,15 +119,11 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         setError(null);
       }
     }
-  }, [studentId, isOpen, preSelectedDepartment]);
+  }, [studentId, isOpen]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>): void => {
     const { name, value } = e.target;
-    if (name === 'department' || name === 'semester') {
-      setFormData(prev => ({ ...prev, [name]: value ? parseInt(value, 10) : 0 }));
-    } else {
-      setFormData(prev => ({ ...prev, [name]: value }));
-    }
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -373,22 +178,17 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         return;
       }
       if (!formData.registration_number.trim()) {
-        setError('Registration number is required.');
-        setIsLoading(false);
-        return;
-      }
-      if (!formData.department || formData.department === 0) {
-        setError('Please select a department.');
-        setIsLoading(false);
-        return;
-      }
-      if (!formData.semester || formData.semester === 0) {
-        setError('Please select a semester.');
+        setError('Registration/Employee ID is required.');
         setIsLoading(false);
         return;
       }
       if (!studentId && !formData.password.trim()) {
-        setError('Password is required for new students.');
+        setError('Password is required for new users.');
+        setIsLoading(false);
+        return;
+      }
+      if ((formData.role === 'student' || formData.role === 'alumni') && !formData.batch) {
+        setError(`Batch is required for ${formData.role}.`);
         setIsLoading(false);
         return;
       }
@@ -407,23 +207,20 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         dataToSend.append('phone', formData.phone);
         dataToSend.append('date_of_birth', formData.date_of_birth);
         dataToSend.append('registration_number', formData.registration_number);
-        dataToSend.append('department_id', formData.department.toString());
+        dataToSend.append('role', formData.role);
         
         if (formData.guardian_name) dataToSend.append('guardian_name', formData.guardian_name);
         if (formData.guardian_contact) dataToSend.append('guardian_contact', formData.guardian_contact);
         if (formData.address) dataToSend.append('address', formData.address);
         dataToSend.append('gender', formData.gender);
         if (formData.blood_group) dataToSend.append('blood_group', formData.blood_group);
-        if (formData.batch) dataToSend.append('batch', formData.batch);
-
-        // Add password only for new students
-        if (!studentId && formData.password.trim()) {
-          dataToSend.append('password', formData.password);
+        if ((formData.role === 'student' || formData.role === 'alumni') && formData.batch) {
+          dataToSend.append('batch', formData.batch);
         }
 
-        // Add semester if selected
-        if (formData.semester && formData.semester !== 0) {
-          dataToSend.append('semester_id', formData.semester.toString());
+        // Add password only for new users
+        if (!studentId && formData.password.trim()) {
+          dataToSend.append('password', formData.password);
         }
         
         // Add the new image file
@@ -437,15 +234,14 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           phone: formData.phone,
           date_of_birth: formData.date_of_birth,
           registration_number: formData.registration_number,
-          department_id: formData.department,
           gender: formData.gender,
+          role: formData.role,
           ...(formData.guardian_name && { guardian_name: formData.guardian_name }),
           ...(formData.guardian_contact && { guardian_contact: formData.guardian_contact }),
           ...(formData.address && { address: formData.address }),
           ...(formData.blood_group && { blood_group: formData.blood_group }),
-          ...(formData.batch && { batch: formData.batch }),
+          ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
           ...(!studentId && formData.password.trim() && { password: formData.password }),
-          ...(formData.semester && formData.semester !== 0 && { semester_id: formData.semester })
         };
       }
 
@@ -456,25 +252,24 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
       if (studentId) {
         // For updates, handle image separately if present
         if (imageFile && imageFile instanceof File) {
-          // First update student data without image
-          const studentDataWithoutImage = {
+          // First update user data without image
+          const userDataWithoutImage = {
             first_name: formData.first_name,
             last_name: formData.last_name,
             email: formData.email,
             phone: formData.phone,
             date_of_birth: formData.date_of_birth,
             registration_number: formData.registration_number,
-            department_id: formData.department,
             gender: formData.gender,
+            role: formData.role,
             ...(formData.guardian_name && { guardian_name: formData.guardian_name }),
             ...(formData.guardian_contact && { guardian_contact: formData.guardian_contact }),
             ...(formData.address && { address: formData.address }),
             ...(formData.blood_group && { blood_group: formData.blood_group }),
-            ...(formData.batch && { batch: formData.batch }),
-            ...(formData.semester && formData.semester !== 0 && { semester_id: formData.semester })
+            ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
           };
           
-          response = await studentService.updateStudent(studentId, studentDataWithoutImage);
+          response = await studentService.updateStudent(studentId, userDataWithoutImage);
           
           // Then upload image separately
           try {
@@ -482,8 +277,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
             imageFormData.append('image', imageFile);
             await studentService.uploadStudentImage(studentId, imageFormData);
           } catch (imageError) {
-            console.warn('Image upload failed, but student data was updated:', imageError);
-            // Don't fail the entire operation if image upload fails
+            console.warn('Image upload failed, but user data was updated:', imageError);
           }
         } else {
           // Update without image
@@ -548,7 +342,11 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
                   <div className="flex flex-col items-center">
                     <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden mb-2">
                       {imagePreview ? (
-                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                        <img 
+                          src={imagePreview.startsWith('blob:') ? imagePreview : (getFullImageUrl(imagePreview) || imagePreview)} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover" 
+                        />
                       ) : (
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -632,7 +430,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
                   <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="registration_number">
-                      Registration Number *
+                      Registration/Employee ID *
                     </label>
                     <input
                       id="registration_number"
@@ -647,88 +445,25 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
                   <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="batch">
-                      Batch
+                      Batch *
                     </label>
-                    <input
+                    <select
                       id="batch"
                       name="batch"
-                      type="text"
+                      required
                       value={formData.batch}
                       onChange={handleChange}
-                      placeholder="e.g., 2025-2029"
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="department">
-                      Department *
-                    </label>
-                    <select
-                      id="department"
-                      name="department"
-                      required
-                      value={formData.department || ""}
-                      onChange={handleChange}
-                      className={`shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline ${departments.length === 0 ? 'bg-gray-100' : ''}`}
-                      disabled={departments.length === 0}
                     >
-                      <option value="">Select Department</option>
-                      {departments.length > 0 ? (
-                        departments.map(dept => (
-                          <option key={dept.id} value={dept.id}>
-                            {dept.name} ({dept.code})
-                          </option>
-                        ))
-                      ) : (
-                        <option value="" disabled>
-                          {error ? 'Failed to load departments' : 'Loading departments...'}
+                      <option value="">Select Batch</option>
+                      {batches.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.program_name})
                         </option>
-                      )}
+                      ))}
                     </select>
-                    {departments.length === 0 && !error && (
-                      <p className="text-blue-500 text-xs italic mt-1">Loading departments...</p>
-                    )}
-                    {error && (
-                      <p className="text-red-500 text-xs italic mt-1">{error}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="semester">
-                      Semester *
-                    </label>
-                    <select
-                      id="semester"
-                      name="semester"
-                      required
-                      value={formData.semester || ""}
-                      onChange={handleChange}
-                      className={`shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline ${semesters.length === 0 ? 'bg-gray-100' : ''}`}
-                      disabled={semesters.length === 0 || !formData.department}
-                    >
-                      <option value="">Select Semester</option>
-                      {semesters.length > 0 ? (
-                        semesters.map(semester => (
-                          <option key={semester.id} value={semester.id}>
-                            {semester.name} ({semester.semester_code})
-                          </option>
-                        ))
-                      ) : (
-                        <option value="" disabled>
-                          {formData.department ? 'Loading semesters...' : 'Select department first'}
-                        </option>
-                      )}
-                    </select>
-                    {semesters.length === 0 && formData.department && (
-                      <p className="text-blue-500 text-xs italic mt-1">
-                        Debug: Department {formData.department} selected, but no semesters loaded
-                      </p>
-                    )}
-                    {semesters.length === 0 && !error && (
-                      <p className="text-blue-500 text-xs italic mt-1">
-                        {formData.department ? 'Loading semesters...' : 'Please select a department first'}
-                      </p>
+                    {batches.length === 0 && (
+                      <p className="text-blue-500 text-xs italic mt-1">Loading batches...</p>
                     )}
                   </div>
 
@@ -829,21 +564,10 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
                       rows={3}
                       value={formData.address}
                       onChange={handleChange}
-                      placeholder="Enter student's full address"
+                      placeholder="Enter user's full address"
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                     />
                   </div>
-                </div>
-
-                <div className="mt-6">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Assigned Courses</h3>
-                  <ul className="list-disc list-inside max-h-48 overflow-y-auto border border-gray-300 rounded p-3 bg-gray-50">
-                    {courses.map(course => (
-                      <li key={course.course_id} className="text-gray-700">
-                        {course.name} ({course.code})
-                      </li>
-                    ))}
-                  </ul>
                 </div>
               </div>
             </div>

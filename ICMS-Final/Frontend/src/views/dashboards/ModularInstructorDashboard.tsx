@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAllocations } from '../../context/AllocationContext';
 import OBEModule from '../modules/OBEModule';
-import InstructorTimetable from '../../components/InstructorTimetable';
-import InstructorAttendanceDashboard from '../../components/attendance/InstructorAttendanceDashboard';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import MyCoursesModule from '../modules/MyCoursesModule';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
@@ -28,7 +26,6 @@ const ModularInstructorDashboard: React.FC = () => {
   );
   const instructorCourses = getInstructorAllocations(currentInstructorId);
 
-<<<<<<< HEAD
   useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'instructor');
@@ -57,9 +54,6 @@ const ModularInstructorDashboard: React.FC = () => {
   const handleViewCourseDetails = (course: any) => {
   navigate(`/teacher/course-details/${course.allocation_id}`);
 };
-=======
-  
->>>>>>> 6fd3ad6 (obe updated)
 
   const handleManageClass = (course: any) => {
   navigate(`/manage-class/${course.allocation_id}`);
@@ -297,10 +291,6 @@ const ModularInstructorDashboard: React.FC = () => {
         return <MyCoursesModule />;
       case 'dashboard':
         return renderDashboard();
-      case 'attendance':
-        return <InstructorAttendanceDashboard />;
-      case 'schedule':
-        return <InstructorTimetable instructorId={currentInstructorId.toString()} darkMode={false} />;
       case 'obe':
         return <OBEModule departmentId={currentUser?.department_id || 0} />;
       default:
@@ -380,7 +370,7 @@ const ModularInstructorDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={instructorProfile || currentUser} label="Instructor" />
+              <TopbarProfileMenu userData={instructorProfile || currentUser} />
             </div>
           </div>
         </header>
