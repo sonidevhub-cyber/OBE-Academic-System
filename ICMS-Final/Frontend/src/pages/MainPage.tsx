@@ -1,78 +1,64 @@
-import React from "react";
-import { motion } from "framer-motion";
-
+import React, { useEffect, useState } from "react";
+import Heroslider from "../components/Heroslider";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footers";
-import ScrollAnimate from "../components/ScrollAnimate";
+import NoticeBoard from "../components/NoticeBoard"; // ✅ separate component
 
 export default function CUIPortalPage() {
+
+  // 🔔 NOTICE CONTROL
+  const [showNotice, setShowNotice] = useState(false);
+
+  // 🔥 AUTO SHOW (10 sec)
+  useEffect(() => {
+    setShowNotice(true);
+
+    const timer = setTimeout(() => {
+      setShowNotice(false);
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
-      <Navbar />
 
-      
+      {/* ✅ NAVBAR */}
+      <Navbar onNoticeClick={() => setShowNotice(true)} />
 
-      {/* ABOUT */}
-      <section id="about" className="py-24 px-6 md:px-20 bg-gray-50">
-        <ScrollAnimate>
-          <motion.div
-            className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.8 }}
-          >
-            {/* Left Content */}
-            <div className="reveal-card">
-              <h2 className="text-3xl md:text-4xl font-bold text-[#5b2fc1] mb-5">
-                About F.G Postgraduate College
-                <span className="block text-lg font-medium text-gray-500 mt-1">
-                  Wah Cantt
-                </span>
-              </h2>
-
-              <p className="text-lg text-gray-700 leading-relaxed mb-4">
-                F.G Postgraduate College, Wah Cantt is a prestigious public
-                sector institution committed to academic excellence, research,
-                and character building.
-              </p>
-
-              <p className="text-gray-700 leading-relaxed">
-                The institution focuses on undergraduate and postgraduate
-                education, fostering critical thinking, innovation and
-                professional growth.
-              </p>
-            </div>
-
-            {/* Right Stats */}
-            <div className="grid grid-cols-2 gap-6">
-              {[
-                { value: "50+", label: "Years of Excellence" },
-                { value: "10k+", label: "Graduates" },
-                { value: "30+", label: "Academic Programs" },
-                { value: "100+", label: "Qualified Faculty" },
-              ].map((item, i) => (
-                <ScrollAnimate delay={i * 160} key={i}>
-                  <div className="reveal-card p-6 rounded-xl bg-white shadow-sm border text-center">
-                    <h3 className="text-3xl font-bold text-[#5b2fc1]">
-                      {item.value}
-                    </h3>
-                    <p className="text-gray-600 mt-1">{item.label}</p>
-                  </div>
-                </ScrollAnimate>
-              ))}
-            </div>
-          </motion.div>
-        </ScrollAnimate>
+      {/* ✅ HERO */}
+      <section id="home" className="min-h-screen">
+        <Heroslider />
       </section>
 
-      {/* ADMISSIONS */}
-      <section id="admissions" className="py-20 px-6 md:px-20 bg-white">
+      {/* ✅ ABOUT */}
+      <section id="about" className="py-20 px-6 md:px-20">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-3xl font-bold text-[#5b2fc1] mb-4">
+            About College
+          </h2>
+
+          <p className="text-gray-700 leading-relaxed mb-3">
+            F.G Postgraduate College Wah Cantt provides quality education
+            supported by modern digital systems.
+          </p>
+
+          <p className="text-gray-600">
+            This portal helps students stay updated with announcements,
+            date sheets, and timetables in real-time.
+          </p>
+        </div>
       </section>
-      {/* FOOTER */}
-      <ScrollAnimate delay={200}>
-        <Footer />
-      </ScrollAnimate>
+
+      {/* 🔥 NOTICE POPUP */}
+      <NoticeBoard
+        show={showNotice}
+        onClose={() => setShowNotice(false)}
+      />
+
+      {/* ✅ FOOTER (CONTACT LINKED HERE) */}
+      <Footer />
+
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -80,8 +80,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'icms_db',
-        'USER': 'icms_user',
-        'PASSWORD': 'admin.123',
+        'USER': 'postgres',
+        'PASSWORD': '12345678',
         'HOST': 'localhost',
         'PORT': '5432',
     }
