@@ -3,10 +3,9 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAllocations } from '../../context/AllocationContext';
-import InstructorOBEModule from '../modules/InstructorOBEModule';
-import InstructorTimetable from '../../components/InstructorTimetable';
-import InstructorAttendanceDashboard from '../../components/attendance/InstructorAttendanceDashboard';
+import OBEModule from '../modules/OBEModule';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
+import MyCoursesModule from '../modules/MyCoursesModule';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
@@ -57,8 +56,8 @@ const ModularInstructorDashboard: React.FC = () => {
 };
 
   const handleManageClass = (course: any) => {
-    alert(`Managing class for ${course.course_name}`);
-  };
+  navigate(`/manage-class/${course.allocation_id}`);
+};
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -116,8 +115,8 @@ const ModularInstructorDashboard: React.FC = () => {
         <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Semesters</p>
-              <p className="text-3xl font-bold text-purple-600 mt-1">{new Set(instructorCourses.map(c => c.semester)).size}</p>
+              <p className="text-sm font-medium text-gray-600">Batches</p>
+              <p className="text-3xl font-bold text-purple-600 mt-1">{new Set(instructorCourses.map(c => c.batch)).size}</p>
             </div>
             <div className="p-3 bg-purple-100 rounded-lg">
               <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,7 +148,7 @@ const ModularInstructorDashboard: React.FC = () => {
                       <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      {course.semester_name}
+                      {course.batch_name}
                     </div>
                     <div className="flex items-center text-sm text-gray-600">
                       <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -169,7 +168,7 @@ const ModularInstructorDashboard: React.FC = () => {
                 <div className="border-t border-blue-200 pt-4">
                   <div className="flex gap-2">
                     <button 
-                      onClick={() => handleViewCourseDetails(course)}
+                      onClick={() => setActiveTab('courses')}
                       className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                     >
                       View Details
@@ -289,15 +288,11 @@ const ModularInstructorDashboard: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case 'courses':
-        return renderMyCourses();
+        return <MyCoursesModule />;
       case 'dashboard':
         return renderDashboard();
-      case 'attendance':
-        return <InstructorAttendanceDashboard />;
-      case 'schedule':
-        return <InstructorTimetable instructorId={currentInstructorId.toString()} darkMode={false} />;
       case 'obe':
-        return <InstructorOBEModule instructorId={currentInstructorId} />;
+        return <OBEModule departmentId={currentUser?.department_id || 0} />;
       default:
         return renderDashboard();
     }
@@ -375,7 +370,7 @@ const ModularInstructorDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={instructorProfile || currentUser} label="Instructor" />
+              <TopbarProfileMenu userData={instructorProfile || currentUser} />
             </div>
           </div>
         </header>

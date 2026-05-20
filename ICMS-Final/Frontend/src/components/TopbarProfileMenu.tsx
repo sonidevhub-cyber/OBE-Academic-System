@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Edit2 } from 'lucide-react';
+import ProfileEditModal from './ui/modals/ProfileEditModal';
 import {
   buildProfileField,
   formatProfileDate,
@@ -39,6 +41,7 @@ const addField = (
 
 const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }) => {
   const [open, setOpen] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const profile = useMemo(() => userData ?? {}, [userData]);
   const displayName = getDisplayName(profile, 'User');
@@ -49,6 +52,7 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
   const departmentLabel = getDepartmentLabel(profile.department || profile.department_name);
   const semesterLabel = getSemesterLabel(profile.semester || profile.semester_name);
   const primaryId =
+    profile.custom_id ||
     profile.employee_id ||
     profile.registration_number ||
     profile.username ||
@@ -57,6 +61,8 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
 
   const sections = useMemo<ProfileSection[]>(() => {
     if (!profile) return [];
+
+    const isSAC = resolvedRole === 'SAC' || resolvedRole === 'Administrator';
 
     const identity: Array<{ label: string; value: string }> = [];
     addField(identity, 'Full Name', displayName);
@@ -72,17 +78,20 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
     addField(contact, 'Address', profile.address);
 
     const workOrAcademic: Array<{ label: string; value: string }> = [];
-    addField(workOrAcademic, 'Employee ID', profile.employee_id);
-    addField(workOrAcademic, 'Registration No.', profile.registration_number);
-    addField(workOrAcademic, 'Department', departmentLabel);
-    addField(workOrAcademic, 'Semester', semesterLabel);
-    addField(workOrAcademic, 'Designation', profile.designation);
-    addField(workOrAcademic, 'Rank', profile.rank);
-    addField(workOrAcademic, 'Specialization', profile.specialization);
-    addField(workOrAcademic, 'Batch', profile.batch);
-    addField(workOrAcademic, 'Experience', profile.experience_years != null ? `${profile.experience_years} years` : null);
-    addField(workOrAcademic, 'Joining Date', profile.joining_date || profile.hire_date, formatProfileDate);
-    addField(workOrAcademic, 'Retirement Date', profile.retirement_date, formatProfileDate);
+    if (!isSAC) {
+      addField(workOrAcademic, 'Identity ID', profile.custom_id);
+      addField(workOrAcademic, 'Employee ID', profile.employee_id);
+      addField(workOrAcademic, 'Registration No.', profile.registration_number);
+      addField(workOrAcademic, 'Department', departmentLabel);
+      addField(workOrAcademic, 'Semester', semesterLabel);
+      addField(workOrAcademic, 'Designation', profile.designation);
+      addField(workOrAcademic, 'Rank', profile.rank);
+      addField(workOrAcademic, 'Specialization', profile.specialization);
+      addField(workOrAcademic, 'Batch', profile.batch);
+      addField(workOrAcademic, 'Experience', profile.experience_years != null ? `${profile.experience_years} years` : null);
+      addField(workOrAcademic, 'Joining Date', profile.joining_date || profile.hire_date, formatProfileDate);
+      addField(workOrAcademic, 'Retirement Date', profile.retirement_date, formatProfileDate);
+    }
 
     const account: Array<{ label: string; value: string }> = [];
     addField(account, 'Created At', profile.created_at, formatProfileDate);
@@ -92,7 +101,7 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
     const result: ProfileSection[] = [];
     if (identity.length) result.push({ title: 'Identity', items: identity });
     if (contact.length) result.push({ title: 'Contact', items: contact });
-    if (workOrAcademic.length) result.push({ title: resolvedRole === 'Student' ? 'Academic' : 'Professional', items: workOrAcademic });
+    if (workOrAcademic.length && !isSAC) result.push({ title: resolvedRole === 'Student' ? 'Academic' : 'Professional', items: workOrAcademic });
     if (account.length) result.push({ title: 'Account', items: account });
 
     return result;
@@ -105,11 +114,20 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
     statusLabel,
   ]);
 
-  const quickFacts = [
-    { label: 'Primary ID', value: primaryId ? String(primaryId) : 'Not available' },
-    { label: 'Department', value: departmentLabel || 'Not available' },
-    { label: 'Contact', value: profile.phone || profile.email || profile.user_email || 'Not available' },
-  ];
+  const quickFacts = useMemo(() => {
+    const isSAC = resolvedRole === 'SAC' || resolvedRole === 'Administrator';
+    const facts = [
+      { label: 'Primary ID', value: primaryId ? String(primaryId) : 'Not available' },
+    ];
+    
+    if (!isSAC) {
+      facts.push({ label: 'Department', value: departmentLabel || 'Not available' });
+    }
+    
+    facts.push({ label: 'Contact', value: profile.phone || profile.email || profile.user_email || 'Not available' });
+    
+    return facts;
+  }, [primaryId, departmentLabel, profile, resolvedRole]);
 
   return (
     <>
@@ -182,13 +200,22 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setOpen(false)}
-                    className="h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
-                    aria-label="Close profile"
-                  >
-                    x
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowEditModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-all font-bold border border-white/20"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Edit Profile</span>
+                    </button>
+                    <button
+                      onClick={() => setOpen(false)}
+                      className="h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors flex items-center justify-center text-xl"
+                      aria-label="Close profile"
+                    >
+                      &times;
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -230,6 +257,16 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
           </div>
         )}
       </AnimatePresence>
+
+      <ProfileEditModal 
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        userData={profile}
+        onSuccess={() => {
+          // You might want to refresh the page or update global state here
+          window.location.reload(); 
+        }}
+      />
     </>
   );
 };

@@ -1,23 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { coordinatorService } from '../api/coordinatorService';
-
-interface CourseAllocation {
-  allocation_id: number;
-  course: number;
-  course_name: string;
-  course_code: string;
-  instructor: number;
-  instructor_name: string;
-  semester: number;
-  semester_name: string;
-  coordinator: number;
-  coordinator_name: string;
-  status: 'proposed' | 'approved' | 'rejected' | 'active';
-  proposed_at: string;
-  hod_comments?: string;
-  approved_at?: string | null;
-  rejection_reason?: string;
-}
+import { coordinatorService, CourseAllocation } from '../api/coordinatorService';
+import { useAuth } from './AuthContext';
 
 interface AllocationContextType {
   allocations: CourseAllocation[];
@@ -28,12 +11,13 @@ interface AllocationContextType {
   getProposedAllocations: () => CourseAllocation[];
   getApprovedAllocations: () => CourseAllocation[];
   getInstructorAllocations: (instructorId: number) => CourseAllocation[];
-  getAllocationsBySemester: (semesterId: number) => CourseAllocation[];
+  getAllocationsByBatch: (batchId: string) => CourseAllocation[];
 }
 
 const AllocationContext = createContext<AllocationContextType | undefined>(undefined);
 
 export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { currentUser, loading: authLoading } = useAuth();
   const [allocations, setAllocations] = useState<CourseAllocation[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -41,8 +25,12 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
     try {
       setLoading(true);
       const response = await coordinatorService.getCourseAllocations();
-      if (response.data) {
-        setAllocations(response.data || []);
+      const data = response.data.data; // Use .data.data for new API response format
+      if (Array.isArray(data)) {
+        setAllocations(data);
+      } else {
+        console.warn('Expected array for allocations, received:', data);
+        setAllocations([]);
       }
     } catch (error) {
       console.error('Error fetching allocations:', error);
@@ -54,8 +42,10 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    fetchAllocations();
-  }, []);
+    if (currentUser && !authLoading) {
+      fetchAllocations();
+    }
+  }, [currentUser, authLoading]);
 
   const addAllocation = (allocation: CourseAllocation) => {
     setAllocations(prev => [...prev, allocation]);
@@ -86,7 +76,7 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
       a =>
       a.status === 'active' || a.status === 'approved'
     );
-  const getAllocationsBySemester = (semesterId: number) => allocations.filter(a => a.semester === semesterId && (a.status === 'approved' || a.status === 'active'));
+  const getAllocationsByBatch = (batchId: string) => allocations.filter(a => a.batch === batchId && (a.status === 'approved' || a.status === 'active'));
 
   return (
     <AllocationContext.Provider value={{
@@ -98,7 +88,7 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
       getProposedAllocations,
       getApprovedAllocations,
       getInstructorAllocations,
-      getAllocationsBySemester
+      getAllocationsByBatch
     }}>
       {children}
     </AllocationContext.Provider>

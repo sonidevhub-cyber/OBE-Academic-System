@@ -38,10 +38,6 @@ const HODCoordinatorManagementModule: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  console.log('HODCoordinatorManagementModule loaded, activeTab:', activeTab);
-  console.log('Coordinators state:', coordinators);
-  console.log('Instructors state:', instructors);
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -49,15 +45,10 @@ const HODCoordinatorManagementModule: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      console.log('Fetching coordinator management data...');
-      
       // Fetch coordinators and instructors
       const coordinatorsRes = await api.get('coordinators/hod-management/department_coordinators/');
       const instructorsRes = await api.get('coordinators/hod-management/department_instructors/');
-      
-      console.log('Coordinators response:', coordinatorsRes.data);
-      console.log('Instructors response:', instructorsRes.data);
-      
+
       setCoordinators(coordinatorsRes.data || []);
       setInstructors(instructorsRes.data || []);
     } catch (error: any) {
@@ -113,7 +104,11 @@ const HODCoordinatorManagementModule: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header with Tabs */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Coordinator Management</h2>
+          <p className="text-sm text-gray-500">Manage department coordinators and instructor-role permissions.</p>
+        </div>
         <div className="flex space-x-1 bg-gray-100 rounded-lg p-1">
           <button
             onClick={() => setActiveTab('instructors')}
@@ -140,22 +135,6 @@ const HODCoordinatorManagementModule: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-3">
-          <button
-            onClick={async () => {
-              try {
-                const response = await api.get('coordinators/hod-management/check_user_role/');
-                console.log('User role check:', response.data);
-                alert(`User role: ${response.data.user_role}, Has HOD profile: ${response.data.has_hod_profile}`);
-              } catch (error) {
-                console.error('User role check error:', error);
-                alert('User role check failed. Check console.');
-              }
-            }}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
-          >
-            <UserCheck className="w-4 h-4 mr-2" />
-            Check User Role
-          </button>
           {activeTab === 'instructors' && (
             <button
               onClick={() => setShowPromoteModal(true)}
@@ -179,23 +158,23 @@ const HODCoordinatorManagementModule: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500">
           <div className="text-2xl font-bold text-blue-600">{instructors.length}</div>
-          <div className="text-gray-600">Total Instructors</div>
+          <div className="text-gray-600">Instructors</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-green-500">
           <div className="text-2xl font-bold text-green-600">{coordinators.length}</div>
-          <div className="text-gray-600">Total Coordinators</div>
+          <div className="text-gray-600">Coordinators</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-purple-500">
           <div className="text-2xl font-bold text-purple-600">
             {instructors.filter(i => i.is_coordinator && i.coordinator_info?.can_act_as_instructor).length}
           </div>
-          <div className="text-gray-600">Dual Role (Coord + Instr)</div>
+          <div className="text-gray-600">Dual Role Users</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-orange-500">
           <div className="text-2xl font-bold text-orange-600">
             {instructors.filter(i => !i.is_coordinator).length}
           </div>
-          <div className="text-gray-600">Available for Promotion</div>
+          <div className="text-gray-600">Ready for Promotion</div>
         </div>
       </div>
 

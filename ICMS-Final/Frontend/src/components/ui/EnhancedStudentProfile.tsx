@@ -3,19 +3,19 @@ import { studentService } from '../../api/apiService';
 import { getDisplayName, getProfileImageUrl } from '../../utils/profileHelpers';
 
 interface EnhancedStudentProfileProps {
-  studentId?: number;
+  studentId?: string | number;
   onClose?: () => void;
 }
 
 interface Course {
-  course_id: number;
+  course_id: string | number;
   name: string;
   code: string;
   description?: string;
 }
 
 interface Student {
-  student_id: number;
+  student_id: string | number;
   name: string;
   email: string;
   phone: string;

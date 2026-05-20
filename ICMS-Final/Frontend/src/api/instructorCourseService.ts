@@ -83,6 +83,6 @@ export const instructorCourseService = {
 
   // Get course allocations (including pending ones)
   getAllAllocations: () => {
-    return api.get('/coordinators/course-allocations/');
+    return api.get('/coordinators/');
   }
 };

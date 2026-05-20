@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { instructorService, departmentService, Instructor } from '../../../api/studentInstructorService';
 import { toast } from 'react-toastify';
 import { getProfileImageUrl } from '../../../utils/profileHelpers';
+import { getFullImageUrl } from '../../../utils/imageHelpers';
 
 // Utility function to decode HTML entities
 const decodeHtmlEntities = (text: string): string => {
@@ -257,7 +258,11 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
                   <div className="flex flex-col items-center">
                     <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden mb-2">
                       {imagePreview ? (
-                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                        <img 
+                          src={imagePreview.startsWith('blob:') ? imagePreview : (getFullImageUrl(imagePreview) || imagePreview)} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover" 
+                        />
                       ) : (
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -282,7 +287,7 @@ const InstructorProfileModal: React.FC<InstructorProfileModalProps> = ({
                 <>
                   {imagePreview ? (
                     <img
-                      src={imagePreview}
+                      src={imagePreview.startsWith('blob:') ? imagePreview : (getFullImageUrl(imagePreview) || imagePreview)}
                       alt={instructor.name}
                       className="w-48 h-48 object-cover rounded-full shadow-md"
                     />

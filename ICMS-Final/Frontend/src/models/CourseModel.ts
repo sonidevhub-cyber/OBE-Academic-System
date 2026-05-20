@@ -1,12 +1,15 @@
-import { Department, Semester } from './DepartmentModel';
+export interface SemesterRef {
+  id: number;
+  name: string;
+}
 
 export interface Course {
   id: number;
   name: string;
   code: string;
   credits: number;
-  department: number | Department;
-  semester: number | Semester;
+  department: number | string;
+  semester: number | SemesterRef;
 }
 
 export interface Instructor {
@@ -16,7 +19,7 @@ export interface Instructor {
     last_name: string;
     email: string;
   };
-  department: number | Department;
+  department: number | string;
   employee_id: string;
   image?: string;
 }

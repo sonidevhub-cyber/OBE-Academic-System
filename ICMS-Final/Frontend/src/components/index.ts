@@ -5,7 +5,6 @@ export { default as ReportCard } from './ui/ReportCard';
 
 // Modals
 export { default as StudentModal } from './ui/modals/StudentModal';
-export { default as DepartmentModal } from './ui/modals/DepartmentModal';
 export { default as CourseModal } from './ui/modals/CourseModal';
 export { default as SemesterModal } from './ui/modals/SemesterModal';
 export { default as InstructorModal } from './ui/modals/InstructorModal';
@@ -30,21 +29,6 @@ export { default as NotificationPanel } from './widgets/dashboard/NotificationPa
 export { default as QuickActions } from './widgets/dashboard/QuickActions';
 export { default as SystemHealthWidget } from './widgets/dashboard/SystemHealthWidget';
 export { default as WeatherWidget } from './widgets/dashboard/WeatherWidget';
-
-// ==================== ATTENDANCE COMPONENTS ====================
-export { default as AttendanceAnalytics } from './analytics/AttendanceAnalytics';
-export { default as AdminAttendanceManagement } from './attendance/AdminAttendanceManagement';
-export { default as AttendanceCards } from './attendance/AttendanceCards';
-export { default as AttendanceEditRequest } from './attendance/AttendanceEditRequest';
-export { default as AttendanceEditRequestCard } from './attendance/AttendanceEditRequestCard';
-export { default as AttendanceFilters } from './attendance/AttendanceFilters';
-export { default as AttendanceMarkCard } from './attendance/AttendanceMarkCard';
-export { default as AttendanceMonitoringCard } from './attendance/AttendanceMonitoringCard';
-export { default as AttendanceReportCard } from './attendance/AttendanceReportCard';
-export { default as TimetableAttendanceCard } from './attendance/TimetableAttendanceCard';
-
-// ==================== TIMETABLE COMPONENTS ====================
-export { default as Timetable } from './timetable/Timetable';
 
 // ==================== ADMIN COMPONENTS ====================
 // export { default as HODRequestsManager } from '../views/modules/admin/HODRequestsManager';

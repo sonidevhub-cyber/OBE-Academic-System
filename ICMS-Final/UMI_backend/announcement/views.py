@@ -1,19 +1,24 @@
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from rbac.permissions import HasRBACPermission
+from rest_framework import generics, permissions
 from .models import Announcement
 from .serializers import AnnouncementSerializer
 
-class AnnouncementViewSet(viewsets.ModelViewSet):
-    queryset = Announcement.objects.all().order_by('-created_at')
+class AnnouncementListCreateView(generics.ListCreateAPIView):
+    queryset = Announcement.objects.filter(is_active=True)
     serializer_class = AnnouncementSerializer
-    permission_classes = [IsAuthenticated, HasRBACPermission]
-    required_permission = 'manage_announcements'
 
     def get_permissions(self):
-        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), HasRBACPermission()]
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)  # 👈 Automatically user set karega
+        serializer.save(author=self.request.user)
+
+class AnnouncementDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Announcement.objects.all()
+    serializer_class = AnnouncementSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]

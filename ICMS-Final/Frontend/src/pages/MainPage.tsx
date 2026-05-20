@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 
 import Navbar from "../components/Navbar";
 import HeroSlider from "../components/Heroslider";
-import Departments from "../components/Department";
 import Footer from "../components/Footers";
 import AdmissionsSection from "../components/AdmissionsSection";
 import NewEvents from "../components/NewEvents";
@@ -71,13 +70,6 @@ export default function CUIPortalPage() {
               ))}
             </div>
           </motion.div>
-        </ScrollAnimate>
-      </section>
-
-      {/* DEPARTMENTS */}
-      <section id="departments" className="py-20 px-6 md:px-20 bg-slate-50">
-        <ScrollAnimate>
-          <Departments />
         </ScrollAnimate>
       </section>
 

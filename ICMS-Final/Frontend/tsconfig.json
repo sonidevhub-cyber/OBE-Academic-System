@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+  "ignoreDeprecations": "6.0", /**abi ma ignore lga rhi sonia sy pochu gi version **/
     "target": "es5",
     "lib": [
       "dom",

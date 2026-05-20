@@ -1,327 +1,139 @@
 import { api } from './api';
 
-export interface Coordinator {
+export interface CurriculumVersion {
   id: number;
-  name: string;
-  email: string;
-  phone: string;
-  employee_id: string;
-  department: number;
-  department_name: string;
-  designation: string;
-  specialization: string;
-  experience_years: number;
-  can_act_as_instructor: boolean;
-  assigned_by: number;
-  assigned_by_name: string;
+  program: number;
+  program_name: string;
+  batch: string;
+  batch_name: string;
+  version_no: string;
+  status: 'draft' | 'active' | 'archived';
+  cloned_from: number | null;
+  cloned_from_version_no: string | null;
+  created_by: number;
+  created_by_name: string;
+  activated_by: number | null;
+  activated_at: string | null;
+  created_at: string;
+  updated_at: string;
   is_active: boolean;
-  created_at: string;
+  total_courses: number;
+  is_editable: boolean;
+  courses_by_semester?: Record<string, CurriculumCourse[]>;
 }
 
-export interface TimetableProposal {
-  proposal_id: number;
-  title: string;
-  description: string;
-  semester: number;
-  semester_name: string;
-  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'implemented';
-  coordinator: number;
-  coordinator_name: string;
-  created_at: string;
-  submitted_at: string | null;
-  reviewed_at: string | null;
-  reviewed_by: number | null;
-  reviewed_by_name: string | null;
-  hod_comments: string;
-  slots: TimetableSlot[];
-}
-
-export interface TimetableSlot {
+export interface CurriculumCourse {
   id: number;
-  course: number;
-  course_name: string;
+  course: string;
   course_code: string;
-  instructor: number | null;
-  instructor_name: string | null;
-  day: string;
-  start_time: string;
-  end_time: string;
-  room: string;
+  course_name: string;
+  course_type: string;
+  credit_hours: number;
+  semester_no: number;
+  is_active: boolean;
+  allocation?: any;
 }
 
 export interface CourseAllocation {
   allocation_id: number;
-  course: number;
+  course: string;
   course_name: string;
   course_code: string;
   instructor: number;
   instructor_name: string;
-  semester: number;
-  semester_name: string;
-  coordinator: number;
+  teacher?: number;
+  teacher_name?: string;
+  batch: string;
+  batch_name: string;
+  coordinator: string;
   coordinator_name: string;
   status: 'proposed' | 'approved' | 'rejected' | 'active';
   proposed_at: string;
   approved_at: string | null;
-  approved_by: number | null;
+  approved_by: string | null;
   approved_by_name: string | null;
   hod_comments: string;
+  rejection_reason?: string;
 }
 
-export interface CoordinatorDashboard {
+export interface TeacherAllocation {
   id: number;
-  coordinator: number;
-  coordinator_name: string;
-  total_courses_managed: number;
-  total_instructors_coordinated: number;
-  pending_approvals: number;
-  active_timetables: number;
-  training_hours: number;
-  certifications: string;
-  performance_rating: number;
-  last_updated: string;
-}
-
-export interface DashboardOverview {
-  coordinator_info: {
-    name: string;
-    department: string | null;
-    can_act_as_instructor: boolean;
-    experience_years: number;
-  };
-  dashboard_metrics: {
-    total_courses_managed: number;
-    total_instructors_coordinated: number;
-    pending_approvals: number;
-    active_timetables: number;
-    approval_rate: number;
-  };
-  department_overview: {
-    total_courses: number;
-    total_instructors: number;
-    pending_proposals: number;
-    pending_allocations: number;
-  };
-  recent_activities: {
-    proposals: Array<{
-      id: number;
-      title: string;
-      status: string;
-      created_at: string;
-      semester: string;
-    }>;
-    allocations: Array<{
-      id: number;
-      course: string;
-      instructor: string;
-      status: string;
-      proposed_at: string;
-    }>;
-  };
-  professional_development: {
-    training_hours: number;
-    performance_rating: number;
-    certifications: string;
-  };
-}
-
-export interface TimetablePublishAudit {
-  department: {
-    id: number | null;
-    name: string | null;
-  };
-  summary: {
-    implemented_proposals: number;
-    total_slots: number;
-    published_slots: number;
-    unpublished_slots: number;
-  };
-  audit: Array<{
-    proposal_id: number;
-    title: string;
-    semester_name: string | null;
-    coordinator_name: string | null;
-    reviewed_at: string | null;
-    published_slots: number;
-    total_slots: number;
-    slots: Array<{
-      proposal_slot_id: number;
-      course_name: string | null;
-      course_code: string | null;
-      instructor_name: string | null;
-      day: string;
-      start_time: string;
-      end_time: string;
-      room: string;
-      published: boolean;
-      timetable_id: number | null;
-    }>;
-  }>;
+  curriculum_version: number;
+  course: string;
+  course_name: string;
+  course_code: string;
+  batch: string;
+  batch_name: string;
+  semester_no: number;
+  teacher: number;
+  teacher_name: string;
+  allocated_by_name: string;
+  allocated_at: string;
+  status: 'active' | 'changed' | 'cancelled';
+  change_reason: string;
+  cloned_from_id: number | null;
+  version_no: string;
 }
 
 export const coordinatorService = {
-  // Dashboard
-  getDashboardOverview: () => 
-    api.get<DashboardOverview>('coordinators/professional-dashboard/dashboard_overview/'),
+  // --- Curriculum Versions ---
+  getCurriculumVersions: (params?: any) => 
+    api.get('curriculum-versions/curriculum-versions/', { params }),
   
-  // Role Management
-  getUserRoles: () =>
-    api.get('coordinators/coordinators/get_user_roles/'),
+  getVersion: (id: number) => {
+    if (isNaN(id)) {
+      console.warn('coordinatorService.getVersion called with NaN');
+      return Promise.reject(new Error('Invalid ID'));
+    }
+    return api.get(`curriculum-versions/curriculum-versions/${id}/`);
+  },
   
-  switchRole: (role: string) =>
-    api.post('coordinators/coordinators/switch_role/', { role }),
+  createVersion: (data: any) => 
+    api.post('curriculum-versions/curriculum-versions/', data),
   
-  // Coordinators
-  getCoordinators: () =>
-    api.get<Coordinator[]>('coordinators/hod-management/department_coordinators/'),
+  activateVersion: (id: number) => 
+    api.post(`curriculum-versions/curriculum-versions/${id}/activate/`),
   
-  getCoordinator: (id: number) =>
-    api.get<Coordinator>(`coordinators/${id}/`),
-  
-  getWorkloadAnalysis: () =>
-    api.get('coordinators/professional-dashboard/workload_analysis/'),
-  
-  getPerformanceMetrics: () =>
-    api.get('coordinators/professional-dashboard/performance_metrics/'),
-  
-  updateProfessionalInfo: (data: { training_hours?: number; certifications?: string }) =>
-    api.post('coordinators/professional-dashboard/update_professional_info/', data),
+  cloneVersion: (id: number, target_batch_id: string) => 
+    api.post(`curriculum-versions/curriculum-versions/${id}/clone/`, { target_batch_id }),
 
-  // Timetable Proposals
-  getTimetableProposals: () =>
-    api.get<TimetableProposal[]>('coordinators/timetable-proposals/'),
+  // --- Teacher Allocations ---
+  getCourseAllocations: (params?: any) => 
+    api.get('coordinators/', { params }),
   
-  createTimetableProposal: (data: { semester: number; title: string; description: string }) =>
-    api.post<TimetableProposal>('coordinators/timetable-proposals/', data),
-  
-  getTimetableProposal: (id: number) =>
-    api.get<TimetableProposal>(`coordinators/timetable-proposals/${id}/`),
-  
-  updateTimetableProposal: (id: number, data: Partial<TimetableProposal>) =>
-    api.put<TimetableProposal>(`coordinators/timetable-proposals/${id}/`, data),
-  
-  submitProposalToHOD: (id: number) =>
-    api.post(`coordinators/timetable-proposals/${id}/submit_to_hod/`),
+  bulkAllocate: (data: any) => 
+    api.post('coordinators/bulk/', data),
 
-  approveTimetableProposal: (id: number, data: { comments?: string }) =>
-    api.post(`coordinators/timetable-proposals/${id}/approve_proposal/`, data),
+  cancelAllocation: (id: number, reason: string) => 
+    api.post(`coordinators/${id}/cancel/`, { reason }),
+  
+  getHistory: (id: number) => 
+    api.get(`coordinators/${id}/history/`),
 
-  rejectTimetableProposal: (id: number, data: { comments?: string }) =>
-    api.post(`coordinators/timetable-proposals/${id}/reject_proposal/`, data),
+  // --- Supporting Data ---
+  getPrograms: () => api.get('programs/'),
+  getInstructors: () => api.get('instructors/profiles/'),
+  getBatches: () => api.get('batches/all/'),
+  getBatchesByProgram: (programId: string) => api.get(`batches/all/?program=${programId}`),
+  getCoursesByBatch: (programId: string, semester: number) => 
+    api.get(`courses/?program=${programId}&semester=${semester}`),
 
-  getTimetablePublishAudit: () =>
-    api.get<TimetablePublishAudit>('coordinators/timetable-proposals/published_audit/'),
+  // --- HOD Specific Actions ---
+  approveCourseAllocation: (id: number, data: any) => 
+    api.post(`coordinators/${id}/approve/`, data),
   
-  // Timetable Slots
-  getTimetableSlots: (proposalId?: number) =>
-    api.get<TimetableSlot[]>('coordinators/timetable-slots/', {
-      params: proposalId ? { proposal_id: proposalId } : {}
-    }),
-  
-  createTimetableSlot: (data: {
-    proposal_id: number;
-    course: number;
-    instructor?: number;
-    day: string;
-    start_time: string;
-    end_time: string;
-    room: string;
-  }) =>
-    api.post<TimetableSlot>('coordinators/timetable-slots/', data),
-  
-  updateTimetableSlot: (id: number, data: Partial<TimetableSlot>) =>
-    api.put<TimetableSlot>(`coordinators/timetable-slots/${id}/`, data),
-  
-  deleteTimetableSlot: (id: number) =>
-    api.delete(`coordinators/timetable-slots/${id}/`),
+  rejectCourseAllocation: (id: number, data: any) => 
+    api.post(`coordinators/${id}/reject/`, data),
 
-  // Course Allocations
-  getCourseAllocations: () =>
-    api.get<CourseAllocation[]>('coordinators/course-allocations/'),
-  
-  createCourseAllocation: (data: {
-    course: number;
-    instructor: number;
-    semester: number;
-    hod_comments?: string;
-  }) =>
-    api.post<CourseAllocation>('coordinators/course-allocations/', data),
-  
-  updateCourseAllocation: (id: number, data: Partial<CourseAllocation>) =>
-    api.put<CourseAllocation>(`coordinators/course-allocations/${id}/`, data),
-  
-  deleteCourseAllocation: (id: number) =>
-    api.delete(`coordinators/course-allocations/${id}/`),
-  
-  approveCourseAllocation: (id: number, data: { comments?: string }) =>
-    api.post(`coordinators/course-allocations/${id}/approve_allocation/`, data),
-  
-  rejectCourseAllocation: (id: number, data: { comments?: string; rejection_reason?: string }) =>
-    api.post(`coordinators/course-allocations/${id}/reject_allocation/`, data),
+  getTimetableProposals: (params?: any) => 
+    api.get('timetable/proposals/', { params }),
 
-  // Academic Data
-  getDepartments: () =>
-    api.get('academics/departments/'),
-  
-  getSemesters: () =>
-    api.get('academics/semesters/'),
-  
-  getCourses: (semesterId?: number) =>
-    api.get('academics/courses/', {
-      params: semesterId ? { semester: semesterId } : {}
-    }),
-  
-  getInstructors: () =>
-    api.get('instructors/instructor/'),
+  getTimetablePublishAudit: (params?: any) => 
+    api.get('timetable/publish-audit/', { params }),
 
-  // Rooms
-  getRooms: () =>
-    api.get('academics/rooms/'),
+  approveTimetableProposal: (id: number, data: any) => 
+    api.post(`timetable/proposals/${id}/approve/`, data),
 
-  // Timetables - Professional semester-based system
-  getTimetables: () =>
-    api.get('coordinators/semester-timetables/'),
-  
-  createSemesterTimetable: (data: {
-    semester_id: number;
-    timetable_slots: Array<{
-      allocation_id: number;
-      day: string;
-      start_time: string;
-      end_time: string;
-      room_name: string;
-    }>;
-  }) =>
-    api.post('coordinators/timetable-proposals/', {
-      semester: data.semester_id,
-      title: `Semester ${data.semester_id} Timetable`,
-      description: `Complete timetable for semester ${data.semester_id}`,
-      status: 'submitted',
-      slots: data.timetable_slots.map(slot => ({
-        allocation_id: slot.allocation_id,
-        day: slot.day,
-        start_time: slot.start_time,
-        end_time: slot.end_time,
-        room: slot.room_name
-      }))
-    }),
-  
-  checkTimeConflicts: (data: {
-    day: string;
-    start_time: string;
-    end_time: string;
-    room_name: string;
-    instructor_id: number;
-  }) =>
-    api.post('coordinators/check-time-conflicts/', data),
-
-  // HOD Management
-  promoteInstructorToCoordinator: (instructorId: number, canActAsInstructor: boolean = false) =>
-    api.post('coordinators/hod-management/promote_instructor_to_coordinator/', {
-      instructor_id: instructorId,
-      can_act_as_instructor: canActAsInstructor
-    }),
-
-  updateCoordinator: (id: number, data: Partial<Coordinator>) =>
-    api.post(`coordinators/hod-management/${id}/toggle_instructor_permission/`),
+  rejectTimetableProposal: (id: number, data: any) => 
+    api.post(`timetable/proposals/${id}/reject/`, data),
 };

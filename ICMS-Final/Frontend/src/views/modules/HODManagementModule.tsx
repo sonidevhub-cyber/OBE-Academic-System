@@ -290,10 +290,15 @@ const HODManagementModule: React.FC<HODManagementProps> = ({ token }) => {
   };
 
   const handleEditClick = (hod: HOD) => {
+    const fallbackFullName = (hod.name || '').trim();
+    const fallbackNameParts = fallbackFullName ? fallbackFullName.split(/\s+/) : [];
+    const fallbackFirstName = fallbackNameParts[0] || '';
+    const fallbackLastName = fallbackNameParts.length > 1 ? fallbackNameParts.slice(1).join(' ') : '';
+
     setEditingHod(hod);
     setEditFormData({
-      first_name: hod.user?.first_name || hod.first_name || '',
-      last_name: hod.user?.last_name || hod.last_name || '',
+      first_name: hod.user?.first_name || hod.first_name || fallbackFirstName,
+      last_name: hod.user?.last_name || hod.last_name || fallbackLastName,
       email: hod.user?.email || hod.email || '',
       phone: hod.phone || '',
       department: typeof hod.department === 'object' ? String(hod.department.id) : hod.department,

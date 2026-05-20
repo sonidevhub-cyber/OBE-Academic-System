@@ -1,0 +1,23 @@
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import CurriculumVersionViewSet, CurriculumVersionCourseViewSet
+
+router = DefaultRouter()
+router.register(r'curriculum-versions', CurriculumVersionViewSet, basename='curriculum-version')
+
+# Manual nested paths for courses
+version_courses_list = CurriculumVersionCourseViewSet.as_view({
+    'get': 'list',
+    'post': 'create'
+})
+version_courses_detail = CurriculumVersionCourseViewSet.as_view({
+    'get': 'retrieve',
+    'patch': 'partial_update',
+    'delete': 'destroy'
+})
+
+urlpatterns = [
+    path('', include(router.urls)),
+    path('curriculum-versions/<int:version_pk>/courses/', version_courses_list, name='version-courses-list'),
+    path('curriculum-versions/<int:version_pk>/courses/<int:pk>/', version_courses_detail, name='version-courses-detail'),
+]

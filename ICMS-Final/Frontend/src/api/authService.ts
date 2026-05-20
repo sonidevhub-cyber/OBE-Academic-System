@@ -68,7 +68,20 @@ const apiClient = axios.create({
     'Content-Type': 'application/json'
   }
 });
-
+apiClient.interceptors.request.use(function (config) {
+  const storedAuth = localStorage.getItem('auth');
+  if (storedAuth) {
+    try {
+      const authData = JSON.parse(storedAuth);
+      if (authData.access_token) {
+        config.headers.Authorization = `Token ${authData.access_token}`;
+      }
+    } catch (err) {
+      console.error('Error parsing stored auth data:', err);
+    }
+  }
+  return config;
+});
 const register = async (_data: RegisterData): Promise<AuthResponse> => {
   console.warn('Registration attempt blocked: registrations are disabled.');
   // Always reject to make registration impossible from the frontend
@@ -102,6 +115,19 @@ const login = async (data: LoginData): Promise<AuthResponse> => {
     });
 
     console.log('Raw login response:', response);
+        if (response.data && response.data.access_token && response.data.user) {
+      // Store auth data in localStorage immediately for interceptor to use
+      const authData = {
+        user: response.data.user,
+        role: response.data.role,
+        permissions: response.data.permissions || [],
+        access_token: response.data.access_token,
+        refresh_token: response.data.refresh_token
+      };
+      localStorage.setItem('auth', JSON.stringify(authData));
+      sessionStorage.setItem('auth', JSON.stringify(authData));
+      console.log('Auth data stored in localStorage:', authData);
+    }
 
     if (response.data && response.data.access_token && response.data.user) {
       // Set token for future requests

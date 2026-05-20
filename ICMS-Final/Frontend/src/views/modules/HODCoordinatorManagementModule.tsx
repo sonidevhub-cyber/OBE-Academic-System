@@ -37,10 +37,6 @@ const HODCoordinatorManagementModule: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  console.log('HODCoordinatorManagementModule loaded');
-  console.log('Coordinators state:', coordinators);
-  console.log('Instructors state:', instructors);
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -48,15 +44,10 @@ const HODCoordinatorManagementModule: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      console.log('Fetching coordinator management data...');
-      
       // Fetch coordinators and instructors
-      const coordinatorsRes = await api.get('coordinators/api/hod-management/department_coordinators/');
-      const instructorsRes = await api.get('coordinators/api/hod-management/department_instructors/');
-      
-      console.log('Coordinators response:', coordinatorsRes.data);
-      console.log('Instructors response:', instructorsRes.data);
-      
+      const coordinatorsRes = await api.get('coordinators/hod-management/department_coordinators/');
+      const instructorsRes = await api.get('coordinators/hod-management/department_instructors/');
+
       setCoordinators(coordinatorsRes.data || []);
       setInstructors(instructorsRes.data || []);
     } catch (error: any) {
@@ -74,7 +65,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
 
   const handlePromoteInstructor = async (instructorId: number, canActAsInstructor: boolean) => {
     try {
-      await api.post('coordinators/api/hod-management/promote_instructor_to_coordinator/', {
+      await api.post('coordinators/hod-management/promote_instructor_to_coordinator/', {
         instructor_id: instructorId,
         can_act_as_instructor: canActAsInstructor
       });
@@ -89,7 +80,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
 
   const handleToggleInstructorRole = async (coordinatorId: number) => {
     try {
-      await api.post(`coordinators/api/hod-management/${coordinatorId}/toggle_instructor_permission/`);
+      await api.post(`coordinators/hod-management/${coordinatorId}/toggle_instructor_permission/`);
       fetchData();
     } catch (error) {
       console.error('Error toggling instructor role:', error);
@@ -100,7 +91,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
     if (!window.confirm('Are you sure you want to remove this coordinator?')) return;
     
     try {
-      await api.delete(`coordinators/api/hod-management/${coordinatorId}/remove_coordinator/`);
+      await api.delete(`coordinators/hod-management/${coordinatorId}/remove_coordinator/`);
       fetchData();
     } catch (error) {
       console.error('Error removing coordinator:', error);
@@ -112,7 +103,11 @@ const HODCoordinatorManagementModule: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header with Collapsible Tabs */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Coordinator Management</h2>
+          <p className="text-sm text-gray-500">Manage department coordinators and instructor-role permissions.</p>
+        </div>
         <div className="flex space-x-1 bg-gray-100 rounded-lg p-1">
           <button
             onClick={() => setShowInstructors(!showInstructors)}
@@ -139,36 +134,6 @@ const HODCoordinatorManagementModule: React.FC = () => {
         </div>
         
         <div className="space-x-2">
-          <button
-            onClick={async () => {
-              try {
-                const response = await api.get('coordinators/api/hod-management/department_coordinators/');
-                console.log('Department coordinators response:', response.data);
-                alert(`Found ${response.data.length} coordinators. Check console for details.`);
-              } catch (error) {
-                console.error('Department coordinators error:', error);
-                alert('Department coordinators failed. Check console.');
-              }
-            }}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            Test Department Coordinators
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const response = await api.get('coordinators/api/hod-management/check_user_role/');
-                console.log('User role check:', response.data);
-                alert(`User role: ${response.data.user_role}, Has HOD profile: ${response.data.has_hod_profile}`);
-              } catch (error) {
-                console.error('User role check error:', error);
-                alert('User role check failed. Check console.');
-              }
-            }}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Check User Role
-          </button>
           {showInstructors && (
             <button
               onClick={() => setShowPromoteModal(true)}
@@ -192,23 +157,23 @@ const HODCoordinatorManagementModule: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500">
           <div className="text-2xl font-bold text-blue-600">{instructors.length}</div>
-          <div className="text-gray-600">Total Instructors</div>
+          <div className="text-gray-600">Instructors</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-green-500">
           <div className="text-2xl font-bold text-green-600">{coordinators.length}</div>
-          <div className="text-gray-600">Total Coordinators</div>
+          <div className="text-gray-600">Coordinators</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-purple-500">
           <div className="text-2xl font-bold text-purple-600">
             {instructors.filter(i => i.is_coordinator && i.coordinator_info?.can_act_as_instructor).length}
           </div>
-          <div className="text-gray-600">Dual Role (Coord + Instr)</div>
+          <div className="text-gray-600">Dual Role Users</div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-orange-500">
           <div className="text-2xl font-bold text-orange-600">
             {instructors.filter(i => !i.is_coordinator).length}
           </div>
-          <div className="text-gray-600">Available for Promotion</div>
+          <div className="text-gray-600">Ready for Promotion</div>
         </div>
       </div>
 
@@ -241,7 +206,7 @@ const HODCoordinatorManagementModule: React.FC = () => {
         <CreateCoordinatorModal
           onSubmit={async (data) => {
             try {
-              const res = await api.post('coordinators/api/hod-management/create_new_coordinator/', data);
+              const res = await api.post('coordinators/hod-management/create_new_coordinator/', data);
               const createdEmployeeId = res?.data?.employee_id;
               if (createdEmployeeId) {
                 alert(`Coordinator created successfully!\nEmployee ID: ${createdEmployeeId}`);

@@ -3,17 +3,17 @@ import { studentService } from '../../api/apiService';
 import { getDisplayName, getProfileImageUrl } from '../../utils/profileHelpers';
 
 interface SimpleStudentProfileProps {
-  studentId?: number;
+  studentId?: string | number;
   onClose?: () => void;
 }
 
 interface Student {
-  student_id: number;
+  student_id: string | number;
   name: string;
   email: string;
   phone: string;
   course?: {
-    course_id: number;
+    course_id: string | number;
     name: string;
     code: string;
   } | null;

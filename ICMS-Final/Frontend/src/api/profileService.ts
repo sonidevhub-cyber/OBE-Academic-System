@@ -7,7 +7,8 @@ export type ProfileRole =
   | 'coordinator'
   | 'admin'
   | 'principal'
-  | 'super_admin';
+  | 'super_admin'
+  | 'SAC';
 
 const PROFILE_ENDPOINTS: Record<ProfileRole, string> = {
   student: 'students/profile/',
@@ -17,6 +18,7 @@ const PROFILE_ENDPOINTS: Record<ProfileRole, string> = {
   admin: 'admin/profile/',
   principal: 'principal/profile/',
   super_admin: 'admin/profile/',
+  SAC: 'admin/profile/',
 };
 
 export const getProfileEndpoint = (role?: string | null): string | null => {
@@ -33,3 +35,26 @@ export const fetchCurrentProfile = async (role?: string | null) => {
   return api.get(endpoint);
 };
 
+export const updateProfile = async (data: any, isFormData: boolean = false) => {
+  const headers: Record<string, string> = {};
+  
+  // When sending FormData, let axios set the Content-Type with boundary
+  // For JSON data, explicitly set the content type
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+  
+  console.log('profileService: Sending updateProfile request');
+  console.log('profileService: isFormData:', isFormData);
+  console.log('profileService: data:', data);
+  console.log('profileService: headers:', headers);
+  
+  try {
+    const response = await api.put('auth/users/profile/update/', data, { headers });
+    console.log('profileService: Response:', response.data);
+    return response;
+  } catch (error) {
+    console.error('profileService: Error:', error);
+    throw error;
+  }
+};

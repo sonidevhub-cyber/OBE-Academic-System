@@ -6,9 +6,7 @@ import { courseService, studentService } from '../api/apiService';
 import { api } from '../api/api';
 import InstructorProfileModal from '../components/ui/modals/InstructorProfileModal';
 import InstructorProfile from '../components/InstructorProfile';
-import InstructorTimetable from '../components/InstructorTimetable';
-import InstructorSchedule from '../components/InstructorSchedule';
-import InstructorAttendanceDashboard from '../components/attendance/InstructorAttendanceDashboard';
+import { getProfileImageUrl } from '../utils/profileHelpers';
 
 import {
   Chart as ChartJS,
@@ -312,13 +310,13 @@ const TeacherDashboard = () => {
                 className="relative group cursor-pointer hover:scale-105 transition-transform duration-200"
                 title="View Profile"
               >
-                {instructorProfile?.image ? (
+                {getProfileImageUrl(instructorProfile) ? (
                   <img
-                    src={instructorProfile.image}
+                    src={getProfileImageUrl(instructorProfile)!}
                     alt="Instructor Profile"
                     className="h-12 w-12 rounded-full border-2 border-white shadow-lg hover:border-indigo-200 transition-colors duration-200 object-cover"
                     onError={(e) => {
-                      console.log('Instructor image failed to load:', instructorProfile.image);
+                      console.log('Instructor image failed to load:', getProfileImageUrl(instructorProfile));
                       const parent = e.currentTarget.parentElement;
                       if (parent) {
                         parent.innerHTML = `<div class="h-12 w-12 rounded-full border-2 border-white shadow-lg bg-white flex items-center justify-center"><span class="text-lg font-semibold text-indigo-600">${(instructorProfile?.name || 'I').charAt(0).toUpperCase()}</span></div>`;
@@ -515,19 +513,6 @@ const TeacherDashboard = () => {
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                <InstructorSchedule />
-              </motion.div>
-            )}
-
-            {activeTab === 'attendance' && (
-              <motion.div
-                key="attendance"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.3 }}
-              >
-                <InstructorAttendanceDashboard />
               </motion.div>
             )}
           </AnimatePresence>
