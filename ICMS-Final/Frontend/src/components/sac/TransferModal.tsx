@@ -139,8 +139,13 @@ const TransferModal: React.FC<TransferModalProps> = ({ isOpen, onClose, student,
                     <div>
                       <p className="text-amber-900 font-bold">No eligible batches found</p>
                       <p className="text-amber-700 text-sm mt-1 leading-relaxed">
+<<<<<<< HEAD
                         No batch is currently on Semester {student.current_semester}. 
                         Transfer will be possible when an eligible batch reaches Semester {student.current_semester}.
+=======
+                        The backend returned 0 eligible batches for this student.
+                        If the student has a previous batch, ensure <span className="font-semibold">original_batch</span> is set.
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
                       </p>
                     </div>
                   </div>

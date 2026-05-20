@@ -106,7 +106,10 @@ const Users: React.FC = () => {
             secondary_role: user.secondary_role,
             designation: user.designation || 'Assistant Professor',
             phone: user.phone || '',
+<<<<<<< HEAD
             password: '',
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             programs: [], // Would need mapping if available
             batch: null,
             profile_pic: null

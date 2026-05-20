@@ -68,20 +68,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json'
   }
 });
-apiClient.interceptors.request.use(function (config) {
-  const storedAuth = localStorage.getItem('auth');
-  if (storedAuth) {
-    try {
-      const authData = JSON.parse(storedAuth);
-      if (authData.access_token) {
-        config.headers.Authorization = `Token ${authData.access_token}`;
-      }
-    } catch (err) {
-      console.error('Error parsing stored auth data:', err);
-    }
-  }
-  return config;
-});
+
 const register = async (_data: RegisterData): Promise<AuthResponse> => {
   console.warn('Registration attempt blocked: registrations are disabled.');
   // Always reject to make registration impossible from the frontend
@@ -108,26 +95,13 @@ const getApiErrorMessage = (error: unknown, fallback: string): string => {
 const login = async (data: LoginData): Promise<AuthResponse> => {
   try {
     const identifier = data.identifier ?? data.username ?? '';
-    console.log('Sending login data:', { identifier, password: data.password });
-    const response = await apiClient.post<BackendResponse>('register/login/', {
+
+    const response = await apiClient.post<BackendResponse>('auth/login/', {
       identifier,
       password: data.password
     });
 
     console.log('Raw login response:', response);
-        if (response.data && response.data.access_token && response.data.user) {
-      // Store auth data in localStorage immediately for interceptor to use
-      const authData = {
-        user: response.data.user,
-        role: response.data.role,
-        permissions: response.data.permissions || [],
-        access_token: response.data.access_token,
-        refresh_token: response.data.refresh_token
-      };
-      localStorage.setItem('auth', JSON.stringify(authData));
-      sessionStorage.setItem('auth', JSON.stringify(authData));
-      console.log('Auth data stored in localStorage:', authData);
-    }
 
     if (response.data && response.data.access_token && response.data.user) {
       // Set token for future requests
@@ -157,13 +131,10 @@ const login = async (data: LoginData): Promise<AuthResponse> => {
 
 const instructorLogin = async (data: InstructorLoginData): Promise<AuthResponse> => {
   try {
-    console.log('Sending instructor login data:', data);
-    const response = await apiClient.post<BackendResponse>('register/login/', {
+    const response = await apiClient.post<BackendResponse>('auth/login/', {
       identifier: data.employee_id,
-      password: data.password
+      password: data.password,
     });
-
-    console.log('Raw instructor login response:', response);
 
     if (response.data && response.data.access_token && response.data.user) {
       // Set token for future requests

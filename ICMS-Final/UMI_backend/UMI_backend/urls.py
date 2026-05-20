@@ -3,7 +3,10 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+<<<<<<< HEAD
 from core.root_urls import urlpatterns as core_root_urlpatterns
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
 from academics import views as academics_views
 
@@ -11,6 +14,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 ]
 
+<<<<<<< HEAD
 # Move core special endpoints to the TOP to avoid being shadowed by routers
 for p in core_root_urlpatterns:
     if hasattr(p, 'callback') and callable(p.callback):
@@ -19,12 +23,23 @@ for p in core_root_urlpatterns:
 urlpatterns += [
     # CORE MODULES (ONE TIME ONLY)
     path('api/register/', include('register.urls')),
+=======
+
+urlpatterns += [
+    # CORE MODULES (ONE TIME ONLY)
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     path('api/auth/', include('register.urls')),
     path('api/users/', include('core.urls.user')),
     path('api/batches/', include('academic_structure.urls')),
     path('api/programs/', include('core.urls.program')),
     path('api/courses/', include('core.urls.course')),
     path('api/students/', include('students.urls')),
+<<<<<<< HEAD
+=======
+    # Mount promotion/pending-transfer endpoints without the extra nested `api/`
+    path('api/', include('core.urls.promotion')),
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     path('api/instructors/', include('instructors.urls')),
 
     # FEATURE MODULES
@@ -34,12 +49,20 @@ urlpatterns += [
     path('api/obe/', include('obe.urls')),
     path('api/monitoring/', include('monitoring.urls')),
     path('api/admin/', include('admin_management.urls')),
+<<<<<<< HEAD
     path('api/coordinators/', include('coordinators.urls')),
     path('api/curriculum-versions/', include('curriculum.urls')),
 
 ]
 
 
+=======
+
+    # SPECIAL ENDPOINTS
+    path('api/coordinators/course-allocations/', academics_views.course_allocations),
+]
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 # NOTE:
 # Frontend hits endpoints under /api/* (axiosInstance baseURL is /api/).
 # core_root_urlpatterns currently lives at the project root (mounted below with path('', ...)).

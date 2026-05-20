@@ -7,8 +7,14 @@ import { Users, BookOpen, GraduationCap, Settings, BarChart3, Bell } from 'lucid
 
 import StudentView from '../views/modules/StudentModule';
 import FeedbackView from '../views/modules/FeedbackModule';
+<<<<<<< HEAD
 
 type TabId = 'students' | 'courses' | 'feedback' | 'results' | 'schedules';
+=======
+import AttendanceView from '../views/modules/AttendanceModule';
+
+type TabId = 'students' | 'feedback' | 'attendance' | 'courses' | 'instructors' | 'hods' | 'results' | 'schedules';
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
 interface Tab {
   id: TabId;
@@ -24,7 +30,12 @@ const Dashboard: React.FC = () => {
   const tabs: Tab[] = [
     { id: 'students', label: 'Students', icon: Users, color: 'text-blue-600' },
     { id: 'courses', label: 'Courses', icon: BookOpen, color: 'text-green-600' },
+<<<<<<< HEAD
     { id: 'feedback', label: 'Feedback', icon: Bell, color: 'text-pink-600' },
+=======
+    { id: 'attendance', label: 'Attendance', icon: CheckCircle, color: 'text-orange-600' },
+    { id: 'feedback', label: 'Feedback', icon: MessageSquare, color: 'text-pink-600' },
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     { id: 'results', label: 'Results', icon: BarChart3, color: 'text-cyan-600' },
     { id: 'schedules', label: 'Schedules', icon: Settings, color: 'text-gray-600' },
   ];
@@ -33,10 +44,20 @@ const Dashboard: React.FC = () => {
     switch (activeTab) {
       case 'students':
         return <StudentView />;
+<<<<<<< HEAD
       case 'courses':
         return <div className="p-8 text-center text-gray-500">Course View - Coming Soon</div>;
       case 'feedback':
         return <FeedbackView />;
+=======
+
+      case 'feedback':
+        return <FeedbackView />;
+      case 'attendance':
+        return <AttendanceView token="" userType="instructor" />;
+      case 'courses':
+        return <div className="p-8 text-center text-gray-500">Course View - Coming Soon</div>;
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       case 'results':
         return <div className="p-8 text-center text-gray-500">Results View - Coming Soon</div>;
       case 'schedules':

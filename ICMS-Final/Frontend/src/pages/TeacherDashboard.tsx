@@ -513,6 +513,20 @@ const TeacherDashboard = () => {
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.3 }}
               >
+<<<<<<< HEAD
+=======
+              </motion.div>
+            )}
+
+            {activeTab === 'attendance' && (
+              <motion.div
+                key="attendance"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
               </motion.div>
             )}
           </AnimatePresence>

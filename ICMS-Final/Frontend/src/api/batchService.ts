@@ -47,8 +47,18 @@ const batchService = {
     deleteBatch: (programId: string, batchId: string) => 
         api.delete<{ success: boolean }>(`programs/${programId}/batches/${batchId}/delete/`),
 
+<<<<<<< HEAD
     getAllBatches: () => 
         api.get<BatchFlat[]>('batches/all/'),
 };
 
 export default batchService;
+=======
+    // Used for student/admin dropdowns.
+    // Frontend expects flat payload: [{id,name,program_name}]
+    getAllBatches: () => api.get<BatchFlat[]>('batches/all/'),
+};
+
+export default batchService;
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03

@@ -31,8 +31,11 @@ class PEOListCreateView(APIView):
         return Response(serializer.data) 
  
     def post(self, request, program_id): 
+<<<<<<< HEAD
         print(f"DEBUG: PEO POST request for program_id: {program_id}")
         print(f"DEBUG: Request data: {request.data}")
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         data = request.data.copy() 
         data['program'] = program_id 
         serializer = PEOSerializer(data=data) 
@@ -42,7 +45,10 @@ class PEOListCreateView(APIView):
                 serializer.data, 
                 status=status.HTTP_201_CREATED 
             ) 
+<<<<<<< HEAD
         print(f"DEBUG: PEO Serializer errors: {serializer.errors}")
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         return Response( 
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
@@ -116,8 +122,11 @@ class GAListCreateView(APIView):
         return Response(serializer.data) 
  
     def post(self, request, program_id): 
+<<<<<<< HEAD
         print(f"DEBUG: GA POST request for program_id: {program_id}")
         print(f"DEBUG: Request data: {request.data}")
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         data = request.data.copy() 
         data['program'] = program_id 
         serializer = GASerializer(data=data) 
@@ -127,7 +136,10 @@ class GAListCreateView(APIView):
                 serializer.data, 
                 status=status.HTTP_201_CREATED 
             ) 
+<<<<<<< HEAD
         print(f"DEBUG: GA Serializer errors: {serializer.errors}")
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         return Response( 
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
@@ -347,7 +359,10 @@ class CLOCopyView(APIView):
                 title=clo.title, 
                 description=clo.description, 
                 order_number=clo.order_number, 
+<<<<<<< HEAD
                 bloom_level=clo.bloom_level,
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
                 kpi_target=clo.kpi_target 
             ) 
             # Copy GA mappings too 
@@ -381,7 +396,11 @@ class CLOGAMatrixView(APIView):
             is_active=True 
         ) 
         gas = GA.objects.filter( 
+<<<<<<< HEAD
             program__courses__id=course_id, 
+=======
+            program__obe_courses__id=course_id, 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             is_active=True 
         ).distinct() 
         mappings = CLOGAMapping.objects.filter( 
@@ -442,10 +461,21 @@ class CourseSessionListView(APIView):
         ).select_related( 
             'course', 'batch', 'instructor' 
         ) 
+<<<<<<< HEAD
         return Response({ 
             'sessions': CourseSessionSerializer( 
                 sessions, many=True 
             ).data
+=======
+        pending_count = sessions.filter( 
+            status='pending' 
+        ).count() 
+        return Response({ 
+            'sessions': CourseSessionSerializer( 
+                sessions, many=True 
+            ).data, 
+            'pending_count': pending_count 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         }) 
  
  

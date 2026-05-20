@@ -56,6 +56,7 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
 
     setSubmitting(true);
     try {
+<<<<<<< HEAD
       // Use FormData only when uploading a profile picture
       // Otherwise use JSON for better compatibility with password updates
       if (profilePic) {
@@ -81,6 +82,18 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
         await updateProfile(data, false);
       }
       
+=======
+      const data = new FormData();
+      data.append('full_name', formData.name);
+      if (formData.password) {
+        data.append('password', formData.password);
+      }
+      if (profilePic) {
+        data.append('profile_pic', profilePic);
+      }
+
+      await updateProfile(data);
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       toast.success('Profile updated successfully');
       onSuccess();
       onClose();
@@ -89,8 +102,12 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
         toast.info('Please re-login with your new password');
       }
     } catch (err: any) {
+<<<<<<< HEAD
       console.error('Profile update error:', err);
       toast.error(err.response?.data?.error || err.message || 'Failed to update profile');
+=======
+      toast.error(err.response?.data?.error || 'Failed to update profile');
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     } finally {
       setSubmitting(false);
     }

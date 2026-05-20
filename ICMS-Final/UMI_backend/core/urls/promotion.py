@@ -14,7 +14,11 @@ urlpatterns = [
         name='mark-repeat',
     ),
     path(
+<<<<<<< HEAD
         'api/students/pending-transfers/',
+=======
+        'students/pending-transfers/',
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         PendingTransfersView.as_view(),
         name='pending-transfers',
     ),

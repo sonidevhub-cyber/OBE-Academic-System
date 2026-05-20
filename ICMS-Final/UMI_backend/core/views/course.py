@@ -20,14 +20,20 @@ class CourseListCreateView(generics.ListCreateAPIView):
         qs = Course.objects.filter(is_active=True)
         program_id = self.request.query_params.get('program_id')
         semester_id = self.request.query_params.get('semester_id')
+<<<<<<< HEAD
         semester_num = self.request.query_params.get('semester_num')
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         
         if program_id:
             qs = qs.filter(program_id=program_id)
         if semester_id:
             qs = qs.filter(semester_id=semester_id)
+<<<<<<< HEAD
         if semester_num:
             qs = qs.filter(semester__number=semester_num)
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         return qs
 
     @transaction.atomic

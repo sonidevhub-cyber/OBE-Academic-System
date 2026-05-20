@@ -1,44 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { api } from '../../api/api';
+import { obeService, GA } from '../../api/obeService';
 import CLOGAMappingMatrix from '../../components/obe/CLOGAMappingMatrix';
-import obeService from '../../api/obeService';
+
 
 interface Props {
   departmentId: number;
 }
 
 const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
-  const [activeTab, setActiveTab] = useState('overview');
-  const [gas, setGas] = useState([]);
-  const [courses, setCourses] = useState([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'gas' | 'mapping' | 'reports'>('overview');
+  const [gas, setGas] = useState<GA[]>([]);
+
   const [attainmentData, setAttainmentData] = useState({
     avgCLO: 0,
     avgGA: 0,
     totalCourses: 0,
-    totalInstructors: 0
+    totalInstructors: 0,
   });
 
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'gas', label: 'Graduate Attributes' },
-    { id: 'mapping', label: 'CLO-GA Matrix' },
-    { id: 'reports', label: 'Reports' }
-  ];
-
   useEffect(() => {
-    loadDepartmentData();
+    void loadDepartmentData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [departmentId]);
 
   const loadDepartmentData = async () => {
     try {
-      const gaData = await obeService.getGraduateAttributes(departmentId);
-      setGas(gaData);
-      
+      if (!departmentId) return;
+
+      const programResponse = await api.get(`/programs/?department_id=${departmentId}`);
+      if (programResponse.data?.length > 0) {
+        const programId = programResponse.data[0].id;
+        const gaResponse = await obeService.getGAs(programId);
+        setGas(gaResponse.data);
+      }
+
       // Mock attainment data
       setAttainmentData({
         avgCLO: 78.5,
         avgGA: 82.3,
         totalCourses: 12,
-        totalInstructors: 8
+        totalInstructors: 8,
       });
     } catch (error) {
       console.error('Failed to load department data:', error);
@@ -49,18 +51,22 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
     const [newGA, setNewGA] = useState({
       code: '',
       title: '',
-      description: ''
+      description: '',
+      order_number: 0,
     });
 
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-        await obeService.createGA({
-          ...newGA,
-          department: departmentId
-        });
-        setNewGA({ code: '', title: '', description: '' });
-        loadDepartmentData();
+        if (!departmentId) return;
+
+        const programResponse = await api.get(`/programs/?department_id=${departmentId}`);
+        if (programResponse.data?.length > 0) {
+          const programId = programResponse.data[0].id;
+          await obeService.createGA(programId, { ...newGA });
+          setNewGA({ code: '', title: '', description: '', order_number: 0 });
+          await loadDepartmentData();
+        }
       } catch (error) {
         console.error('Failed to create GA:', error);
       }
@@ -76,7 +82,7 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
                 type="text"
                 placeholder="GA Code (e.g., GA1)"
                 value={newGA.code}
-                onChange={(e) => setNewGA({...newGA, code: e.target.value})}
+                onChange={(e) => setNewGA({ ...newGA, code: e.target.value })}
                 className="px-3 py-2 border rounded-md"
                 required
               />
@@ -84,7 +90,7 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
                 type="text"
                 placeholder="GA Title"
                 value={newGA.title}
-                onChange={(e) => setNewGA({...newGA, title: e.target.value})}
+                onChange={(e) => setNewGA({ ...newGA, title: e.target.value })}
                 className="px-3 py-2 border rounded-md"
                 required
               />
@@ -92,7 +98,7 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
             <textarea
               placeholder="GA Description"
               value={newGA.description}
-              onChange={(e) => setNewGA({...newGA, description: e.target.value})}
+              onChange={(e) => setNewGA({ ...newGA, description: e.target.value })}
               className="w-full px-3 py-2 border rounded-md"
               rows={3}
               required
@@ -109,11 +115,15 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-semibold mb-4">Department Graduate Attributes</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {gas.map((ga: any) => (
+            {gas.map((ga) => (
               <div key={ga.id} className="p-4 border rounded-lg">
                 <div className="flex justify-between items-start mb-2">
                   <h4 className="font-medium text-lg">{ga.code}</h4>
-                  <span className={`px-2 py-1 rounded text-xs ${ga.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                  <span
+                    className={`px-2 py-1 rounded text-xs ${
+                      ga.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    }`}
+                  >
                     {ga.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
@@ -244,10 +254,15 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
 
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          {tabs.map(tab => (
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'gas', label: 'Graduate Attributes' },
+            { id: 'mapping', label: 'CLO-GA Matrix' },
+            { id: 'reports', label: 'Reports' },
+          ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => setActiveTab(tab.id as typeof activeTab)}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === tab.id
                   ? 'border-blue-500 text-blue-600'
@@ -263,7 +278,7 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
       <div>
         {activeTab === 'overview' && <OverviewDashboard />}
         {activeTab === 'gas' && <GAManagement />}
-        {activeTab === 'mapping' && <CLOGAMappingMatrix departmentId={departmentId} />}
+        {activeTab === 'mapping' && <CLOGAMappingMatrix />}
         {activeTab === 'reports' && <ReportsSection />}
       </div>
     </div>
@@ -271,3 +286,4 @@ const HODOBEModule: React.FC<Props> = ({ departmentId }) => {
 };
 
 export default HODOBEModule;
+

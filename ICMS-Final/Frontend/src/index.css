@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 /* ========== Global Scroll Settings (Lenis Compatible) ========== */
+@keyframes scroll {
+  0% {
+    transform: translateY(0%);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+.animate-scroll {
+  animation: scroll 15s linear infinite;
+}
 html, body {
   margin: 0;
   padding: 0;

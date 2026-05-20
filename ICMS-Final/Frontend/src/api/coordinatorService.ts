@@ -128,12 +128,79 @@ export const coordinatorService = {
   getTimetableProposals: (params?: any) => 
     api.get('timetable/proposals/', { params }),
 
+<<<<<<< HEAD
   getTimetablePublishAudit: (params?: any) => 
     api.get('timetable/publish-audit/', { params }),
+=======
+  // Academic Data
+  getDepartments: () =>
+    api.get('academics/departments/'),
+  
+  getSemesters: () =>
+    api.get('academics/semesters/'),
+  
+  getCourses: (semesterId?: number) =>
+    api.get('academics/courses/', {
+      params: semesterId ? { semester: semesterId } : {}
+    }),
+  
+  getInstructors: () =>
+    api.get('instructors/instructor'),
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
   approveTimetableProposal: (id: number, data: any) => 
     api.post(`timetable/proposals/${id}/approve/`, data),
 
+<<<<<<< HEAD
   rejectTimetableProposal: (id: number, data: any) => 
     api.post(`timetable/proposals/${id}/reject/`, data),
 };
+=======
+  // Timetables - Professional semester-based system
+  getTimetables: () =>
+    api.get('coordinators/semester-timetables/'),
+  
+  createSemesterTimetable: (data: {
+    semester_id: number;
+    timetable_slots: Array<{
+      allocation_id: number;
+      day: string;
+      start_time: string;
+      end_time: string;
+      room_name: string;
+    }>;
+  }) =>
+    api.post('coordinators/timetable-proposals/', {
+      semester: data.semester_id,
+      title: `Semester ${data.semester_id} Timetable`,
+      description: `Complete timetable for semester ${data.semester_id}`,
+      status: 'submitted',
+      slots: data.timetable_slots.map(slot => ({
+        allocation_id: slot.allocation_id,
+        day: slot.day,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        room: slot.room_name
+      }))
+    }),
+  
+  checkTimeConflicts: (data: {
+    day: string;
+    start_time: string;
+    end_time: string;
+    room_name: string;
+    instructor_id: number;
+  }) =>
+    api.post('coordinators/check-time-conflicts/', data),
+
+  // HOD Management
+  promoteInstructorToCoordinator: (instructorId: number, canActAsInstructor: boolean = false) =>
+    api.post('coordinators/hod-management/promote_instructor_to_coordinator/', {
+      instructor_id: instructorId,
+      can_act_as_instructor: canActAsInstructor
+    }),
+
+  updateCoordinator: (id: number, data: Partial<Coordinator>) =>
+    api.post(`coordinators/hod-management/${id}/toggle_instructor_permission/`),
+};
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03

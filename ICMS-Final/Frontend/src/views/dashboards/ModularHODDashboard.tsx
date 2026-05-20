@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+<<<<<<< HEAD
 import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
 import HODCoordinatorManagementModule from '../modules/HODCoordinatorManagementModule';
+=======
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import AnnouncementModule from '../modules/AnnouncementModule';
+import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
+import FeedbackButton from '../forms/FeedbackButton';
+import HODCourseAllocationModule from '../modules/HODCourseAllocationModule';
+import HODInstructorOnlyModule from '../modules/hod/HODInstructorOnlyModule';
+import HODCoordinatorOnlyModule from '../modules/hod/HODCoordinatorOnlyModule';
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import { coordinatorService } from '../../api/coordinatorService';
 import { toast } from 'react-hot-toast';
@@ -43,10 +54,48 @@ interface Student {
   email: string;
 }
 
+<<<<<<< HEAD
 type TabId = 'dashboard' | 'allocations' | 'timetable' | 'timetable-approvals' | 'instructors' | 'students' | 'feedback' | 'announcements';
 
 const ModularHODDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('allocations');
+=======
+interface TimetableProposal {
+  proposal_id: number;
+  title: string;
+  description: string;
+  semester_name?: string;
+  coordinator_name?: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'implemented';
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  hod_comments?: string;
+}
+
+interface TimetablePublishAuditData {
+  summary: {
+    implemented_proposals: number;
+    total_slots: number;
+    published_slots: number;
+    unpublished_slots: number;
+  };
+  audit: Array<{
+    proposal_id: number;
+    title: string;
+    semester_name: string | null;
+    coordinator_name: string | null;
+    published_slots: number;
+    total_slots: number;
+  }>;
+}
+
+type TabId = 'dashboard' | 'attendance' | 'allocations' | 'allocation-pending' | 'allocation-approved' | 'allocation-rejected' | 'timetable' | 'timetable-pending' | 'timetable-approved' | 'timetable-rejected' | 'faculty' | 'instructors' | 'coordinators' | 'students' | 'feedback' | 'announcements' | 'datesheet';
+
+const ModularHODDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const { currentUser, hasPermission } = useAuth();
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
   const [department, setDepartment] = useState<Department | null>(null);
   const [semesters, setSemesters] = useState<Semester[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -68,6 +117,7 @@ const ModularHODDashboard: React.FC = () => {
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+<<<<<<< HEAD
     { id: 'allocations', label: 'Course Allocations', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
     { id: 'instructors', label: 'Instructors', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
     { id: 'timetable', label: 'Timetable', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
@@ -75,12 +125,49 @@ const ModularHODDashboard: React.FC = () => {
     { id: 'students', label: 'Students', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
     { id: 'feedback', label: 'Feedback', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
     { id: 'announcements', label: 'Announcements', icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z' }
+=======
+    { id: 'attendance', label: 'Attendance', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
+    { id: 'faculty', label: 'Faculty', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+    { id: 'feedback', label: 'Feedback', icon: 'M7 8h10M7 12h6m2 8l-4-4H7a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z' },
+    { id: 'announcements', label: 'Announcements', icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z' },
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
   ];
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
+<<<<<<< HEAD
+=======
+  useEffect(() => {
+    let cancelled = false;
+    const role = getEffectiveRole(currentUser, 'hod');
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetchCurrentProfile(role);
+        if (!cancelled) {
+          setHodProfile(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch HOD profile:', error);
+        if (!cancelled) {
+          setHodProfile(currentUser);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+useEffect(() => {
+  fetchStudents(selectedSemester || undefined);
+}, [selectedSemester]);
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
   const fetchDashboardData = async () => {
     try {
       const response = await fetch(`${API_BASE}/hod/dashboard/`, {
@@ -122,6 +209,7 @@ const ModularHODDashboard: React.FC = () => {
       console.error('Error fetching students:', error);
     }
   };
+<<<<<<< HEAD
 
   const handleLogout = () => {
     localStorage.removeItem('auth');
@@ -218,6 +306,9 @@ const ModularHODDashboard: React.FC = () => {
       </div>
     </div>
   );
+=======
+      
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
   const renderContent = () => {
     if (loading) return <div className="p-4">Loading HOD Dashboard...</div>;
@@ -286,6 +377,7 @@ const ModularHODDashboard: React.FC = () => {
         );
 
       case 'instructors':
+<<<<<<< HEAD
         return <HODCoordinatorManagementModule />;
       case 'timetable':
         return (
@@ -309,6 +401,17 @@ const ModularHODDashboard: React.FC = () => {
             </div>
           </div>
         );
+=======
+        return <HODInstructorOnlyModule />;
+
+      case 'coordinators':
+        return <HODCoordinatorOnlyModule />;
+
+      
+
+      
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
       case 'timetable-approvals':
         return (
@@ -440,12 +543,52 @@ const ModularHODDashboard: React.FC = () => {
         );
 
       case 'announcements':
+<<<<<<< HEAD
         return <AnnouncementModule token={token || ''} canCreate={canManageAnnouncements} />;
 
+=======
+        return <AnnouncementModule token={token || ''} canCreate={true} />;
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       default:
         return <div>Content for {activeTab}</div>;
     }
   };
+
+  function renderTabs(): React.ReactNode {
+  return (
+    <div className="w-64 bg-gradient-to-b from-blue-900 to-indigo-900 text-white flex flex-col p-4">
+
+      <h2 className="text-xl font-bold mb-6">HOD Panel</h2>
+
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          onClick={() => setActiveTab(tab.id as TabId)}
+          className={`flex items-center px-4 py-2 rounded-lg mb-2 transition ${
+            activeTab === tab.id ? 'bg-white/20' : 'hover:bg-white/10'
+          }`}
+        >
+          <span>{tab.label}</span>
+        </button>
+      ))}
+
+      {/* Logout */}
+      <div className="mt-auto pt-4 border-t border-white/20">
+        <button
+          onClick={() => {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.href = '/login';
+          }}
+          className="w-full text-red-300 hover:text-red-100"
+        >
+          Logout
+        </button>
+      </div>
+
+    </div>
+  );
+}
 
   return (
     <div className="flex min-h-screen w-full bg-[#E8EFF8]">
@@ -475,10 +618,14 @@ const ModularHODDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
+<<<<<<< HEAD
               <div className="text-right">
                 <p className="text-white font-medium">Welcome back, HOD</p>
                 <p className="text-blue-200 text-sm">{new Date().toLocaleDateString()}</p>
               </div>
+=======
+              <TopbarProfileMenu userData={hodProfile || currentUser} />
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             </div>
           </motion.div>
         </header>

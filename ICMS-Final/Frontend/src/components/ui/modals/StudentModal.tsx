@@ -36,6 +36,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
   // Fetch batches
   useEffect(() => {
+<<<<<<< HEAD
     if (isOpen) {
       const fetchBatches = async () => {
         try {
@@ -47,6 +48,28 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
       };
       fetchBatches();
     }
+=======
+    if (!isOpen) return;
+
+    const fetchBatches = async () => {
+      try {
+        const response = await batchService.getAllBatches();
+
+        // DRF can return either an array or {data: [...]}. Normalize here.
+        const payload: any = (response as any).data;
+        const normalized: BatchFlat[] = Array.isArray(payload)
+          ? payload
+          : (payload?.data ?? []);
+
+        setBatches(normalized);
+      } catch (err) {
+        console.error('Failed to fetch batches:', err);
+        setBatches([]);
+      }
+    };
+
+    fetchBatches();
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
   }, [isOpen]);
 
   // Reset form when modal opens/closes or studentId changes
@@ -232,7 +255,11 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           ...(formData.address && { address: formData.address }),
           ...(formData.blood_group && { blood_group: formData.blood_group }),
           ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
+<<<<<<< HEAD
           ...(formData.password.trim() && { password: formData.password }),
+=======
+          ...(!studentId && formData.password.trim() && { password: formData.password }),
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         };
       }
 
@@ -258,7 +285,10 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
             ...(formData.address && { address: formData.address }),
             ...(formData.blood_group && { blood_group: formData.blood_group }),
             ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
+<<<<<<< HEAD
             ...(formData.password.trim() && { password: formData.password }),
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
           };
           
           response = await studentService.updateStudent(studentId, userDataWithoutImage);

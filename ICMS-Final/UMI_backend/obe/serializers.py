@@ -21,11 +21,19 @@ class GASerializer(serializers.ModelSerializer):
     class Meta: 
         model = GA 
         fields = [ 
+<<<<<<< HEAD
             'id', 'program', 'title', 
+=======
+            'id', 'program', 'code', 'title', 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             'description', 'order_number', 
             'is_active', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 
+<<<<<<< HEAD
+=======
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
  
  
 class GAPEOMappingSerializer( 
@@ -62,7 +70,11 @@ class CLOSerializer(serializers.ModelSerializer):
             'id', 'course', 'batch', 
             'course_name', 'batch_name', 
             'title', 'description', 
+<<<<<<< HEAD
             'order_number', 'bloom_level', 'kpi_target', 
+=======
+            'order_number', 'kpi_target', 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             'is_active', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 
@@ -102,21 +114,34 @@ class CourseSessionSerializer(
     batch_name = serializers.CharField( 
         source='batch.name', read_only=True 
     ) 
+<<<<<<< HEAD
     semester_name = serializers.CharField( 
         source='semester.name', read_only=True 
     ) 
     instructor_name = serializers.CharField( 
         source='instructor.full_name', 
+=======
+    instructor_name = serializers.CharField( 
+        source='instructor.name', 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         read_only=True 
     ) 
  
     class Meta: 
         model = CourseSession 
         fields = [ 
+<<<<<<< HEAD
             'id', 'course', 'batch', 'semester',
             'instructor', 'course_name', 
             'batch_name', 'semester_name', 'instructor_name', 
             'is_active', 'created_at' 
+=======
+            'id', 'course', 'batch', 
+            'instructor', 'course_name', 
+            'batch_name', 'instructor_name', 
+            'academic_year', 'semester_number', 
+            'status', 'is_active', 'created_at' 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         ] 
         read_only_fields = ['id', 'created_at'] 
  
@@ -127,12 +152,25 @@ class CurriculumVersionSerializer(
     batch_name = serializers.CharField( 
         source='batch.name', read_only=True 
     ) 
+<<<<<<< HEAD
+=======
+    course_name = serializers.CharField( 
+        source='course.name', read_only=True 
+    ) 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
  
     class Meta: 
         model = CurriculumVersion 
         fields = [ 
+<<<<<<< HEAD
             'id', 'batch', 
             'batch_name', 'version_number', 
             'is_effective', 'is_active', 'created_at' 
+=======
+            'id', 'batch', 'course', 
+            'batch_name', 'course_name', 
+            'action', 'semester_number', 
+            'note', 'is_active', 'created_at' 
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         ] 
         read_only_fields = ['id', 'created_at'] 

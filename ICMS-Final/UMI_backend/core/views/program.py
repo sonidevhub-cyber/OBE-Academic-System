@@ -6,7 +6,11 @@ from rest_framework.response import Response
 
 from core.models.program import Program
 from core.models.semester import Semester
+<<<<<<< HEAD
 from core.permissions import IsSAC, IsSACOrAssignedCoordinator
+=======
+from core.permissions import IsSAC
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 from core.serializers.program import ProgramCreateSerializer, ProgramDetailSerializer, ProgramListSerializer
 
 
@@ -20,6 +24,7 @@ class ProgramListCreateView(generics.ListCreateAPIView):
         return ProgramCreateSerializer if self.request.method == 'POST' else ProgramListSerializer
 
     def get_queryset(self):
+<<<<<<< HEAD
         user = self.request.user
         queryset = Program.objects.all().filter(is_active=True)
         
@@ -34,6 +39,9 @@ class ProgramListCreateView(generics.ListCreateAPIView):
                 pass
                 
         return queryset
+=======
+        return Program.objects.all().filter(is_active=True)
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -48,7 +56,11 @@ class ProgramListCreateView(generics.ListCreateAPIView):
 
 
 class ProgramDetailView(generics.RetrieveUpdateAPIView):
+<<<<<<< HEAD
     permission_classes = [IsSACOrAssignedCoordinator]
+=======
+    permission_classes = [IsSAC]
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     queryset = Program.objects.all()
 
     def get_serializer_class(self):
@@ -57,6 +69,7 @@ class ProgramDetailView(generics.RetrieveUpdateAPIView):
     @transaction.atomic
     def patch(self, request, *args, **kwargs):
         program = self.get_object()
+<<<<<<< HEAD
         
         # Restriction: Only SAC can change name or code
         if request.user.role != 'SAC':
@@ -66,6 +79,8 @@ class ProgramDetailView(generics.RetrieveUpdateAPIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
 
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
         for field in ['name', 'code', 'description']:
             if field in request.data:
                 setattr(program, field, request.data[field])

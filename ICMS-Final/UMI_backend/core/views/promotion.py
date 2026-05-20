@@ -107,14 +107,26 @@ class EligibleBatchesView(APIView):
         except User.DoesNotExist:
             return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
             
+<<<<<<< HEAD
         if not student.batch:
+=======
+        base_batch = student.batch or student.original_batch
+        if not base_batch:
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
             return Response({'eligible_batches': [], 'has_eligible': False})
 
         batches = Batch.objects.filter(
             current_semester=student.current_semester,
+<<<<<<< HEAD
             session_type=student.batch.session_type,
             status='active'
         ).exclude(id=student.batch.id)
+=======
+            session_type=base_batch.session_type,
+            status='active'
+        ).exclude(id=base_batch.id)
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
         data = [
             {

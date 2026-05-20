@@ -166,12 +166,15 @@ const ModularAdminDashboard = () => {
   const headerProfile = adminProfile || currentUser;
   const headerImageUrl = getProfileImageUrl(headerProfile);
   const headerName = (headerProfile?.full_name || headerProfile?.name || headerProfile?.username || 'Admin').trim();
+<<<<<<< HEAD
 
   // Define styles
   const sidebarGradient = "from-indigo-600 via-purple-700 to-pink-800";
   const headerGradient = "from-indigo-600 via-purple-600 to-pink-700";
   const accentColor = "text-blue-200";
   const hoverColor = "hover:bg-white/10";
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
   // Render navigation tabs
   const renderTabs = () => (
@@ -187,7 +190,11 @@ const ModularAdminDashboard = () => {
           )}
         </div>
         <h3 className="text-lg font-semibold text-white truncate px-2">{headerName}</h3>
+<<<<<<< HEAD
         <p className={`text-xs ${accentColor} uppercase tracking-widest`}>{isSAC ? 'SAC' : (headerProfile?.role || 'Admin')}</p>
+=======
+        <p className="text-xs text-blue-200 uppercase tracking-widest">{headerProfile?.role || 'Admin'}</p>
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       </div>
 
       <nav>
@@ -205,7 +212,11 @@ const ModularAdminDashboard = () => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
                 </svg>
+<<<<<<< HEAD
                 <span className="flex-1 text-left font-semibold">{tab.label}</span>
+=======
+                <span className="flex-1 text-left">{tab.label}</span>
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
                 {tab.badgeCount !== undefined && tab.badgeCount > 0 && (
                   <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-sm border border-red-400">
                     {tab.badgeCount}
@@ -295,7 +306,10 @@ const ModularAdminDashboard = () => {
       case 'users':
         return <Users />;
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       case 'program-setup':
         return <SacProgramSetup onManagePromotion={(programId, batchId) => {
           setPromotionParams({ programId, batchId });

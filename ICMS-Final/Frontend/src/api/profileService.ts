@@ -35,6 +35,7 @@ export const fetchCurrentProfile = async (role?: string | null) => {
   return api.get(endpoint);
 };
 
+<<<<<<< HEAD
 export const updateProfile = async (data: any, isFormData: boolean = false) => {
   const headers: Record<string, string> = {};
   
@@ -58,3 +59,8 @@ export const updateProfile = async (data: any, isFormData: boolean = false) => {
     throw error;
   }
 };
+=======
+export const updateProfile = async (data: any) => {
+  return api.put('auth/users/profile/update/', data);
+};
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03

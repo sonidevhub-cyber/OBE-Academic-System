@@ -1,8 +1,14 @@
 from rest_framework import serializers
+<<<<<<< HEAD
 from .models import Semester, Course
 import re
 from core.models.program import Program
 
+=======
+from .models import Attendance, Result, Scholarship, Semester, Course
+import re
+from academic_structure.models import Program
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
 # ===========================
 # Semester Serializer
@@ -112,3 +118,68 @@ class CourseSerializer(serializers.ModelSerializer):
 
         return super().update(instance, validated_data)
 
+<<<<<<< HEAD
+=======
+# ===========================
+# Attendance Serializer
+# ===========================
+class AttendanceSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.name', read_only=True)
+    course_name = serializers.CharField(source='course.name', read_only=True)
+    
+    class Meta:
+        model = Attendance
+        fields = '__all__'
+
+# ===========================
+# Result Serializer
+# ===========================
+class ResultSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.name', read_only=True)
+    course_name = serializers.CharField(source='course.name', read_only=True)
+    percentage = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = Result
+        fields = '__all__'
+
+# ===========================
+# Course Allocation Serializer
+# ===========================
+from .models import Timetable
+
+class CourseAllocationSerializer(serializers.ModelSerializer):
+    allocation_id = serializers.IntegerField(source='timetable_id', read_only=True)
+    course_name = serializers.CharField(source='course.name', read_only=True)
+    course_code = serializers.CharField(source='course.code', read_only=True)
+    instructor_name = serializers.CharField(source='instructor.full_name', read_only=True)
+    semester = serializers.IntegerField(source='course.semester.semester_id', read_only=True)
+    semester_name = serializers.CharField(source='course.semester.name', read_only=True)
+    coordinator_name = serializers.CharField(source='created_by.full_name', read_only=True)
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Timetable
+        fields = [
+            'allocation_id', 'course', 'course_name', 'course_code',
+            'instructor', 'instructor_name', 'semester', 'semester_name',
+            'coordinator_name', 'status', 'approved_at', 'rejection_reason'
+        ]
+
+    def get_status(self, obj):
+        mapping = {
+            'draft': 'proposed',
+            'pending': 'proposed',
+            'approved': 'active',
+            'rejected': 'rejected'
+        }
+        return mapping.get(obj.approval_status, 'proposed')
+
+# ===========================
+# Scholarship Serializer
+# ===========================
+class ScholarshipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Scholarship
+        fields = '__all__'
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03

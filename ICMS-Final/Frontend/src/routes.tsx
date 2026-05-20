@@ -8,24 +8,36 @@ import { useAuth } from './context/AuthContext';
 import AdminDashboard from './roles/admin/AdminDashboard';
 import StudentDashboard from './roles/student/StudentDashboard';
 import StudentProfile from './components/ui/EnhancedStudentProfile';
+<<<<<<< HEAD
 import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
 import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
+=======
+import ModularInstructorDashboard from './views/dashboards/ModularInstructorDashboard';
+import ModularCoordinatorDashboard from './views/dashboards/ModularCoordinatorDashboard';
+import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 import SacProgramSetup from './views/pages/SacProgramSetup';
 import Batches from './views/pages/Batches';
 import ManagePromotion from './views/pages/ManagePromotion';
 import PendingTransfers from './views/pages/PendingTransfers';
 import Users from './pages/sac/Users';
 import TeacherManagement from './views/pages/TeacherManagement';
+<<<<<<< HEAD
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
 // import CourseDetails from 'views/pages/CourseDetails';
 import ActiveHODRecordsPage from './pages/ActiveHODRecordsPage';
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 //import TransportManagement from './components/pages/TransportManagement';
 
 
@@ -118,9 +130,15 @@ const getRedirectPath = () => {
         <Route path="/sac/users" element={<Users />} />
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
       </Route>
+<<<<<<< HEAD
 
        <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}>
   <Route path="/active-hod-records" element={<ActiveHODRecordsPage />} />
+=======
+      <Route element={<ProtectedRoute allowedRoles={['principal']} />}>
+</Route>
+       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}>
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 </Route>
       
       {/* Fallback route */}

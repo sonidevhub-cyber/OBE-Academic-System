@@ -5,7 +5,11 @@ from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 
 from core.models.batch import Batch
+<<<<<<< HEAD
 from core.permissions import IsSAC, IsSACOrCoordinator
+=======
+from core.permissions import IsSAC
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 from core.serializers.batch import BatchCreateSerializer, BatchListSerializer
 from core.serializers.user import UserListSerializer
 from django.contrib.auth import get_user_model
@@ -86,6 +90,7 @@ class BatchDeactivateView(generics.GenericAPIView):
 
 
 class AllBatchesView(generics.ListAPIView):
+<<<<<<< HEAD
     permission_classes = [IsSACOrCoordinator]
 
     def get_queryset(self):
@@ -94,6 +99,15 @@ class AllBatchesView(generics.ListAPIView):
         if program_id:
             queryset = queryset.filter(program_id=program_id)
         return queryset
+=======
+    # Student registration dropdown needs to read available batches.
+    # Previously this was restricted to IsSAC, which caused the dropdown to be empty.
+    permission_classes = [permissions.AllowAny]
+
+
+    def get_queryset(self):
+        return Batch.objects.filter(is_active=True, status='active').select_related('program')
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
     def list(self, request, *args, **kwargs):
         items = self.get_queryset()
@@ -101,7 +115,10 @@ class AllBatchesView(generics.ListAPIView):
             {
                 'id': str(b.id),
                 'name': b.name,
+<<<<<<< HEAD
                 'program_id': str(b.program_id),
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
                 'program_name': b.program.name,
                 'session_type': b.session_type,
                 'current_semester': b.current_semester,

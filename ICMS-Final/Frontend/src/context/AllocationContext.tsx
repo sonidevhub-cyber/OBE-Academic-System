@@ -1,6 +1,29 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+<<<<<<< HEAD
 import { coordinatorService, CourseAllocation } from '../api/coordinatorService';
 import { useAuth } from './AuthContext';
+=======
+import { coordinatorService } from '../api/coordinatorService';
+import { useAuth } from './AuthContext';
+
+interface CourseAllocation {
+  allocation_id: number;
+  course: number;
+  course_name: string;
+  course_code: string;
+  instructor: number;
+  instructor_name: string;
+  semester: number;
+  semester_name: string;
+  coordinator: number;
+  coordinator_name: string;
+  status: 'proposed' | 'approved' | 'rejected' | 'active';
+  proposed_at: string;
+  hod_comments?: string;
+  approved_at?: string | null;
+  rejection_reason?: string;
+}
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 
 interface AllocationContextType {
   allocations: CourseAllocation[];
@@ -25,9 +48,18 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
     try {
       setLoading(true);
       const response = await coordinatorService.getCourseAllocations();
+<<<<<<< HEAD
       const data = response.data.data; // Use .data.data for new API response format
       if (Array.isArray(data)) {
         setAllocations(data);
+=======
+      // Ensure we are setting an array even if the response is not as expected
+      const data = response.data;
+      if (Array.isArray(data)) {
+        setAllocations(data);
+      } else if (data && typeof data === 'object' && 'results' in data && Array.isArray((data as any).results)) {
+        setAllocations((data as any).results);
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       } else {
         console.warn('Expected array for allocations, received:', data);
         setAllocations([]);

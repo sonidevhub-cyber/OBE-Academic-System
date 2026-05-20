@@ -1,7 +1,6 @@
 // ==================== UI COMPONENTS ====================
 export { default as EnhancedStudentProfile } from './ui/EnhancedStudentProfile';
 export { default as SimpleStudentProfile } from './ui/SimpleStudentProfile';
-export { default as ReportCard } from './ui/ReportCard';
 
 // Modals
 export { default as StudentModal } from './ui/modals/StudentModal';
@@ -30,5 +29,9 @@ export { default as QuickActions } from './widgets/dashboard/QuickActions';
 export { default as SystemHealthWidget } from './widgets/dashboard/SystemHealthWidget';
 export { default as WeatherWidget } from './widgets/dashboard/WeatherWidget';
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 // ==================== ADMIN COMPONENTS ====================
 // export { default as HODRequestsManager } from '../views/modules/admin/HODRequestsManager';

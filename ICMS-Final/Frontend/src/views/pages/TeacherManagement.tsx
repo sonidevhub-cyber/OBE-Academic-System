@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { instructorService, departmentService, Instructor, Department } from '../../api/studentInstructorService';
+
+// Extension of Instructor interface to include user information if needed locally
+// Note: Ideally this should be updated in the service file
+interface InstructorWithUser extends Instructor {
+  user?: any;
+}
 import InstructorModal from '../../components/ui/modals/InstructorModal';
 import InstructorProfileModal from '../../components/ui/modals/InstructorProfileModal';
 

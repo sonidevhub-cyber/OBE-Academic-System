@@ -14,8 +14,11 @@ import {
 } from 'lucide-react';
 
 import AnnouncementModule from '../modules/AnnouncementModule';
+<<<<<<< HEAD
 import ResultsModule from '../modules/ResultsModule';
 import ProfileModule from '../modules/ProfileModule';
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 import AnalyticsModule from '../modules/AnalyticsModule';
 
 type TabId = 'dashboard' | 'results' | 'announcements' | 'profile';
@@ -99,6 +102,25 @@ const UnifiedDashboard: React.FC = () => {
         </nav>
       </div>
 
+<<<<<<< HEAD
+=======
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <AnalyticsModule token={token} userType={currentRole === 'coordinator' ? 'instructor' : currentRole as "student" | "admin" | "instructor" | "hod"} />;
+      case 'announcements':
+        return <AnnouncementModule token={token} canCreate={hasPermission('manage_announcements')} />;
+      case 'profile':
+        return <ProfileModule profileData={userProfile} userType={currentRole === 'coordinator' ? 'instructor' : currentRole as "student" | "admin" | "principal" | "instructor" | "hod"} />;
+      default:
+        return <div>Content for {activeTab}</div>;
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen w-full bg-[#E8EFF8]">
+      {renderTabs()}
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
       <div className="flex-1">
         <header className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-700 p-6 shadow-xl border-b border-white/20">
           <div className="flex items-center justify-between">
@@ -121,4 +143,7 @@ const UnifiedDashboard: React.FC = () => {
 };
 
 export default UnifiedDashboard;
+<<<<<<< HEAD
 
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03

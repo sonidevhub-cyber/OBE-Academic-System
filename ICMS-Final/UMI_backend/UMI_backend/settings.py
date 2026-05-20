@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import os
+=======
+﻿import os
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,19 +24,31 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     # Third party apps
     'rest_framework',
     'rest_framework.authtoken',
 
     'corsheaders',
     'django_extensions',
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     # Local apps
     'register',
     'students',
     'instructors',
     'academics',
+<<<<<<< HEAD
+=======
+    'attendance',
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
     'monitoring',
 
     'announcement',
@@ -41,9 +57,12 @@ INSTALLED_APPS = [
     'academic_structure',
     'obe',
     'core',
+<<<<<<< HEAD
     'coordinators',
     'curriculum',
 
+=======
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
 ]
 
 MIDDLEWARE = [
@@ -83,8 +102,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'icms_db',
-        'USER': 'icms_user',
-        'PASSWORD': 'admin.123',
+        'USER': 'postgres',
+        'PASSWORD': '12345678',
         'HOST': 'localhost',
         'PORT': '5432',
     }
@@ -132,9 +151,18 @@ REST_FRAMEWORK = {
     ],
 }
 
+<<<<<<< HEAD
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Custom User Model
 AUTH_USER_MODEL = 'core.CustomUser'
 
+=======
+
+# CORS settings
+CORS_ALLOW_ALL_ORIGINS = True
+
+# Custom User Model
+AUTH_USER_MODEL = 'core.CustomUser'
+>>>>>>> d20874b4c7f20ce286a33d5060e426742042dd03
