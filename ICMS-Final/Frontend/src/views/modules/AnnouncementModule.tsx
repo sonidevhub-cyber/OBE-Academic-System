@@ -1,94 +1,172 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 
 interface Announcement {
-  id: number;
+  id: string;
   title: string;
-  message: string;
+  content: string;
+  type: string;
+  is_pinned: boolean;
+  file?: string;
   created_at: string;
-  author?: string;
+  author_name?: string;
 }
 
-interface AnnouncementModuleProps {
+interface Props {
   token?: string;
   canCreate?: boolean;
-  onAnnouncementCreate?: (announcement: Announcement) => void;
 }
 
-const AnnouncementModule: React.FC<AnnouncementModuleProps> = ({ 
-  token, 
-  canCreate = false, 
-  onAnnouncementCreate 
-}) => {
+const AnnouncementModule: React.FC<Props> = ({ token, canCreate = false }) => {
+
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [newAnnouncement, setNewAnnouncement] = useState({ title: '', message: '' });
   const [loading, setLoading] = useState(false);
 
+  const [newAnnouncement, setNewAnnouncement] = useState({
+    title: '',
+    message: '',
+    type: 'announcement',
+    is_pinned: false
+  });
+
+  const [file, setFile] = useState<File | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // 📥 FETCH
   const fetchAnnouncements = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/announcements/', {
-        headers: token ? {
-          'Authorization': `Token ${token}`,
-          'Content-Type': 'application/json'
-        } : {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAnnouncements(data.data || data || []);
+      const res = await fetch('http://localhost:8000/api/announcements/');
+      const data = await res.json();
+
+      if (Array.isArray(data)) {
+        setAnnouncements(data);
+      } else if (Array.isArray(data.results)) {
+        setAnnouncements(data.results);
+      } else if (Array.isArray(data.data)) {
+        setAnnouncements(data.data);
+      } else {
+        setAnnouncements([]);
       }
-    } catch (error) {
-      console.error('Error fetching announcements:', error);
-    } finally {
-      setLoading(false);
+
+    } catch (err) {
+      console.error(err);
+      setAnnouncements([]);
     }
+    setLoading(false);
   };
 
-  const handleCreateAnnouncement = async (e: React.FormEvent) => {
+  // ➕ CREATE / UPDATE
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canCreate || !token) return;
+
+    if (!token) return;
 
     try {
-      const response = await fetch('http://localhost:8000/api/announcements/', {
-        method: 'POST',
+      const formData = new FormData();
+      formData.append("title", newAnnouncement.title);
+      formData.append("content", newAnnouncement.message);
+      formData.append("type", newAnnouncement.type);
+      formData.append("is_pinned", String(newAnnouncement.is_pinned));
+
+      if (file) {
+        formData.append("file", file);
+      }
+
+      const url = editingId
+        ? `http://localhost:8000/api/announcements/${editingId}/`
+        : `http://localhost:8000/api/announcements/`;
+
+      const method = editingId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: {
-          'Authorization': `Token ${token}`,
-          'Content-Type': 'application/json'
+          Authorization: `Token ${token}`
         },
-        body: JSON.stringify(newAnnouncement)
+        body: formData
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setNewAnnouncement({ title: '', message: '' });
+      if (res.ok) {
+        alert(editingId ? "✅ Updated" : "✅ Uploaded");
+
+        setNewAnnouncement({
+          title: '',
+          message: '',
+          type: 'announcement',
+          is_pinned: false
+        });
+
+        setFile(null);
+        setEditingId(null);
+
         fetchAnnouncements();
-        onAnnouncementCreate?.(data);
-        alert('✅ Announcement added successfully!');
+      } else {
+        const err = await res.json();
+        alert("❌ " + JSON.stringify(err));
       }
-    } catch (error) {
-      console.error('Error creating announcement:', error);
+
+    } catch (err) {
+      console.error(err);
     }
   };
+
+  // ❌ DELETE
+  const handleDelete = async (id: string) => {
+    if (!token) return;
+
+    if (!window.confirm("Delete this?")) return;
+
+    const res = await fetch(`http://localhost:8000/api/announcements/${id}/`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Token ${token}`
+      }
+    });
+
+    if (res.ok) {
+      alert("✅ Deleted");
+      fetchAnnouncements();
+    }
+  };
+
+  // ✏️ EDIT
+  const handleEdit = (a: Announcement) => {
+    setEditingId(a.id);
+    setNewAnnouncement({
+      title: a.title,
+      message: a.content,
+      type: a.type,
+      is_pinned: a.is_pinned
+    });
+  };
+
+  // 🎯 TYPE COLOR
+  const getBadgeColor = (type: string) => {
+    if (type === "datesheet") return "bg-yellow-200 text-black";
+    if (type === "timetable") return "bg-blue-200 text-black";
+    return "bg-gray-200 text-black";
+  };
+
+  // 🔝 SORT (PINNED FIRST → LATEST)
+  const sortedAnnouncements = [...announcements].sort((a, b) => {
+    if (a.is_pinned && !b.is_pinned) return -1;
+    if (!a.is_pinned && b.is_pinned) return 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 
   useEffect(() => {
     fetchAnnouncements();
-  }, [token]);
+  }, []);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="p-6 bg-white rounded-2xl shadow-md"
-    >
-      <h2 className="text-2xl font-bold text-blue-600 mb-4">📢 Announcements</h2>
+    <div className="p-6 bg-white rounded-xl shadow">
 
-      {/* Create Announcement Form */}
+      <h2 className="text-xl font-bold mb-4">📢 Announcements</h2>
+
+      {/* FORM */}
       {canCreate && (
-        <form onSubmit={handleCreateAnnouncement} className="space-y-3 mb-6">
+        <form onSubmit={handleSubmit} className="space-y-3 mb-6">
+
           <input
             type="text"
             placeholder="Title"
@@ -96,77 +174,121 @@ const AnnouncementModule: React.FC<AnnouncementModuleProps> = ({
             onChange={(e) =>
               setNewAnnouncement({ ...newAnnouncement, title: e.target.value })
             }
-            className="w-full p-2 border rounded-md"
+            className="w-full p-2 border rounded"
             required
           />
+
           <textarea
             placeholder="Message"
             value={newAnnouncement.message}
             onChange={(e) =>
               setNewAnnouncement({ ...newAnnouncement, message: e.target.value })
             }
-            className="w-full p-2 border rounded-md"
-            rows={4}
+            className="w-full p-2 border rounded"
             required
           />
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+
+          <select
+            value={newAnnouncement.type}
+            onChange={(e) =>
+              setNewAnnouncement({ ...newAnnouncement, type: e.target.value })
+            }
+            className="w-full p-2 border rounded"
           >
-            Add Announcement
+            <option value="announcement">Announcement</option>
+            <option value="datesheet">Date Sheet</option>
+            <option value="timetable">Time Table</option>
+          </select>
+
+          {/* ⭐ PIN */}
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={newAnnouncement.is_pinned}
+              onChange={(e) =>
+                setNewAnnouncement({
+                  ...newAnnouncement,
+                  is_pinned: e.target.checked
+                })
+              }
+            />
+            ⭐ Pin Important Notice
+          </label>
+
+          <input
+            type="file"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+
+          <button className="bg-blue-600 text-white px-4 py-2 rounded">
+            {editingId ? "Update" : "Upload"}
           </button>
+
         </form>
       )}
 
-      {/* Announcement List */}
-      <div>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">
-            {canCreate ? 'Existing Announcements' : 'Latest Announcements'}
-          </h3>
-          <button
-            onClick={fetchAnnouncements}
-            disabled={loading}
-            className="bg-gray-500 text-white px-3 py-1 rounded-md text-sm hover:bg-gray-600 disabled:opacity-50"
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
-        </div>
-        
-        {loading ? (
-          <div className="text-center py-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-          </div>
-        ) : announcements.length > 0 ? (
-          <div className="space-y-4">
-            {announcements.map((announcement, index) => (
-              <motion.div
-                key={announcement.id || index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="border-b border-gray-300 pb-3 mb-3 last:border-b-0"
-              >
-                <h4 className="text-blue-600 font-bold">{announcement.title}</h4>
-                <p className="text-gray-700 mt-1">{announcement.message}</p>
-                <div className="flex justify-between items-center mt-2">
-                  <p className="text-xs text-gray-400">
-                    Posted on: {new Date(announcement.created_at).toLocaleDateString()}
-                  </p>
-                  {announcement.author && (
-                    <p className="text-xs text-gray-500">
-                      By: {announcement.author}
-                    </p>
-                  )}
+      {/* LIST */}
+      {loading ? <p>Loading...</p> : (
+        <div className="space-y-4">
+
+          {sortedAnnouncements.map((a) => (
+            <div
+              key={a.id}
+              className={`border-b pb-3 p-3 rounded ${
+                a.is_pinned ? "bg-yellow-100 border-yellow-400" : ""
+              }`}
+            >
+
+              {/* ⭐ PIN LABEL */}
+              {a.is_pinned && (
+                <span className="text-xs bg-yellow-400 px-2 py-1 rounded">
+                  ⭐ Important
+                </span>
+              )}
+
+              <h4 className="font-bold text-blue-600">{a.title}</h4>
+
+              <p>{a.content}</p>
+
+              {/* 🎯 TYPE */}
+              <span className={`text-xs px-2 py-1 rounded ${getBadgeColor(a.type)}`}>
+                {a.type}
+              </span>
+
+              {/* 📄 FILE */}
+              {a.file && (
+                <a
+                  href={a.file}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-blue-500 mt-1"
+                >
+                  📄 View File
+                </a>
+              )}
+
+              <p className="text-xs text-gray-400">
+                {new Date(a.created_at).toLocaleDateString()}
+              </p>
+
+              {canCreate && (
+                <div className="space-x-3 mt-2">
+                  <button onClick={() => handleEdit(a)} className="text-blue-600 text-sm">
+                    Edit
+                  </button>
+
+                  <button onClick={() => handleDelete(a.id)} className="text-red-600 text-sm">
+                    Delete
+                  </button>
                 </div>
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No announcements yet.</p>
-        )}
-      </div>
-    </motion.div>
+              )}
+
+            </div>
+          ))}
+
+        </div>
+      )}
+    </div>
   );
 };
 
