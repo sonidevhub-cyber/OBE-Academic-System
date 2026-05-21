@@ -8,7 +8,7 @@ class InstructorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Instructor
         fields = [
-            'id', 'custom_id', 'user', 'name', 'email', 'phone', 
+            'id', 'custom_id', 'user', 'name', 'email', 'phone', 'gender', 'blood_group',
             'department', 'department_name', 'employment_type', 
             'qualification', 'experience', 'joining_date', 'image',
             'user_email', 'employee_id', 'designation', 'address',

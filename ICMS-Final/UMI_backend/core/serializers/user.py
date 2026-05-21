@@ -25,6 +25,7 @@ class UserListSerializer(serializers.ModelSerializer):
             'email',
             'role',
             'secondary_role',
+            'active_role',
             'role_display',
             'programs_list',
             'batch_name',
@@ -35,6 +36,9 @@ class UserListSerializer(serializers.ModelSerializer):
             'promotion_status',
             'current_semester',
             'created_at',
+            # Add missing fields
+            'is_staff',
+            'is_superuser',
         ]
 
     def get_role_display(self, obj):

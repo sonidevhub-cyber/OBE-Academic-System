@@ -22,9 +22,17 @@ User = get_user_model()
 def _build_login_response_for_user(user):
     token, _ = Token.objects.get_or_create(user=user)
 
+    # Use active_role if set, otherwise fallback to primary role
+    current_role = user.active_role or user.role
+
     roles = [user.role]
-    if getattr(user, "secondary_role", None):
+    if user.secondary_role and user.secondary_role != 'none':
         roles.append(user.secondary_role)
+    
+    # Faculty are also instructors
+    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+        if 'instructor' not in roles:
+            roles.append('instructor')
 
     payload = {
         "id": str(user.id),
@@ -33,16 +41,35 @@ def _build_login_response_for_user(user):
         "username": getattr(user, "username", None),
         "full_name": getattr(user, "full_name", None),
 
-        "role": user.role,
-        "secondary_role": getattr(user, "secondary_role", None),
+        "role": current_role,  # Front-end uses this as active role
+        "primary_role": user.role,
+        "secondary_role": user.secondary_role,
 
         "roles": roles,
-        "active_role": user.role,
-        "effective_role": user.role,
+        "active_role": current_role,
+        "effective_role": current_role,
 
         "is_superuser": user.is_superuser,
         "is_staff": user.is_staff,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None,
+    }
 
+    # Enrich with instructor data if it's a faculty member
+    if user.role in ['hod', 'coordinator', 'instructor', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+        try:
+            from instructors.models import Instructor
+            from instructors.serializers import InstructorSerializer
+            instructor = Instructor.objects.get(user=user)
+            instructor_data = InstructorSerializer(instructor).data
+            # Merge fields into payload, avoiding conflicts with core auth fields
+            for key, value in instructor_data.items():
+                if key not in payload and value is not None:
+                    payload[key] = value
+        except Exception:
+            pass
+
+    payload.update({
         "must_change_password": getattr(user, "must_change_password", False),
         "profile_pic": user.profile_pic.url if getattr(user, "profile_pic", None) else None,
         "designation": getattr(user, "designation", None),
@@ -50,7 +77,7 @@ def _build_login_response_for_user(user):
 
         "permissions": [],
         "rbac_role": None,
-    }
+    })
 
     # Student extra info
     if user.role in ["student", "alumni"]:
@@ -236,27 +263,76 @@ def update_profile(request):
 @permission_classes([IsAuthenticated])
 def available_roles(request):
     user = request.user
-
-    roles = [user.role]
-    if getattr(user, "secondary_role", None):
-        roles.append(user.secondary_role)
-
+    
+    roles = []
+    # Add primary role
+    roles.append({
+        "role": user.role,
+        "name": user.role.upper(),
+        "is_primary": True
+    })
+    
+    # Add secondary role
+    if user.secondary_role and user.secondary_role != 'none':
+        roles.append({
+            "role": user.secondary_role,
+            "name": user.secondary_role.upper(),
+            "is_primary": False
+        })
+    
+    # Faculty are also instructors
+    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+        if not any(r['role'] == 'instructor' for r in roles):
+            roles.append({
+                "role": 'instructor',
+                "name": 'Instructor',
+                "is_primary": False
+            })
+            
     return Response({
         "available_roles": roles,
-        "current_role": user.role
+        "current_role": user.active_role or user.role
     })
 
 
 # =========================
-# SWITCH ROLE (DISABLED)
+# SWITCH ROLE
 # =========================
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def switch_active_role(request):
-    return Response(
-        {"error": "Role switching is not implemented yet"},
-        status=status.HTTP_400_BAD_REQUEST
-    )
+    user = request.user
+    target_role = request.data.get("role")
+    
+    if not target_role:
+        return Response({"error": "No role provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    # Determine allowed roles
+    allowed_roles = [user.role]
+    if user.secondary_role and user.secondary_role != 'none':
+        allowed_roles.append(user.secondary_role)
+    
+    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+        if 'instructor' not in allowed_roles:
+            allowed_roles.append('instructor')
+            
+    if target_role not in allowed_roles:
+        return Response({"error": "Role not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    # Update active role
+    user.active_role = target_role
+    user.save()
+    
+    # Build updated login response
+    response_data = _build_login_response_for_user(user)
+    # Match the format expected by frontend UniversalRoleSwitcher
+    response_data.update({
+        "active_role": target_role,
+        "current_role": target_role,
+        "role": target_role
+    })
+    
+    return Response(response_data)
 
 
 # =========================

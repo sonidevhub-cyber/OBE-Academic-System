@@ -33,7 +33,7 @@ const ModularInstructorDashboard: React.FC = () => {
     const loadProfile = async () => {
       try {
         const response = await fetchCurrentProfile(role);
-        if (!cancelled) {
+        if (!cancelled && response.data && (response.data.email || response.data.full_name)) {
           setInstructorProfile(response.data);
         }
       } catch (error) {

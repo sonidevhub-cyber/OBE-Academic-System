@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 
 import AnnouncementModule from '../modules/AnnouncementModule';
-import ResultsModule from '../modules/ResultsModule';
 import ProfileModule from '../modules/ProfileModule';
 import AnalyticsModule from '../modules/AnalyticsModule';
 
@@ -40,8 +39,6 @@ const UnifiedDashboard: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <AnalyticsModule token="" userType={'student'} />;
-      case 'results':
-        return <ResultsModule token="" />;
       case 'announcements':
         return <AnnouncementModule token="" canCreate={hasPermission('manage_announcements')} />;
       case 'profile':

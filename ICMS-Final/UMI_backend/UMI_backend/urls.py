@@ -35,6 +35,7 @@ urlpatterns += [
     path('api/monitoring/', include('monitoring.urls')),
     path('api/admin/', include('admin_management.urls')),
     path('api/coordinators/', include('coordinators.urls')),
+    path('api/hods/', include('coordinators.urls')),
     path('api/curriculum-versions/', include('curriculum.urls')),
 
 ]

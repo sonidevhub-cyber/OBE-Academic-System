@@ -62,6 +62,13 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         ], 
         default='none' 
     ) 
+
+    # Currently active role for multi-role users
+    active_role = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True
+    )
     # Rule: secondary_role only set when 
     # role == 'instructor' or role == 'hod' 
     # or role == 'coordinator' 

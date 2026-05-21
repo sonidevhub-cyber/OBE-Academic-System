@@ -5,7 +5,10 @@ import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
 import HODCoordinatorManagementModule from '../modules/HODCoordinatorManagementModule';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
+import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { coordinatorService } from '../../api/coordinatorService';
+import { fetchCurrentProfile } from '../../api/profileService';
+import { getEffectiveRole } from '../../utils/profileHelpers';
 import { toast } from 'react-hot-toast';
 
 interface Department {
@@ -56,9 +59,11 @@ const ModularHODDashboard: React.FC = () => {
   const [selectedSemester, setSelectedSemester] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hodProfile, setHodProfile] = useState<any>(null);
 
   const authData = localStorage.getItem('auth');
   const auth = authData ? JSON.parse(authData) : {};
+  const currentUser = auth.user;
   const token = authData ? auth.access_token || auth.token : null;
   const canManageAnnouncements = Boolean(
     auth?.permissions?.includes('manage_announcements') ||
@@ -79,7 +84,21 @@ const ModularHODDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
+    loadProfile();
   }, []);
+
+  const loadProfile = async () => {
+    try {
+      const role = getEffectiveRole(currentUser, 'hod');
+      const response = await fetchCurrentProfile(role);
+      if (response.data && (response.data.email || response.data.full_name)) {
+        setHodProfile(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch HOD profile:', error);
+      setHodProfile(currentUser);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -475,6 +494,7 @@ const ModularHODDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
+              <TopbarProfileMenu userData={hodProfile || currentUser} />
               <div className="text-right">
                 <p className="text-white font-medium">Welcome back, HOD</p>
                 <p className="text-blue-200 text-sm">{new Date().toLocaleDateString()}</p>

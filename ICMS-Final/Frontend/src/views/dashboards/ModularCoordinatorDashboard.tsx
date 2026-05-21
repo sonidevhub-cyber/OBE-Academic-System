@@ -15,15 +15,15 @@ import { useAuth } from '../../context/AuthContext';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
+import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import CurriculumVersionListPage from '../modules/curriculum/CurriculumVersionListPage';
 import CurriculumVersionDetailPage from '../modules/curriculum/CurriculumVersionDetailPage';
 import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationBulkModule';
 import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
-import CoordinatorProfileModule from '../modules/coordinator/CoordinatorProfileModule';
 import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'settings' | 'profile';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -38,7 +38,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
     const loadProfile = async () => {
       try {
         const response = await fetchCurrentProfile(role);
-        if (!cancelled) {
+        if (!cancelled && response.data && (response.data.email || response.data.full_name)) {
           setCoordinatorProfile(response.data);
         }
       } catch (error) {
@@ -66,7 +66,6 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
-    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   const renderContent = () => {
@@ -124,13 +123,6 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
         return <SacProgramSetup onManagePromotion={() => {}} />; // Coordinator might not manage promotion but can see setup
-      case 'settings':
-        return (
-          <div className="bg-white p-8 rounded-[40px] shadow-xl border border-gray-100">
-            <h2 className="text-2xl font-black text-gray-900 mb-4">Dashboard Settings</h2>
-            <p className="text-gray-500 font-bold">Manage your portal preferences here.</p>
-          </div>
-        );
       default:
         return null;
     }
@@ -223,6 +215,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <UniversalRoleSwitcher />
               <TopbarProfileMenu userData={coordinatorProfile || currentUser} />
             </div>
           </motion.div>

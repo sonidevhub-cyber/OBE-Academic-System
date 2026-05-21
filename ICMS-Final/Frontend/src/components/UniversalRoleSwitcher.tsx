@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../api/axiosInstance';
 
 interface Role {
   role: string;
@@ -21,57 +22,47 @@ const UniversalRoleSwitcher: React.FC = () => {
 
   const loadAvailableRoles = async () => {
     try {
-      const token = JSON.parse(sessionStorage.getItem("auth") || localStorage.getItem("auth") || "{}")?.access_token;
-      const response = await fetch('http://127.0.0.1:8000/api/register/available-roles/', {
-        headers: { 'Authorization': `Token ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableRoles(data.available_roles || []);
-      }
+      const response = await axiosInstance.get('register/available-roles/');
+      setAvailableRoles(response.data.available_roles || []);
     } catch (error) {
       console.error('Error loading available roles:', error);
     }
   };
 
   const handleRoleSwitch = async (targetRole: string) => {
-    if (!currentUser || targetRole === (currentUser.effective_role || currentUser.active_role || currentUser.role)) return;
+    const currentEffectiveRole = currentUser?.effective_role || currentUser?.active_role || currentUser?.role;
+    if (!currentUser || targetRole === currentEffectiveRole) return;
     
     setLoading(true);
     try {
-      const token = JSON.parse(sessionStorage.getItem("auth") || localStorage.getItem("auth") || "{}")?.access_token;
-      const response = await fetch('http://127.0.0.1:8000/api/register/switch-active-role/', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Token ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ role: targetRole })
-      });
+      const response = await axiosInstance.post('register/switch-active-role/', { role: targetRole });
       
-      if (response.ok) {
-        const data = await response.json();
-        // Update user in context
-        const updatedUser = {
-          ...currentUser,
-          role: data.role || targetRole,
-          active_role: data.active_role || targetRole,
-          effective_role: data.current_role || targetRole,
-          roles: data.roles || currentUser.roles
-        };
-        updateUser(updatedUser);
-        
-        // Navigate to appropriate dashboard
-        navigateToRoleDashboard(targetRole);
-        setIsOpen(false);
-      } else {
-        const error = await response.json();
-        alert(`Error: ${error.error || 'Failed to switch role'}`);
-      }
-    } catch (error) {
+      const data = response.data;
+      // Update user in context and localStorage
+      const updatedUser = {
+        ...currentUser,
+        ...data.user,
+        role: targetRole,
+        active_role: targetRole,
+        effective_role: targetRole,
+      };
+      
+      // Update localStorage
+      const authData = JSON.parse(localStorage.getItem('auth') || '{}');
+      const newAuthData = { ...authData, user: updatedUser };
+      localStorage.setItem('auth', JSON.stringify(newAuthData));
+      
+      updateUser(updatedUser);
+      
+      // Navigate to appropriate dashboard
+      navigateToRoleDashboard(targetRole);
+      setIsOpen(false);
+      
+      // Force reload to ensure all modules update with new role
+      window.location.reload();
+    } catch (error: any) {
       console.error('Error switching role:', error);
-      alert('Failed to switch role');
+      alert(`Error: ${error.response?.data?.error || 'Failed to switch role'}`);
     } finally {
       setLoading(false);
     }

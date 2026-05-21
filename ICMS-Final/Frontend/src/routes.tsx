@@ -18,7 +18,6 @@ import Users from './pages/sac/Users';
 import TeacherManagement from './views/pages/TeacherManagement';
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
 // import CourseDetails from 'views/pages/CourseDetails';
-import ActiveHODRecordsPage from './pages/ActiveHODRecordsPage';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
@@ -119,8 +118,7 @@ const getRedirectPath = () => {
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
       </Route>
 
-       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}>
-  <Route path="/active-hod-records" element={<ActiveHODRecordsPage />} />
+       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}> 
 </Route>
       
       {/* Fallback route */}

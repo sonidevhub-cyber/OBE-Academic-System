@@ -78,9 +78,30 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def profile(self, request):
+        user = request.user
+        
+        # Base user data
         from core.serializers.user import UserListSerializer
-        serializer = UserListSerializer(request.user, context={'request': request})
-        return api_response(data=serializer.data, message="Coordinator profile retrieved successfully")
+        data = UserListSerializer(user, context={'request': request}).data
+        
+        # Try to enrich with instructor data if available
+        try:
+            from instructors.models import Instructor
+            from instructors.serializers import InstructorSerializer
+            instructor = Instructor.objects.get(user=user)
+            instructor_data = InstructorSerializer(instructor, context={'request': request}).data
+            
+            # Merge instructor data, preferring instructor data for overlapping fields
+            # except for role/active_role which should come from the user/session
+            for key, value in instructor_data.items():
+                if key not in ['id', 'role', 'active_role', 'secondary_role', 'user']:
+                    data[key] = value
+                    
+        except Exception:
+            # If no instructor profile, just return base user data
+            pass
+            
+        return api_response(data=data, message="Coordinator profile retrieved successfully")
 
     @action(detail=False, methods=['post'])
     def bulk(self, request):
