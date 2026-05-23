@@ -47,6 +47,7 @@ class GA(models.Model):
         blank=True, null=True 
     ) 
     order_number = models.IntegerField() 
+    kpi_target = models.FloatField(default=60.0) 
     is_active = models.BooleanField(default=True) 
     created_at = models.DateTimeField( 
         auto_now_add=True 
@@ -58,6 +59,29 @@ class GA(models.Model):
  
     def __str__(self): 
         return f"GA-{self.order_number}: {self.title}" 
+ 
+ 
+class PerformanceIndicator(models.Model): 
+    id = models.UUIDField( 
+        primary_key=True, 
+        default=uuid.uuid4, 
+        editable=False 
+    ) 
+    ga = models.ForeignKey( 
+        GA, 
+        on_delete=models.CASCADE, 
+        related_name='performance_indicators' 
+    ) 
+    code = models.CharField(max_length=20) 
+    description = models.TextField() 
+    kpi = models.FloatField(default=60.0) 
+    created_at = models.DateTimeField(auto_now_add=True) 
+ 
+    class Meta: 
+        ordering = ['code'] 
+ 
+    def __str__(self): 
+        return f"PI-{self.code}: {self.ga.title}" 
  
  
 class GAPEOMapping(models.Model): 
@@ -170,6 +194,42 @@ class CLOGAMapping(models.Model):
  
     def __str__(self): 
         return f"{self.clo} -> {self.ga} ({self.get_weight_display()})" 
+ 
+ 
+class CLOPIMapping(models.Model): 
+    WEIGHT_CHOICES = [ 
+        (1, 'Low'), 
+        (2, 'Medium'), 
+        (3, 'High'), 
+    ] 
+    id = models.UUIDField( 
+        primary_key=True, 
+        default=uuid.uuid4, 
+        editable=False 
+    ) 
+    clo = models.ForeignKey( 
+        CLO, 
+        on_delete=models.CASCADE, 
+        related_name='pi_mappings' 
+    ) 
+    pi = models.ForeignKey( 
+        PerformanceIndicator, 
+        on_delete=models.CASCADE, 
+        related_name='clo_mappings' 
+    ) 
+    weight = models.IntegerField( 
+        choices=WEIGHT_CHOICES, default=3 
+    ) 
+    is_active = models.BooleanField(default=True) 
+    created_at = models.DateTimeField( 
+        auto_now_add=True 
+    ) 
+ 
+    class Meta: 
+        unique_together = ('clo', 'pi') 
+ 
+    def __str__(self): 
+        return f"{self.clo} -> {self.pi} ({self.get_weight_display()})" 
  
  
 class CourseSession(models.Model): 

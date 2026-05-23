@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import ( 
     PEO, GA, GAPEOMapping, 
     CLO, CLOGAMapping, 
+    PerformanceIndicator, CLOPIMapping,
     CourseSession, CurriculumVersion 
 ) 
  
@@ -17,12 +18,22 @@ class PEOSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at'] 
  
  
+class PerformanceIndicatorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerformanceIndicator
+        fields = ['id', 'ga', 'code', 'description', 'kpi', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class GASerializer(serializers.ModelSerializer): 
+    performance_indicators = PerformanceIndicatorSerializer(many=True, read_only=True)
+
     class Meta: 
         model = GA 
         fields = [ 
             'id', 'program', 'title', 
-            'description', 'order_number', 
+            'description', 'order_number', 'kpi_target',
+            'performance_indicators',
             'is_active', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 
@@ -91,6 +102,22 @@ class CLOGAMappingSerializer(
             'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 
+ 
+ 
+class CLOPIMappingSerializer(serializers.ModelSerializer):
+    clo_title = serializers.CharField(source='clo.title', read_only=True)
+    pi_code = serializers.CharField(source='pi.code', read_only=True)
+    weight_display = serializers.CharField(source='get_weight_display', read_only=True)
+
+    class Meta:
+        model = CLOPIMapping
+        fields = [
+            'id', 'clo', 'pi', 'weight',
+            'clo_title', 'pi_code',
+            'weight_display', 'is_active',
+            'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
  
  
 class CourseSessionSerializer( 

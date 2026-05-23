@@ -6,12 +6,14 @@ from django.db import transaction
 from .models import ( 
     PEO, GA, GAPEOMapping, 
     CLO, CLOGAMapping, 
+    PerformanceIndicator, CLOPIMapping,
     CourseSession, CurriculumVersion 
 ) 
 from .serializers import ( 
     PEOSerializer, GASerializer, 
     GAPEOMappingSerializer, 
     CLOSerializer, CLOGAMappingSerializer, 
+    PerformanceIndicatorSerializer, CLOPIMappingSerializer,
     CourseSessionSerializer, 
     CurriculumVersionSerializer 
 ) 
@@ -115,16 +117,35 @@ class GAListCreateView(APIView):
         serializer = GASerializer(gas, many=True) 
         return Response(serializer.data) 
  
+    @transaction.atomic
     def post(self, request, program_id): 
         print(f"DEBUG: GA POST request for program_id: {program_id}")
         print(f"DEBUG: Request data: {request.data}")
+        
+        # Performance Indicators from request
+        pi_data = request.data.get('performance_indicators', [])
+        if not pi_data or len(pi_data) == 0:
+            return Response(
+                {'error': 'At least one Performance Indicator (PI) is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         data = request.data.copy() 
         data['program'] = program_id 
         serializer = GASerializer(data=data) 
         if serializer.is_valid(): 
-            serializer.save() 
+            ga = serializer.save() 
+            
+            for pi_item in pi_data:
+                PerformanceIndicator.objects.create(
+                    ga=ga,
+                    code=pi_item.get('code'),
+                    description=pi_item.get('description', ''),
+                    kpi=pi_item.get('kpi', ga.kpi_target)
+                )
+                
             return Response( 
-                serializer.data, 
+                GASerializer(ga).data, 
                 status=status.HTTP_201_CREATED 
             ) 
         print(f"DEBUG: GA Serializer errors: {serializer.errors}")
@@ -154,6 +175,7 @@ class GADetailView(APIView):
             ) 
         return Response(GASerializer(ga).data) 
  
+    @transaction.atomic
     def patch(self, request, pk): 
         ga = self.get_object(pk) 
         if not ga: 
@@ -161,12 +183,47 @@ class GADetailView(APIView):
                 {'error': 'Not found'}, 
                 status=status.HTTP_404_NOT_FOUND 
             ) 
+        
+        # Handle PI updates if provided
+        pi_data = request.data.get('performance_indicators', [])
+        if pi_data is not None and len(pi_data) == 0:
+            return Response(
+                {'error': 'At least one Performance Indicator (PI) is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        incoming_pi_ids = [pi.get('id') for pi in pi_data if pi.get('id')]
+        
+        # 1. Delete PIs that are not in the incoming list
+        PerformanceIndicator.objects.filter(ga=ga).exclude(id__in=incoming_pi_ids).delete()
+        
+        # 2. Update or Create PIs
+        for pi_item in pi_data:
+            pi_id = pi_item.get('id')
+            if pi_id:
+                try:
+                    pi_obj = PerformanceIndicator.objects.get(id=pi_id, ga=ga)
+                    pi_obj.code = pi_item.get('code', pi_obj.code)
+                    pi_obj.description = pi_item.get('description', pi_obj.description)
+                    pi_obj.kpi = pi_item.get('kpi', pi_obj.kpi)
+                    pi_obj.save()
+                except PerformanceIndicator.DoesNotExist:
+                    continue
+            else:
+                # New PI without ID
+                PerformanceIndicator.objects.create(
+                    ga=ga,
+                    code=pi_item.get('code'),
+                    description=pi_item.get('description', ''),
+                    kpi=pi_item.get('kpi', ga.kpi_target)
+                )
+
         serializer = GASerializer( 
             ga, data=request.data, partial=True 
         ) 
         if serializer.is_valid(): 
             serializer.save() 
-            return Response(serializer.data) 
+            return Response(GASerializer(ga).data) 
         return Response( 
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
@@ -426,6 +483,55 @@ class CLOGAMatrixView(APIView):
             CLOGAMappingSerializer( 
                 created, many=True 
             ).data, 
+            status=status.HTTP_201_CREATED 
+        ) 
+ 
+ 
+class CLOPIMatrixView(APIView): 
+    permission_classes = [IsAuthenticated] 
+ 
+    def get(self, request, course_id, batch_id): 
+        clos = CLO.objects.filter( 
+            course_id=course_id, 
+            batch_id=batch_id, 
+            is_active=True 
+        ) 
+        # Get all GAs for this course, and their PIs
+        gas = GA.objects.filter( 
+            program__courses__id=course_id, 
+            is_active=True 
+        ).distinct().prefetch_related('performance_indicators')
+        
+        mappings = CLOPIMapping.objects.filter( 
+            clo__course_id=course_id, 
+            clo__batch_id=batch_id, 
+            is_active=True 
+        ) 
+        return Response({ 
+            'clos': CLOSerializer(clos, many=True).data, 
+            'gas': GASerializer(gas, many=True).data, 
+            'mappings': CLOPIMappingSerializer(mappings, many=True).data 
+        }) 
+ 
+    @transaction.atomic 
+    def post(self, request, course_id, batch_id): 
+        CLOPIMapping.objects.filter( 
+            clo__course_id=course_id, 
+            clo__batch_id=batch_id 
+        ).delete() 
+ 
+        mappings_data = request.data.get('mappings', []) 
+        created = [] 
+        for m in mappings_data: 
+            mapping = CLOPIMapping.objects.create( 
+                clo_id=m['clo_id'], 
+                pi_id=m['pi_id'], 
+                weight=m.get('weight', 3) 
+            ) 
+            created.append(mapping) 
+ 
+        return Response( 
+            CLOPIMappingSerializer(created, many=True).data, 
             status=status.HTTP_201_CREATED 
         ) 
  

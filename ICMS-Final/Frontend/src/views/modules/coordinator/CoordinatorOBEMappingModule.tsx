@@ -10,14 +10,15 @@ import {
   Trash2, 
   Info,
   ChevronRight,
-  LayoutGrid
+  LayoutGrid,
+  Check
 } from 'lucide-react';
 import obeService, { PEO, GA, GAPEOMatrix } from '../../../api/obeService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
 import batchService, { Batch } from '../../../api/batchService';
 import { toast } from 'react-toastify';
 
-type SubTabId = 'vision' | 'peo' | 'ga' | 'ga-peo' | 'clo-ga';
+type SubTabId = 'vision' | 'peo' | 'ga' | 'ga-peo' | 'clo-pi';
 
 const CoordinatorOBEMappingModule: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<SubTabId>('vision');
@@ -44,12 +45,13 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     description: '', 
     order_number: 1, 
     kpi_target: 60,
-    bloom_level: 'K2'
+    bloom_level: 'K2',
+    performance_indicators: [] as any[]
   });
 
   // Matrix States
   const [gaPeoMatrix, setGaPeoMatrix] = useState<GAPEOMatrix | null>(null);
-  const [cloGaMatrix, setCloGaMatrix] = useState<any>(null);
+  const [cloPiMatrix, setCloPiMatrix] = useState<any>(null);
   const [matrixChanges, setMatrixChanges] = useState<Set<string>>(new Set());
 
   const fetchInitialData = useCallback(async () => {
@@ -161,25 +163,80 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const handleOpenModal = (type: 'peo' | 'ga' | 'clo', item?: any) => {
     setModalType(type);
     setEditingItem(item || null);
+    
+    let initialPIs: any[] = [];
+    if (type === 'ga') {
+      if (item && item.performance_indicators) {
+        initialPIs = item.performance_indicators;
+      } else {
+        const order = item ? item.order_number : (gas.length + 1);
+        const count = getPiCount(order);
+        for (let i = 1; i <= count; i++) {
+          initialPIs.push({
+            code: `${order}.${i}`,
+            description: '',
+            kpi: 60
+          });
+        }
+      }
+    }
+
     setFormData(item ? { 
       title: item.title, 
       description: item.description, 
       order_number: item.order_number,
       kpi_target: item.kpi_target || 60,
-      bloom_level: item.bloom_level || 'K2'
+      bloom_level: item.bloom_level || 'K2',
+      performance_indicators: initialPIs
     } : { 
       title: '', 
       description: '', 
       order_number: (type === 'peo' ? peos.length : type === 'ga' ? gas.length : clos.length) + 1,
       kpi_target: 60,
-      bloom_level: 'K2'
+      bloom_level: 'K2',
+      performance_indicators: initialPIs
     });
     setIsModalOpen(true);
+  };
+
+  const handleRemovePI = (index: number) => {
+    const newPIs = [...formData.performance_indicators];
+    newPIs.splice(index, 1);
+    setFormData({ ...formData, performance_indicators: newPIs });
+  };
+
+  const handleAddPI = () => {
+    const nextSubNumber = formData.performance_indicators.length + 1;
+    const newPI = {
+      code: `${formData.order_number}.${nextSubNumber}`,
+      description: '',
+      kpi: formData.kpi_target || 60
+    };
+    setFormData({
+      ...formData,
+      performance_indicators: [...formData.performance_indicators, newPI]
+    });
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProgram) return;
+
+    // Validation for GA: Must have at least one PI
+    if (modalType === 'ga') {
+      if (!formData.performance_indicators || formData.performance_indicators.length === 0) {
+        toast.error('At least one Performance Indicator (PI) is required for a GA');
+        return;
+      }
+      
+      // Ensure all PIs have description and KPI
+      const invalidPI = formData.performance_indicators.some((pi: any) => !pi.description || pi.kpi === undefined || pi.kpi === null);
+      if (invalidPI) {
+        toast.error('Please fill in all PI descriptions and KPI targets');
+        return;
+      }
+    }
+
     try {
       if (modalType === 'peo') {
         if (editingItem) {
@@ -241,94 +298,84 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     }
   };
 
-  const loadCloGaMatrix = async () => {
+  const getPiCount = (gaOrder: number) => {
+    const counts: Record<number, number> = {
+      1: 3, 2: 4, 3: 4, 4: 3, 5: 3, 6: 3,
+      7: 2, 8: 2, 9: 3, 10: 3, 11: 3, 12: 2
+    };
+    return counts[gaOrder] || 2;
+  };
+
+  const loadCloPiMatrix = async () => {
     if (!selectedCourse || !selectedBatch) return;
     try {
-      const res = await obeService.getMappingMatrix(selectedCourse.id, selectedBatch.id);
-      setCloGaMatrix(res);
+      const res = await obeService.getCLOPIMappingMatrix(selectedCourse.id, selectedBatch.id);
+      setCloPiMatrix(res);
       setMatrixChanges(new Set());
     } catch (error) {
-      toast.error('Failed to load CLO-GA matrix');
+      toast.error('Failed to load CLO-PI matrix');
     }
   };
 
   useEffect(() => {
     if (activeSubTab === 'ga-peo' && selectedProgram) loadGaPeoMatrix();
-    if (activeSubTab === 'clo-ga' && selectedCourse && selectedBatch) loadCloGaMatrix();
+    if (activeSubTab === 'clo-pi' && selectedCourse && selectedBatch) loadCloPiMatrix();
   }, [activeSubTab, selectedProgram, selectedCourse, selectedBatch]);
 
-  const toggleMapping = (rowId: string, colId: string) => {
-    const key = `${rowId}:${colId}`;
-    setMatrixChanges(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const isMapped = (rowId: string, colId: string, currentMappings: any[]) => {
-    const key = `${rowId}:${colId}`;
-    if (!currentMappings) return matrixChanges.has(key);
-    
-    const inOriginal = currentMappings.some(m => 
-      (m.ga_id === rowId && m.peo_id === colId) || 
-      (m.clo_id === rowId && m.ga_id === colId) ||
-      (m.ga === rowId && m.peo === colId) ||
-      (m.clo === rowId && m.ga === colId)
-    );
-    return matrixChanges.has(key) ? !inOriginal : inOriginal;
-  };
-
-  const saveGaPeoMappings = async () => {
-    if (!selectedProgram || !gaPeoMatrix) return;
-    const finalMappings: any[] = [];
-    
-    // Process all possible combinations
-    gaPeoMatrix.gas.forEach(ga => {
-      gaPeoMatrix.peos.forEach(peo => {
-        if (isMapped(ga.id, peo.id, gaPeoMatrix.mappings)) {
-          finalMappings.push({ ga_id: ga.id, peo_id: peo.id });
+  const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-pi') => {
+     const changeKey = `${rowId}-${colId}`;
+     const newChanges = new Set(matrixChanges);
+     if (newChanges.has(changeKey)) newChanges.delete(changeKey);
+     else newChanges.add(changeKey);
+     setMatrixChanges(newChanges);
+ 
+     if (type === 'ga-peo') {
+        const newMappings = [...gaPeoMatrix!.mappings];
+        const existingIdx = newMappings.findIndex(m => (m.ga === rowId && m.peo === colId) || (m.ga_id === rowId && m.peo_id === colId));
+        if (existingIdx >= 0) newMappings.splice(existingIdx, 1);
+        else newMappings.push({ id: '', ga: rowId, peo: colId, ga_id: rowId, peo_id: colId });
+        setGaPeoMatrix({ ...gaPeoMatrix!, mappings: newMappings });
+      } else {
+       const newMappings = [...cloPiMatrix!.mappings];
+       const existingIdx = newMappings.findIndex(m => (m.clo === rowId && m.pi === colId) || (m.clo_id === rowId && m.pi_id === colId));
+       if (existingIdx >= 0) newMappings.splice(existingIdx, 1);
+       else newMappings.push({ id: '', clo: rowId, pi: colId, clo_id: rowId, pi_id: colId, weight: 3 });
+       setCloPiMatrix({ ...cloPiMatrix!, mappings: newMappings });
+     }
+   };
+ 
+   const handleSaveMatrix = async (type: 'ga-peo' | 'clo-pi') => {
+      try {
+        if (type === 'ga-peo') {
+          const mappings = gaPeoMatrix!.mappings.map(m => ({
+            ga_id: (m.ga || m.ga_id)!,
+            peo_id: (m.peo || m.peo_id)!
+          }));
+          await obeService.updateGAPEOMappings(selectedProgram!.id, mappings);
+          toast.success('GA-PEO mappings saved');
+          loadGaPeoMatrix();
+        } else {
+          const mappings = cloPiMatrix!.mappings.map((m: any) => ({
+            clo_id: (m.clo || m.clo_id)!,
+            pi_id: (m.pi || m.pi_id)!,
+            weight: m.weight || 3
+          }));
+          await obeService.updateCLOPIMappings(selectedCourse!.id, selectedBatch!.id, mappings);
+          toast.success('CLO-PI mappings saved');
+          loadCloPiMatrix();
         }
-      });
-    });
-
-    try {
-      await obeService.updateGAPEOMappings(selectedProgram.id, finalMappings);
-      toast.success('Successfully mapped Graduate Attributes to PEOs');
-      loadGaPeoMatrix();
-    } catch (error) {
-      toast.error('Failed to update mappings');
-    }
-  };
-
-  const saveCloGaMappings = async () => {
-    if (!selectedCourse || !selectedBatch || !cloGaMatrix) return;
-    const finalMappings: any[] = [];
-    
-    clos.forEach(clo => {
-      gas.forEach(ga => {
-        if (isMapped(clo.id, ga.id, cloGaMatrix.mappings)) {
-          finalMappings.push({ clo_id: clo.id, ga_id: ga.id, weight: 3 }); // High weight default
-        }
-      });
-    });
-
-    try {
-      await obeService.updateCLOGAMappings(selectedCourse.id, selectedBatch.id, finalMappings);
-      toast.success('Successfully mapped Course Outcomes to GAs');
-      loadCloGaMatrix();
-    } catch (error) {
-      toast.error('Failed to update CLO-GA mappings');
-    }
-  };
+        setMatrixChanges(new Set());
+      } catch (error) {
+        toast.error('Failed to save mappings');
+      }
+    };
 
   const subTabs = [
     { id: 'vision', label: 'Program Vision', icon: Target },
     { id: 'peo', label: 'PEO Definitions', icon: Award },
     { id: 'ga', label: 'GA Definitions', icon: Info },
     { id: 'ga-peo', label: 'GA-PEO Mapping', icon: LayoutGrid },
-    { id: 'clo-ga', label: 'CLO-GA Mapping', icon: LayoutGrid },
+    { id: 'clo-pi', label: 'CLO-PI Mapping', icon: LayoutGrid },
   ];
 
   return (
@@ -346,7 +393,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           </select>
         </div>
 
-        {activeSubTab === 'clo-ga' && (
+        {activeSubTab === 'clo-pi' && (
           <>
             <div>
               <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Batch</label>
@@ -482,7 +529,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                   <p className="text-gray-400 text-sm mt-1">Map Graduate Attributes to Program Educational Objectives.</p>
                 </div>
                 <button 
-                  onClick={saveGaPeoMappings}
+                  onClick={() => handleSaveMatrix('ga-peo')}
                   className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
                 >
                   <Save size={18} />
@@ -512,11 +559,13 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             <div className="text-sm text-gray-500 truncate max-w-[200px]">{ga.title}</div>
                           </td>
                           {gaPeoMatrix.peos.map(peo => {
-                            const active = isMapped(ga.id, peo.id, gaPeoMatrix.mappings);
+                            const active = gaPeoMatrix.mappings.some(m => 
+                              (m.ga === ga.id || m.ga_id === ga.id) && (m.peo === peo.id || m.peo_id === peo.id)
+                            );
                             return (
                               <td key={peo.id} className="p-6 border-b border-gray-50 text-center">
                                 <button
-                                  onClick={() => toggleMapping(ga.id, peo.id)}
+                                  onClick={() => handleMatrixChange(ga.id, peo.id, 'ga-peo')}
                                   className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all transform active:scale-95 ${
                                     active 
                                       ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
@@ -539,128 +588,149 @@ const CoordinatorOBEMappingModule: React.FC = () => {
             </div>
           )}
 
-          {activeSubTab === 'clo-ga' && (
-            <div className="p-8">
-              <div className="flex justify-between items-center mb-8">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900">CLO to GA Mapping Matrix</h3>
-                  <p className="text-gray-400 text-sm mt-1">Map Course Learning Outcomes to Graduate Attributes.</p>
-                </div>
-                {selectedCourse && (
-                  <button 
-                    onClick={saveCloGaMappings}
-                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
-                  >
-                    <Save size={18} />
-                    Save Mappings
-                  </button>
-                )}
+          {activeSubTab === 'clo-pi' && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {!selectedCourse ? (
+              <div className="bg-white p-12 text-center rounded-[40px] border-2 border-dashed border-gray-100 shadow-xl shadow-gray-50/50">
+                <BookOpen className="w-16 h-16 text-gray-200 mx-auto mb-6" />
+                <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">Select a Course</h3>
+                <p className="text-gray-500 font-bold mt-2">Please select a course to define CLOs and map them to PIs</p>
               </div>
-
-              {!selectedCourse ? (
-                <div className="p-12 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
-                  <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500 font-medium">Please select a course to define and map CLOs</p>
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  {/* CLO Definition Section */}
-                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
-                    <div className="flex justify-between items-center mb-6">
-                      <h4 className="font-bold text-gray-800">CLOs for {selectedCourse.code}</h4>
-                      <button 
-                        onClick={() => handleOpenModal('clo')}
-                        className="text-indigo-600 font-bold text-sm hover:underline"
-                      >
-                        + Add CLO
-                      </button>
+            ) : (
+              <>
+                {/* CLO Definition Section */}
+                <div className="bg-white p-8 rounded-[40px] shadow-xl border border-gray-100">
+                  <div className="flex justify-between items-center mb-8">
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">Course Learning Outcomes</h3>
+                      <p className="text-gray-500 font-bold mt-1">Define learning outcomes for {selectedCourse.code}</p>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {clos.map(clo => (
-                        <div key={clo.id} className="group p-4 bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 relative">
-                          <span className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">
+                    <button 
+                      onClick={() => handleOpenModal('clo')}
+                      className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-100 transition-all"
+                    >
+                      <Plus size={18} />
+                      Add CLO
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {clos.map(clo => (
+                      <div key={clo.id} className="group p-6 bg-gray-50 rounded-3xl border border-transparent hover:border-indigo-100 hover:bg-white hover:shadow-xl hover:shadow-indigo-50/50 transition-all relative overflow-hidden">
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center font-black text-lg shadow-inner">
                             {clo.order_number}
-                          </span>
+                          </div>
                           <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs font-bold text-gray-400 uppercase">CLO-{clo.order_number}</p>
-                              <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-md font-bold">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-tighter">CLO-{clo.order_number}</span>
+                              <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-lg font-black uppercase">
                                 {clo.bloom_level}
                               </span>
                             </div>
-                            <p className="text-sm font-semibold text-gray-700 truncate" title={clo.title}>{clo.title}</p>
-                          </div>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-white/90 p-1 rounded-lg shadow-sm">
-                            <button onClick={() => handleOpenModal('clo', clo)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded">
-                              <Settings size={14} />
-                            </button>
-                            <button onClick={() => handleDeleteItem('clo', clo.id)} className="p-1 text-red-600 hover:bg-red-50 rounded">
-                              <Trash2 size={14} />
-                            </button>
+                            <p className="text-sm font-bold text-gray-700 leading-relaxed" title={clo.title}>{clo.title}</p>
                           </div>
                         </div>
-                      ))}
-                      {clos.length === 0 && (
-                        <div className="col-span-full p-4 text-center text-gray-400 italic text-sm">
-                          No CLOs defined for this course.
+                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <button onClick={() => handleOpenModal('clo', clo)} className="p-2 bg-white text-indigo-600 hover:bg-indigo-50 rounded-xl shadow-sm border border-gray-100">
+                            <Settings size={14} />
+                          </button>
+                          <button onClick={() => handleDeleteItem('clo', clo.id)} className="p-2 bg-white text-red-600 hover:bg-red-50 rounded-xl shadow-sm border border-gray-100">
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Mapping Grid */}
-                  <div className="overflow-x-auto rounded-3xl border border-gray-100">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50">
-                          <th className="p-6 border-b border-gray-100 font-black text-gray-400 uppercase text-xs tracking-widest w-64">Course Outcome</th>
-                          {gas.map(ga => (
-                            <th key={ga.id} className="p-6 border-b border-gray-100 text-center w-24">
-                              <div className="font-black text-indigo-600 text-sm">GA-{ga.order_number}</div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {clos.map(clo => (
-                          <tr key={clo.id} className="hover:bg-indigo-50/30 transition-colors">
-                            <td className="p-6 border-b border-gray-50">
-                              <div className="font-bold text-gray-900">CLO-{clo.order_number}</div>
-                              <div className="text-sm text-gray-500 truncate max-w-[200px]" title={clo.title}>{clo.title}</div>
-                            </td>
-                            {gas.map(ga => {
-                              const active = isMapped(clo.id, ga.id, cloGaMatrix?.mappings || []);
-                              return (
-                                <td key={ga.id} className="p-6 border-b border-gray-50 text-center">
-                                  <button
-                                    onClick={() => toggleMapping(clo.id, ga.id)}
-                                    className={`w-10 h-10 rounded-xl flex items-center justify-center mx-auto transition-all transform active:scale-95 ${
-                                      active 
-                                        ? 'bg-green-600 text-white shadow-lg shadow-green-100' 
-                                        : 'bg-gray-50 text-gray-300 hover:bg-gray-100'
-                                    }`}
-                                  >
-                                    {active ? <Save size={16} /> : <Plus size={16} />}
-                                  </button>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                        {clos.length === 0 && (
-                          <tr>
-                            <td colSpan={gas.length + 1} className="p-12 text-center text-gray-400 italic">
-                              Add CLOs above to start mapping.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {/* Mapping Matrix Section */}
+                <div className="bg-white p-8 rounded-[40px] shadow-xl border border-gray-100">
+                  <div className="flex items-center justify-between mb-8">
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">CLO-PI Mapping Matrix</h3>
+                      <p className="text-gray-500 font-bold mt-1">Map Course Learning Outcomes to Performance Indicators</p>
+                    </div>
+                    <button
+                      onClick={() => handleSaveMatrix('clo-pi')}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-indigo-200"
+                    >
+                      <Save size={18} />
+                      Save Mappings
+                    </button>
+                  </div>
+
+                  {cloPiMatrix && (
+                    <div className="overflow-x-auto rounded-[30px] border border-gray-100">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50">
+                            <th className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest border-b border-r border-gray-100 w-48 sticky left-0 bg-gray-50 z-10">CLOs \ PIs</th>
+                            {cloPiMatrix.gas.map((ga: any) => (
+                          <th 
+                            key={ga.id} 
+                            colSpan={ga.performance_indicators?.length || 1}
+                            className="p-4 text-xs font-black text-gray-700 uppercase tracking-widest text-center border-b border-r border-gray-100 bg-indigo-50/50"
+                          >
+                            GA-{ga.order_number}: {ga.title}
+                          </th>
+                        ))}
+                          </tr>
+                          <tr className="bg-white">
+                            <th className="p-6 border-b border-r border-gray-100 sticky left-0 bg-white z-10"></th>
+                            {cloPiMatrix.gas.flatMap((ga: any) => 
+                              (ga.performance_indicators || [{ id: 'empty', code: 'N/A' }]).map((pi: any) => (
+                                <th 
+                                  key={pi.id} 
+                                  className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center border-b border-r border-gray-100 min-w-[80px]"
+                                >
+                                  {pi.code}
+                                </th>
+                              ))
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cloPiMatrix.clos.map((clo: any) => (
+                            <tr key={clo.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="p-6 border-b border-r border-gray-100 font-black text-gray-700 text-sm sticky left-0 bg-white group-hover:bg-gray-50 z-10">
+                                <div className="flex flex-col">
+                                  <span>{clo.title}</span>
+                                  <span className="text-[10px] text-gray-400 font-bold uppercase">{clo.bloom_level}</span>
+                                </div>
+                              </td>
+                              {cloPiMatrix.gas.flatMap((ga: any) => 
+                                (ga.performance_indicators || [{ id: 'empty' }]).map((pi: any) => {
+                                  const isSelected = cloPiMatrix.mappings.some((m: any) => 
+                                    (m.clo === clo.id || m.clo_id === clo.id) && (m.pi === pi.id || m.pi_id === pi.id)
+                                  );
+                                  return (
+                                    <td key={`${clo.id}-${pi.id}`} className="p-4 border-b border-r border-gray-100 text-center">
+                                      <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => handleMatrixChange(clo.id, pi.id, 'clo-pi')}
+                                          className="sr-only peer"
+                                        />
+                                        <div className="w-10 h-10 bg-gray-100 rounded-xl peer-checked:bg-indigo-600 flex items-center justify-center transition-all peer-checked:shadow-lg peer-checked:shadow-indigo-100">
+                                          {isSelected && <Check size={20} className="text-white" />}
+                                        </div>
+                                      </label>
+                                    </td>
+                                  );
+                                })
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
         </motion.div>
       </AnimatePresence>
 
@@ -670,7 +740,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-[40px] shadow-2xl w-full max-w-lg overflow-hidden border border-white"
+            className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white"
           >
             <div className="p-10">
               <h3 className="text-2xl font-black text-gray-900 mb-2">
@@ -719,6 +789,18 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                       </select>
                     </div>
                   )}
+                  {modalType === 'ga' && (
+                    <div>
+                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Target (%)</label>
+                      <input
+                        type="number"
+                        required
+                        value={formData.kpi_target}
+                        onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
+                        className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                      />
+                    </div>
+                  )}
                 </div>
                 {modalType === 'clo' && (
                   <div>
@@ -742,6 +824,87 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                     className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
                   />
                 </div>
+
+                {modalType === 'ga' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <LayoutGrid size={16} className="text-indigo-600" />
+                        <h4 className="text-sm font-black text-gray-900 uppercase tracking-widest">Performance Indicators</h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddPI}
+                        className="flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all"
+                      >
+                        <Plus size={14} />
+                        Add PI
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {formData.performance_indicators.map((pi, index) => (
+                        <div key={index} className="grid grid-cols-12 gap-3 items-center">
+                          <div className="col-span-2">
+                            <input
+                              type="text"
+                              required
+                              placeholder="Code"
+                              value={pi.code}
+                              onChange={(e) => {
+                                const newPIs = [...formData.performance_indicators];
+                                newPIs[index].code = e.target.value;
+                                setFormData({...formData, performance_indicators: newPIs});
+                              }}
+                              className="w-full bg-gray-100 border-none rounded-xl px-3 py-2.5 text-xs font-black text-gray-700 text-center focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                          <div className="col-span-6">
+                            <input
+                              type="text"
+                              required
+                              placeholder="PI Description"
+                              value={pi.description}
+                              onChange={(e) => {
+                                const newPIs = [...formData.performance_indicators];
+                                newPIs[index].description = e.target.value;
+                                setFormData({...formData, performance_indicators: newPIs});
+                              }}
+                              className="w-full bg-gray-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                            />
+                          </div>
+                          <div className="col-span-3">
+                            <input
+                              type="number"
+                              required
+                              placeholder="KPI %"
+                              value={pi.kpi}
+                              onChange={(e) => {
+                                const newPIs = [...formData.performance_indicators];
+                                newPIs[index].kpi = parseFloat(e.target.value);
+                                setFormData({...formData, performance_indicators: newPIs});
+                              }}
+                              className="w-full bg-gray-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                            />
+                          </div>
+                          <div className="col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePI(index)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {formData.performance_indicators.length === 0 && (
+                        <div className="text-center py-6 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-100">
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No Performance Indicators added yet</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-4 pt-4">
                   <button
                     type="button"

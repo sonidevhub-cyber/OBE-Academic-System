@@ -25,12 +25,23 @@ export interface PEO {
   is_active: boolean;
 }
 
+export interface PerformanceIndicator {
+  id: string;
+  ga: string;
+  code: string;
+  description: string;
+  kpi: number;
+  created_at: string;
+}
+
 export interface GA {
   id: string;
   program: string;
   title: string;
   description: string;
   order_number: number;
+  kpi_target: number;
+  performance_indicators: PerformanceIndicator[];
   is_active: boolean;
 }
 
@@ -38,6 +49,8 @@ export interface GAPEOMapping {
   id: string;
   ga: string;
   peo: string;
+  ga_id?: string;
+  peo_id?: string;
 }
 
 export interface GAPEOMatrix {
@@ -190,6 +203,16 @@ class OBEService {
 
   async updateCLOGAMappings(courseId: string, batchId: string, mappings: any[]): Promise<any> {
     const response = await api.post(`/obe/courses/${courseId}/batches/${batchId}/clo-ga-matrix/`, { mappings });
+    return response.data;
+  }
+
+  async getCLOPIMappingMatrix(courseId: string, batchId: string): Promise<any> {
+    const response = await api.get(`/obe/courses/${courseId}/batches/${batchId}/clo-pi-matrix/`);
+    return response.data;
+  }
+
+  async updateCLOPIMappings(courseId: string, batchId: string, mappings: any[]): Promise<any> {
+    const response = await api.post(`/obe/courses/${courseId}/batches/${batchId}/clo-pi-matrix/`, { mappings });
     return response.data;
   }
 
