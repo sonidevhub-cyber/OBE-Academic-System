@@ -64,12 +64,12 @@ export const semesterService = {
 
 // ==================== COURSE MODULE ====================
 export const courseService = {
-  getAll: () => api.get('academics/courses/'),
-  getById: (id: string | number) => api.get(`academics/courses/${id}/`),
-  create: (data: any) => api.post('academics/courses/', data),
-  update: (id: string | number, data: any) => api.put(`academics/courses/${id}/`, data),
-  delete: (id: string | number) => api.delete(`academics/courses/${id}/`),
-  getBySemester: (semesterId: string | number) => api.get(`academics/courses/?semester=${semesterId}`),
+  getAll: () => api.get('courses/'),
+  getById: (id: string | number) => api.get(`courses/${id}/`),
+  create: (data: any) => api.post('courses/', data),
+  update: (id: string | number, data: any) => api.put(`courses/${id}/`, data),
+  delete: (id: string | number) => api.delete(`courses/${id}/`),
+  getBySemester: (semesterId: string | number) => api.get(`courses/?semester=${semesterId}`),
   // Backward compatibility aliases
   getAllCourses: function() { return this.getAll(); },
   getCourseById: function(id: string | number) { return this.getById(id); },

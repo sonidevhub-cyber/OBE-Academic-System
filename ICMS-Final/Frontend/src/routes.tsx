@@ -11,6 +11,8 @@ import StudentProfile from './components/ui/EnhancedStudentProfile';
 import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
 import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
 import SacProgramSetup from './views/pages/SacProgramSetup';
+import MasterCurriculumManagement from './views/pages/MasterCurriculumManagement';
+import MasterCurriculumDetailPage from './views/pages/MasterCurriculumDetailPage';
 import Batches from './views/pages/Batches';
 import ManagePromotion from './views/pages/ManagePromotion';
 import PendingTransfers from './views/pages/PendingTransfers';
@@ -108,10 +110,12 @@ const getRedirectPath = () => {
         <Route path="/curriculum-versions/:id" element={<CurriculumVersionDetailPage />} />
       </Route>
 
-      <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director', 'coordinator']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin-dashboard" element={<Navigate to="/admin" />} />
         <Route path="/sac/programs" element={<SacProgramSetup />} />
+        <Route path="/curriculum/master" element={<MasterCurriculumManagement />} />
+        <Route path="/curriculum/master/:id" element={<MasterCurriculumDetailPage />} />
         <Route path="/sac/programs/:programId/batches" element={<Batches />} />
         <Route path="/sac/programs/:programId/batches/:batchId/promotion" element={<ManagePromotion />} />
         <Route path="/sac/users" element={<Users />} />

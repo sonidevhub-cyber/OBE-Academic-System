@@ -82,7 +82,7 @@ const CurriculumVersionListPage: React.FC<CurriculumVersionListPageProps> = ({ o
           >
             <option value="">All Statuses</option>
             <option value="draft">Draft</option>
-            <option value="active">Active</option>
+            <option value="finalized">Finalized</option>
             <option value="archived">Archived</option>
           </select>
         </div>
@@ -96,7 +96,7 @@ const CurriculumVersionListPage: React.FC<CurriculumVersionListPageProps> = ({ o
                 <th className="px-6 py-3 font-semibold">Status</th>
                 <th className="px-6 py-3 font-semibold">Courses</th>
                 <th className="px-6 py-3 font-semibold">Created By</th>
-                <th className="px-6 py-3 font-semibold">Activated At</th>
+                <th className="px-6 py-3 font-semibold">Finalized At</th>
                 <th className="px-6 py-3 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -121,8 +121,8 @@ const CurriculumVersionListPage: React.FC<CurriculumVersionListPageProps> = ({ o
                     </td>
                     <td className="px-6 py-4 text-gray-600">{version.total_courses} courses</td>
                     <td className="px-6 py-4 text-gray-600">{version.created_by_name}</td>
-                    <td className="px-6 py-4 text-gray-600">
-                      {version.activated_at ? new Date(version.activated_at).toLocaleDateString() : '-'}
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                      {version.activated_at ? new Date(version.activated_at).toLocaleDateString() : 'Not finalized'}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex space-x-2">

@@ -60,17 +60,19 @@ export interface GAPEOMatrix {
 }
 
 class OBEService {
-  // --- Legacy Methods for Backward Compatibility ---
-  async getMappingMatrix(courseId?: string, batchId?: string): Promise<any>;
-  async getMappingMatrix(courseId?: number, departmentId?: number): Promise<any>;
-  async getMappingMatrix(courseId?: any, batchOrDeptId?: any): Promise<any> {
-    if (typeof courseId === 'string' && typeof batchOrDeptId === 'string') {
-      // New UUID-based call
-      const response = await api.get(`/obe/courses/${courseId}/batches/${batchOrDeptId}/clo-ga-matrix/`);
+  // --- GA-CLO Mapping Matrix ---
+  async getMappingMatrix(courseId: string | number | undefined, secondId: string | number | undefined): Promise<any> {
+    if (typeof courseId === 'string' && typeof secondId === 'number') {
+      // New version-based call
+      const response = await api.get(`/obe/courses/${courseId}/versions/${secondId}/clo-ga-matrix/`);
+      return response.data;
+    } else if (typeof courseId === 'string' && typeof secondId === 'string') {
+      // Batch-based call
+      const response = await api.get(`/obe/courses/${courseId}/batches/${secondId}/clo-ga-matrix/`);
       return response.data;
     } else {
-      // Legacy number-based call
-      const params = courseId ? { course_id: courseId } : { department_id: batchOrDeptId };
+      // Legacy or department-based
+      const params = courseId ? { course_id: courseId } : { department_id: secondId };
       const response = await api.get('/obe/clo-ga-mappings/mapping_matrix/', { params });
       return response.data;
     }
@@ -81,14 +83,8 @@ class OBEService {
     return response.data;
   }
 
-  async getGraduateAttributes(departmentId?: number) {
-    const params = departmentId ? `?department=${departmentId}` : '';
-    const response = await api.get(`/obe/graduate-attributes/${params}`);
-    return response.data;
-  }
-
-  async getCourseOutcomes(courseId: number) {
-    const response = await api.get(`/obe/clos/?course=${courseId}`);
+  async saveCLOGAMappings(courseId: string, versionId: number, mappings: any[]): Promise<any> {
+    const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clo-ga-matrix/`, { mappings });
     return response.data;
   }
 
@@ -97,12 +93,93 @@ class OBEService {
     return response.data;
   }
 
-  async getCLOGAMappings(courseId: number) {
+  async getCLOGAMappings(courseId: string) {
     const response = await api.get(`/obe/clo-ga-mappings/?course=${courseId}`);
     return response.data;
   }
 
-  // --- New PEO Methods ---
+  // --- PI Mapping Matrix ---
+  async getPIMappingMatrix(courseId: string, versionId: number): Promise<any> {
+    const response = await api.get(`/obe/courses/${courseId}/versions/${versionId}/clo-pi-matrix/`);
+    return response.data;
+  }
+
+  async saveCLOPIMappings(courseId: string, versionId: number, mappings: any[]): Promise<any> {
+    const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clo-pi-matrix/`, { mappings });
+    return response.data;
+  }
+
+  async getCLOPIMappingMatrix(courseId: string, id: string | number): Promise<any> {
+    if (typeof id === 'number') {
+      const response = await api.get(`/obe/courses/${courseId}/versions/${id}/clo-pi-matrix/`);
+      return response.data;
+    } else {
+      const response = await api.get(`/obe/courses/${courseId}/batches/${id}/clo-pi-matrix/`);
+      return response.data;
+    }
+  }
+
+  async updateCLOPIMappings(courseId: string, id: string | number, mappings: any[]): Promise<any> {
+    if (typeof id === 'number') {
+      const response = await api.post(`/obe/courses/${courseId}/versions/${id}/clo-pi-matrix/`, { mappings });
+      return response.data;
+    } else {
+      const response = await api.post(`/obe/courses/${courseId}/batches/${id}/clo-pi-matrix/`, { mappings });
+      return response.data;
+    }
+  }
+
+  // --- CLO Management ---
+  async getCLOs(courseId: string, id: string | number): Promise<any[]> {
+    if (typeof id === 'number') {
+      // versionId
+      const response = await api.get(`/obe/courses/${courseId}/versions/${id}/clos/`);
+      return response.data;
+    } else {
+      // batchId
+      const response = await api.get(`/obe/courses/${courseId}/batches/${id}/clos/`);
+      return response.data;
+    }
+  }
+
+  async createCLO(courseId: string, id: string | number, data: any): Promise<any>;
+  async createCLO(data: any): Promise<any>;
+  async createCLO(courseIdOrData: any, maybeId?: any, maybeData?: any): Promise<any> {
+    if (typeof courseIdOrData === 'string' && maybeId) {
+      if (typeof maybeId === 'number') {
+        // versionId
+        const response = await api.post(`/obe/courses/${courseIdOrData}/versions/${maybeId}/clos/`, maybeData);
+        return response.data;
+      } else {
+        // batchId
+        const response = await api.post(`/obe/courses/${courseIdOrData}/batches/${maybeId}/clos/`, maybeData);
+        return response.data;
+      }
+    } else {
+      // Legacy call: (data)
+      const response = await api.post('/obe/clos/', courseIdOrData);
+      return response.data;
+    }
+  }
+
+  async updateCLO(id: any, data: any): Promise<any> {
+    const response = await api.patch(`/obe/clos/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteCLO(id: any): Promise<any> {
+    const response = await api.delete(`/obe/clos/${id}/`);
+    return response.data;
+  }
+
+  async copyCLOs(courseId: string, versionId: number, sourceVersionId: number) {
+    const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clos/copy/`, {
+      source_version_id: sourceVersionId
+    });
+    return response.data;
+  }
+
+  // --- PEO Methods ---
   async getPEOs(programId: string): Promise<PEO[]> {
     const response = await api.get(`/obe/programs/${programId}/peos/`);
     return response.data;
@@ -123,13 +200,18 @@ class OBEService {
     return response.data;
   }
 
-  // --- New GA Methods ---
+  // --- GA Methods ---
   async getGAs(programId: string): Promise<GA[]> {
     const response = await api.get(`/obe/programs/${programId}/gas/`);
     return response.data;
   }
 
-  // Supporting both legacy and new createGA
+  async getGraduateAttributes(departmentId?: number) {
+    const params = departmentId ? `?department=${departmentId}` : '';
+    const response = await api.get(`/obe/graduate-attributes/${params}`);
+    return response.data;
+  }
+
   async createGA(programId: string, data: Partial<GA>): Promise<any>;
   async createGA(data: any): Promise<any>;
   async createGA(programIdOrData: any, maybeData?: any): Promise<any> {
@@ -154,69 +236,34 @@ class OBEService {
     return response.data;
   }
 
-  // --- New GA-PEO Matrix Methods ---
+  // --- GA-PEO Matrix Methods ---
   async getGAPEOMatrix(programId: string): Promise<GAPEOMatrix> {
     const response = await api.get(`/obe/programs/${programId}/ga-peo-matrix/`);
     return response.data;
   }
 
-  async updateGAPEOMappings(programId: string, mappings: Array<{ga_id: string, peo_id: string}>): Promise<any> {
+  async saveGAPEOMappings(programId: string, mappings: Array<{ga_id: string, peo_id: string}>): Promise<any> {
     const response = await api.post(`/obe/programs/${programId}/ga-peo-matrix/`, { mappings });
     return response.data;
   }
 
-  // --- New CLO Methods ---
-  async getCLOs(courseId: string, batchId: string): Promise<any[]> {
-    const response = await api.get(`/obe/courses/${courseId}/batches/${batchId}/clos/`);
+  // --- Course Session Views ---
+  async getCourseSessions(batchId: string) {
+    const response = await api.get(`/obe/batches/${batchId}/sessions/`);
     return response.data;
   }
 
-  // Supporting both legacy and new createCLO
-  async createCLO(courseId: string, batchId: string, data: any): Promise<any>;
-  async createCLO(data: any): Promise<any>;
-  async createCLO(courseIdOrData: any, maybeBatchId?: any, maybeData?: any): Promise<any> {
-    if (typeof courseIdOrData === 'string' && maybeBatchId && maybeData) {
-      // New UUID-based call: (courseId, batchId, data)
-      const response = await api.post(`/obe/courses/${courseIdOrData}/batches/${maybeBatchId}/clos/`, maybeData);
-      return response.data;
-    } else {
-      // Legacy call: (data)
-      const response = await api.post('/obe/clos/', courseIdOrData);
-      return response.data;
-    }
-  }
-
-  async updateCLO(id: any, data: any): Promise<any> {
-    if (typeof id === 'string') {
-      const response = await api.patch(`/obe/clos/${id}/`, data);
-      return response.data;
-    } else {
-      const response = await api.put(`/obe/clos/${id}/`, data);
-      return response.data;
-    }
-  }
-
-  async deleteCLO(id: any): Promise<any> {
-    const response = await api.delete(`/obe/clos/${id}/`);
+  async createCourseSession(data: any) {
+    const response = await api.post('/obe/sessions/', data);
     return response.data;
   }
 
-  async updateCLOGAMappings(courseId: string, batchId: string, mappings: any[]): Promise<any> {
-    const response = await api.post(`/obe/courses/${courseId}/batches/${batchId}/clo-ga-matrix/`, { mappings });
+  async updateCourseSession(id: string, data: any) {
+    const response = await api.patch(`/obe/sessions/${id}/`, data);
     return response.data;
   }
 
-  async getCLOPIMappingMatrix(courseId: string, batchId: string): Promise<any> {
-    const response = await api.get(`/obe/courses/${courseId}/batches/${batchId}/clo-pi-matrix/`);
-    return response.data;
-  }
-
-  async updateCLOPIMappings(courseId: string, batchId: string, mappings: any[]): Promise<any> {
-    const response = await api.post(`/obe/courses/${courseId}/batches/${batchId}/clo-pi-matrix/`, { mappings });
-    return response.data;
-  }
-
-  // Program Vision (using Program description for now as requested)
+  // Program Vision
   async updateProgramVision(programId: string, vision: string): Promise<any> {
     const response = await api.patch(`/programs/${programId}/`, { description: vision });
     return response.data;

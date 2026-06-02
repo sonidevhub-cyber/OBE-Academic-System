@@ -22,12 +22,13 @@ export interface Course {
   id: string;
   name: string;
   code: string;
-  course_type: 'theory' | 'lab';
+  course_type: 'LECTURE' | 'LAB';
   credit_hours: number;
   semester_id: string;
   program_id: string;
   semester_number?: number;
   program_name?: string;
+  parent_course_id?: string;
 }
 
 const academicStructureService = {
@@ -38,9 +39,10 @@ const academicStructureService = {
   getProgramDetail: (id: string) => api.get<Program>(`programs/${id}/`),
 
   // Courses
-  getCourses: (program_id: string, semester_id?: string) => {
+  getCourses: (program_id: string, semester_id?: string, batch_id?: string) => {
     let url = `courses/?program_id=${program_id}`;
     if (semester_id) url += `&semester_id=${semester_id}`;
+    if (batch_id) url += `&batch_id=${batch_id}`;
     return api.get<Course[]>(url);
   },
   createCourse: (data: Omit<Course, 'id' | 'semester_number' | 'program_name'>) => 

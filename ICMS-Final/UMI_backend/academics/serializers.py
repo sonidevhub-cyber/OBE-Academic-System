@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Semester, Course
 import re
 from core.models.program import Program
+from core.models.batch import Batch # Import Batch model
 
 
 # ===========================
@@ -111,4 +112,3 @@ class CourseSerializer(serializers.ModelSerializer):
             validated_data['semester'] = semester_obj
 
         return super().update(instance, validated_data)
-

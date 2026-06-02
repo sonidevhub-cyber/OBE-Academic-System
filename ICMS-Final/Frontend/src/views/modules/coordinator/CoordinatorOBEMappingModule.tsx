@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import obeService, { PEO, GA, GAPEOMatrix } from '../../../api/obeService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
-import batchService, { Batch } from '../../../api/batchService';
+import { curriculumService, CurriculumVersion } from '../../../api/curriculumService';
 import { toast } from 'react-toastify';
 
 type SubTabId = 'vision' | 'peo' | 'ga' | 'ga-peo' | 'clo-pi';
@@ -24,8 +24,8 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<SubTabId>('vision');
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
+  const [versions, setVersions] = useState<CurriculumVersion[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<CurriculumVersion | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [clos, setClos] = useState<any[]>([]);
@@ -74,7 +74,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     if (selectedProgram) {
       setVision(selectedProgram.description || '');
       loadPeosAndGas(selectedProgram.id);
-      loadBatches(selectedProgram.id);
+      loadVersions(selectedProgram.id);
     }
   }, [selectedProgram]);
 
@@ -85,10 +85,10 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   }, [selectedProgram]);
 
   useEffect(() => {
-    if (selectedCourse && selectedBatch) {
-      loadClos(selectedCourse.id, selectedBatch.id);
+    if (selectedCourse && selectedVersion) {
+      loadClos(selectedCourse.id, selectedVersion.id);
     }
-  }, [selectedCourse, selectedBatch]);
+  }, [selectedCourse, selectedVersion]);
 
   const loadPeosAndGas = async (programId: string) => {
     if (!programId) return;
@@ -106,21 +106,21 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     }
   };
 
-  const loadBatches = async (programId: string) => {
+  const loadVersions = async (programId: string) => {
     if (!programId) return;
     try {
-      const res = await batchService.getBatches(programId);
-      const batchData = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
-      setBatches(batchData);
-      if (batchData.length > 0) {
-        setSelectedBatch(batchData[0]);
+      const res = await curriculumService.getVersions({ program: programId, status: 'draft' });
+      const versionData = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
+      setVersions(versionData);
+      if (versionData.length > 0) {
+        setSelectedVersion(versionData[0]);
       } else {
-        setSelectedBatch(null);
+        setSelectedVersion(null);
       }
     } catch (error) {
-      console.error('Failed to load batches:', error);
-      setBatches([]);
-      setSelectedBatch(null);
+      console.error('Failed to load versions:', error);
+      setVersions([]);
+      setSelectedVersion(null);
     }
   };
 
@@ -136,10 +136,10 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     }
   };
 
-  const loadClos = async (courseId: string, batchId: string) => {
-    if (!courseId || !batchId) return;
+  const loadClos = async (courseId: string, versionId: number) => {
+    if (!courseId || !versionId) return;
     try {
-      const res = await obeService.getCLOs(courseId, batchId);
+      const res = await obeService.getCLOs(courseId, versionId);
       setClos(Array.isArray(res) ? res : (res as any).data || []);
     } catch (error) {
       console.error('Failed to load CLOs:', error);
@@ -257,15 +257,15 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         }
         loadPeosAndGas(selectedProgram.id);
       } else if (modalType === 'clo') {
-        if (!selectedCourse || !selectedBatch) return;
+        if (!selectedCourse || !selectedVersion) return;
         if (editingItem) {
           await obeService.updateCLO(editingItem.id, formData);
           toast.success('CLO updated');
         } else {
-          await obeService.createCLO(selectedCourse.id, selectedBatch.id, formData);
+          await obeService.createCLO(selectedCourse.id, selectedVersion.id, formData);
           toast.success('CLO created');
         }
-        loadClos(selectedCourse.id, selectedBatch.id);
+        loadClos(selectedCourse.id, selectedVersion.id);
       }
       setIsModalOpen(false);
     } catch (error) {
@@ -280,7 +280,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       else if (type === 'ga') await obeService.deleteGA(id);
       else if (type === 'clo') await obeService.deleteCLO(id);
       toast.success(`${type.toUpperCase()} deleted`);
-      if (type === 'clo') loadClos(selectedCourse!.id, selectedBatch!.id);
+      if (type === 'clo') loadClos(selectedCourse!.id, selectedVersion!.id);
       else loadPeosAndGas(selectedProgram!.id);
     } catch (error) {
       toast.error('Delete failed');
@@ -293,8 +293,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       const res = await obeService.getGAPEOMatrix(selectedProgram.id);
       setGaPeoMatrix(res);
       setMatrixChanges(new Set());
-    } catch (error) {
-      toast.error('Failed to load GA-PEO matrix');
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        setGaPeoMatrix({ peos: [], gas: [], mappings: [] });
+      } else {
+        toast.error('Failed to load GA-PEO matrix');
+      }
     }
   };
 
@@ -307,20 +311,25 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   };
 
   const loadCloPiMatrix = async () => {
-    if (!selectedCourse || !selectedBatch) return;
+    if (!selectedCourse || !selectedVersion) return;
     try {
-      const res = await obeService.getCLOPIMappingMatrix(selectedCourse.id, selectedBatch.id);
+      const res = await obeService.getCLOPIMappingMatrix(selectedCourse.id, selectedVersion.id);
       setCloPiMatrix(res);
       setMatrixChanges(new Set());
-    } catch (error) {
-      toast.error('Failed to load CLO-PI matrix');
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // Try fallback or show empty
+        setCloPiMatrix({ clos: [], gas: [], mappings: [] });
+      } else {
+        toast.error('Failed to load CLO-PI matrix');
+      }
     }
   };
 
   useEffect(() => {
     if (activeSubTab === 'ga-peo' && selectedProgram) loadGaPeoMatrix();
-    if (activeSubTab === 'clo-pi' && selectedCourse && selectedBatch) loadCloPiMatrix();
-  }, [activeSubTab, selectedProgram, selectedCourse, selectedBatch]);
+    if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloPiMatrix();
+  }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion]);
 
   const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-pi') => {
      const changeKey = `${rowId}-${colId}`;
@@ -351,7 +360,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
             ga_id: (m.ga || m.ga_id)!,
             peo_id: (m.peo || m.peo_id)!
           }));
-          await obeService.updateGAPEOMappings(selectedProgram!.id, mappings);
+          await obeService.saveGAPEOMappings(selectedProgram!.id, mappings);
           toast.success('GA-PEO mappings saved');
           loadGaPeoMatrix();
         } else {
@@ -360,7 +369,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
             pi_id: (m.pi || m.pi_id)!,
             weight: m.weight || 3
           }));
-          await obeService.updateCLOPIMappings(selectedCourse!.id, selectedBatch!.id, mappings);
+          await obeService.updateCLOPIMappings(selectedCourse!.id, selectedVersion!.id, mappings);
           toast.success('CLO-PI mappings saved');
           loadCloPiMatrix();
         }
@@ -396,13 +405,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         {activeSubTab === 'clo-pi' && (
           <>
             <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Batch</label>
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Curriculum Version (Draft)</label>
               <select 
-                value={selectedBatch?.id || ''} 
-                onChange={(e) => setSelectedBatch(batches.find(b => b.id === e.target.value) || null)}
+                value={selectedVersion?.id || ''} 
+                onChange={(e) => setSelectedVersion(versions.find(v => v.id === Number(e.target.value)) || null)}
                 className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
               >
-                {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {versions.length === 0 && <option value="">No Draft Versions</option>}
+                {versions.map(v => <option key={v.id} value={v.id}>{v.version_no}</option>)}
               </select>
             </div>
             <div>

@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
-
-# ---------- Semester ----------
+from core.models.batch import Batch # Import Batch model
 class Semester(models.Model):
     semester_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)

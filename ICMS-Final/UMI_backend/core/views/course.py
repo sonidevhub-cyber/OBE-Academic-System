@@ -28,6 +28,12 @@ class CourseListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(semester_id=semester_id)
         if semester_num:
             qs = qs.filter(semester__number=semester_num)
+        
+        semester = self.request.query_params.get('semester')
+        if semester:
+            qs = qs.filter(semester__number=semester)
+            
+        print(f"Returning {qs.count()} courses for program {program_id}, semester_id {semester_id}, semester_num {semester_num or semester}")
         return qs
 
     @transaction.atomic
@@ -36,4 +42,3 @@ class CourseListCreateView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         course = serializer.save()
         return Response(CourseSerializer(course).data, status=status.HTTP_201_CREATED)
-

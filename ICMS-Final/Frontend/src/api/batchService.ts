@@ -10,6 +10,7 @@ export interface Batch {
     student_count: number; 
     is_active: boolean; 
     status: 'active' | 'graduated';
+    curriculum_version_no?: string;
     graduated_at: string | null;
 } 
 
@@ -18,6 +19,7 @@ export interface BatchCreateData {
     start_year: number; 
     end_year: number; 
     session_type: 'fall' | 'spring';
+    curriculum_version_id?: string; // New field for cloning
 }
 
 export interface BatchFlat {

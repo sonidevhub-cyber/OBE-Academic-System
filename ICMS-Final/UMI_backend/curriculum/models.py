@@ -5,18 +5,18 @@ from django.core.exceptions import ValidationError
 class CurriculumVersion(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft'),
-        ('active', 'Active'),
+        ('finalized', 'Finalized'),
         ('archived', 'Archived'),
     ]
 
     program = models.ForeignKey('core.Program', on_delete=models.PROTECT, related_name='obe_curriculum_versions')
-    batch = models.ForeignKey('core.Batch', on_delete=models.PROTECT, related_name='obe_curriculum_versions')
+    batch = models.ForeignKey('core.Batch', on_delete=models.PROTECT, related_name='obe_curriculum_versions', null=True, blank=True)
     version_no = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     cloned_from = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='clones')
     
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_curriculums')
-    activated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='activated_curriculums')
+    activated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='finalized_curriculums')
     activated_at = models.DateTimeField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -24,7 +24,7 @@ class CurriculumVersion(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ['program', 'batch']
+        unique_together = ['program', 'version_no', 'batch']
         ordering = ['-created_at']
         verbose_name = "Curriculum Version"
         verbose_name_plural = "Curriculum Versions"
@@ -35,12 +35,14 @@ class CurriculumVersion(models.Model):
     def clean(self):
         if self.pk:
             old_instance = CurriculumVersion.objects.get(pk=self.pk)
-            if old_instance.status in ['active', 'archived'] and self.status == old_instance.status:
-                # Allow status change from active to archived, but not editing content
-                raise ValidationError("Active/Archived version edit nahi ho sakti")
+            if old_instance.status in ['finalized', 'archived'] and self.status == old_instance.status:
+                # Allow status change from finalized to archived, but not editing content
+                raise ValidationError("Finalized/Archived version edit nahi ho sakti")
 
     def __str__(self):
-        return f"{self.program.name} - {self.batch.name} ({self.version_no})"
+        if self.batch:
+            return f"{self.program.name} - {self.batch.name} ({self.version_no})"
+        return f"{self.program.name} ({self.version_no})"
 
 class CurriculumVersionCourse(models.Model):
     version = models.ForeignKey(CurriculumVersion, on_delete=models.CASCADE, related_name='version_courses')

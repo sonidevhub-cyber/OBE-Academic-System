@@ -11,7 +11,6 @@ import {
   CheckCircle2, 
   AlertCircle,
   ChevronRight,
-  BookMarked,
   Users,
   ArrowRightCircle,
   Calendar,
@@ -22,6 +21,7 @@ import {
 } from 'lucide-react';
 import academicStructureService, { Program, Course, Semester } from '../../api/academicStructureService';
 import batchService, { Batch, BatchCreateData } from '../../api/batchService';
+import { curriculumService } from '../../api/curriculumService';
 import { studentService } from '../../api/apiService';
 import { toast } from 'react-toastify';
 
@@ -45,11 +45,11 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [selectedSemester, setSelectedSemester] = useState<Semester | null>(null);
-  const [courses, setCourses] = useState<Course[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [alumniBatches, setAlumniBatches] = useState<Batch[]>([]);
+  const [masterCurricula, setMasterCurricula] = useState<any[]>([]);
   
-  const [activeTab, setActiveTab] = useState<'courses' | 'batches' | 'alumni'>('courses');
+  const [activeTab, setActiveTab] = useState<'batches' | 'alumni'>('batches');
   
   const [selectedBatchForStudents, setSelectedBatchForStudents] = useState<Batch | null>(null);
   const [batchStudents, setBatchStudents] = useState<Student[]>([]);
@@ -72,54 +72,45 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     total_semesters: 8
   });
 
-  const [showCourseForm, setShowCourseForm] = useState(false);
-  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
-  const [courseForm, setCourseForm] = useState({
-    name: '',
-    code: '',
-    course_type: 'theory' as 'theory' | 'lab',
-    credit_hours: 3,
-    semester_id: ''
-  });
-
   const [showBatchForm, setShowBatchForm] = useState(false);
-  const [batchForm, setBatchForm] = useState<BatchCreateData>({ 
-    name: '', 
-    start_year: new Date().getFullYear(), 
+  const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
+  const [batchForm, setBatchForm] = useState<BatchCreateData>({
+    name: '',
+    start_year: new Date().getFullYear(),
     end_year: new Date().getFullYear() + 4,
-    session_type: 'fall'
+    session_type: 'fall',
+    curriculum_version_id: undefined,
   });
+  
 
   // Fetch Programs
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-        const response = await academicStructureService.getPrograms();
+      const response = await academicStructureService.getPrograms();
       setPrograms(response.data);
 
+      let currentProgram = selectedProgram;
       // If nothing selected yet, select first program.
       if (response.data.length > 0 && !selectedProgram) {
-        setSelectedProgram(response.data[0]);
+        currentProgram = response.data[0];
+        setSelectedProgram(currentProgram);
       }
 
       // IMPORTANT:
       // Program objects coming from getPrograms() may not include `semesters`.
-      // Always refresh selectedProgram from detail endpoint so UI shows semesters immediately.
-      if (selectedProgram?.id) {
-        const detailRes = await academicStructureService.getProgramDetail(selectedProgram.id);
+      // Always refresh currentProgram from detail endpoint so UI shows semesters immediately.
+      if (currentProgram?.id) {
+        const detailRes = await academicStructureService.getProgramDetail(currentProgram.id);
         setSelectedProgram(detailRes.data);
       }
-
-      // NOTE: program IDs are backend UUIDs. UI should never display them raw.
-      // If you see random-looking IDs in the UI, it is because somewhere prints `program.id`.
-      // (This component only displays code/name, so no change needed here.)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load programs');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedProgram?.id]); // Depend on id instead of whole object
 
   useEffect(() => {
     fetchData();
@@ -130,13 +121,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     if (!selectedProgram) return;
     setContentLoading(true);
     try {
-      if (activeTab === 'courses') {
-        const response = await academicStructureService.getCourses(
-          selectedProgram.id, 
-          selectedSemester?.id
-        );
-        setCourses(response.data);
-      } else if (activeTab === 'batches') {
+      if (activeTab === 'batches') {
         const response = await batchService.getBatches(selectedProgram.id);
         // Only show active batches in Batches tab
         setBatches(response.data.filter(b => b.status === 'active'));
@@ -155,6 +140,24 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   useEffect(() => {
     fetchContent();
   }, [fetchContent]);
+
+  const fetchMasterCurricula = useCallback(async () => {
+    if (!selectedProgram) return;
+    try {
+      const res = await curriculumService.getMasterCurricula(selectedProgram.id);
+      const data = res.data?.data || res.data || [];
+      setMasterCurricula(data);
+    } catch (error) {
+      console.error("Error fetching master curricula:", error);
+      toast.error("Could not load master curricula.");
+    }
+  }, [selectedProgram]);
+
+  useEffect(() => {
+    if (selectedProgram) {
+      fetchMasterCurricula();
+    }
+  }, [selectedProgram, fetchMasterCurricula]);
 
   const fetchBatchStudents = useCallback(async (batch: Batch) => {
     setSelectedBatchForStudents(batch);
@@ -193,36 +196,6 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     }
   };
 
-  const handleSaveCourse = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProgram) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const payload = {
-        ...courseForm,
-        program_id: selectedProgram.id
-      };
-
-      if (editingCourse) {
-        await academicStructureService.updateCourse(editingCourse.id, payload);
-        setSuccess('Course updated successfully');
-      } else {
-        await academicStructureService.createCourse(payload);
-        setSuccess('Course added successfully');
-      }
-      setShowCourseForm(false);
-      setEditingCourse(null);
-      setCourseForm({ name: '', code: '', course_type: 'theory', credit_hours: 3, semester_id: '' });
-      fetchContent();
-    } catch (err: any) {
-      const data = err.response?.data;
-      setError(data?.code ? `Course Code: ${data.code[0]}` : data?.semester_id ? data.semester_id[0] : data?.detail || 'Failed to save course');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleCreateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProgram) return;
@@ -232,14 +205,25 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     }
     setSubmitting(true);
     try {
-      await batchService.createBatch(selectedProgram.id, batchForm);
+      const payload: any = {
+        name: batchForm.name,
+        start_year: batchForm.start_year,
+        end_year: batchForm.end_year,
+        session_type: batchForm.session_type,
+      };
+
+      if (batchForm.curriculum_version_id) {
+        payload.curriculum_version_id = batchForm.curriculum_version_id;
+      }
+      await batchService.createBatch(selectedProgram.id, payload);
       setSuccess('Batch created successfully');
       setShowBatchForm(false);
       setBatchForm({
         name: '',
         start_year: new Date().getFullYear(),
         end_year: new Date().getFullYear() + 4,
-        session_type: 'fall'
+        session_type: 'fall',
+        curriculum_version_id: undefined,
       });
       fetchContent();
     } catch (err: any) {
@@ -281,17 +265,6 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
       toast.error(errorMsg);
     } finally {
       setIsGraduating(false);
-    }
-  };
-
-  const handleDeleteCourse = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this course?')) return;
-    try {
-      await academicStructureService.deleteCourse(id);
-      setSuccess('Course deleted');
-      fetchContent();
-    } catch (err) {
-      setError('Failed to delete course');
     }
   };
 
@@ -417,23 +390,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
             </div>
           </div>
 
-          {selectedProgram && activeTab === 'courses' && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-4 bg-gray-50 border-b border-gray-100">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><CalendarRange className="w-4 h-4 text-indigo-600" /> Semesters</h3>
-              </div>
-              <div className="p-2 grid grid-cols-2 gap-1">
-                <button onClick={() => setSelectedSemester(null)}
-                  className={`p-2 text-xs font-semibold rounded-lg transition-all ${selectedSemester === null ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}
-                >All Semesters</button>
-                {selectedProgram.semesters?.map((s, idx) => (
-                  <button key={s.id || idx} onClick={() => setSelectedSemester(s)}
-                    className={`p-2 text-xs font-semibold rounded-lg transition-all ${selectedSemester?.id === s.id ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}
-                  >{s.name}</button>
-                ))}
-              </div>
-            </div>
-          )}
+
         </div>
 
         {/* Content Area */}
@@ -442,11 +399,6 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-h-[500px]">
               {/* Tabs */}
               <div className="flex border-b border-gray-100">
-                <button onClick={() => setActiveTab('courses')}
-                  className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'courses' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                  <BookMarked className="w-4 h-4" /> Course Catalog
-                </button>
                 <button onClick={() => setActiveTab('batches')}
                   className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'batches' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' : 'text-gray-400 hover:text-gray-600'}`}
                 >
@@ -462,17 +414,13 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
               <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
-                    {activeTab === 'courses' 
-                      ? (selectedSemester ? `${selectedProgram.code} - ${selectedSemester.name}` : `${selectedProgram.code} Courses`)
-                      : activeTab === 'batches' 
+                    {activeTab === 'batches' 
                         ? `${selectedProgram.code} Batches`
                         : `${selectedProgram.code} Alumni Records`
                     }
                   </h2>
                   <p className="text-sm text-gray-500">
-                    {activeTab === 'courses' 
-                      ? `${courses.length} courses found` 
-                      : activeTab === 'batches'
+                    {activeTab === 'batches'
                         ? `${batches.length} active batches`
                         : `${alumniBatches.length} graduated batches`
                     }
@@ -480,72 +428,17 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                 </div>
                 {activeTab !== 'alumni' && (
                   <button 
-                    onClick={() => activeTab === 'courses' ? setShowCourseForm(true) : setShowBatchForm(true)}
+                    onClick={() => setShowBatchForm(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                   >
                     <PlusCircle className="w-4 h-4" />
-                    <span className="text-sm font-medium">{activeTab === 'courses' ? 'Add Course' : 'Add Batch'}</span>
+                    <span className="text-sm font-medium">Add Batch</span>
                   </button>
                 )}
               </div>
 
               {/* Content Forms & Lists */}
               <div className="p-0">
-                {/* Course Form */}
-                <AnimatePresence>
-                  {showCourseForm && activeTab === 'courses' && (
-                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                      className="p-6 bg-indigo-50/50 border-b border-indigo-100"
-                    >
-                      <form onSubmit={handleSaveCourse} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Course Code</label>
-                          <input required value={courseForm.code} onChange={e => setCourseForm({...courseForm, code: e.target.value})}
-                            placeholder="e.g. CS-201" className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none" />
-                        </div>
-                        <div className="space-y-1 md:col-span-2">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Course Title</label>
-                          <input required value={courseForm.name} onChange={e => setCourseForm({...courseForm, name: e.target.value})}
-                            placeholder="e.g. Data Structures" className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none" />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Type</label>
-                          <select value={courseForm.course_type} onChange={e => setCourseForm({...courseForm, course_type: e.target.value as any})}
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
-                          >
-                            <option value="theory">Theory</option>
-                            <option value="lab">Lab</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Credit Hours</label>
-                          <input type="number" min="1" max="6" value={courseForm.credit_hours}
-                            onChange={e => setCourseForm({...courseForm, credit_hours: parseInt(e.target.value)})}
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none" />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Semester</label>
-                          <select required value={courseForm.semester_id} onChange={e => setCourseForm({...courseForm, semester_id: e.target.value})}
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
-                          >
-                            <option value="">Select Semester</option>
-                            {selectedProgram.semesters?.map(s => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="md:col-span-3 flex justify-end gap-2 pt-2">
-                          <button type="button" onClick={() => setShowCourseForm(false)} className="px-4 py-2 text-sm text-gray-500">Cancel</button>
-                          <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2">
-                            {submitting && <Loader2 className="w-3 h-3 animate-spin" />}
-                            {editingCourse ? 'Update Course' : 'Add Course'}
-                          </button>
-                        </div>
-                      </form>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 {/* Batch Form */}
                 <AnimatePresence>
                   {showBatchForm && activeTab === 'batches' && (
@@ -583,6 +476,21 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                             {batchForm.session_type === 'fall' ? 'Starts at Semester 1 (Odd)' : 'Starts at Semester 2 (Even)'}
                           </p>
                         </div>
+                        <div className="space-y-1 md:col-span-3">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Master Curriculum</label>
+                          <select
+                            value={batchForm.curriculum_version_id || ''}
+                            onChange={e => setBatchForm({...batchForm, curriculum_version_id: e.target.value || undefined})}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
+                          >
+                            <option value="">Do Not Use Master Curriculum</option>
+                            {masterCurricula.map(cv => (
+                              <option key={cv.id} value={cv.id}>
+                                {cv.version_no}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <div className="md:col-span-3 flex justify-end gap-2 pt-2">
                           <button type="button" onClick={() => setShowBatchForm(false)} className="px-4 py-2 text-sm text-gray-500">Cancel</button>
                           <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2">
@@ -600,49 +508,6 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                     <Loader2 className="w-8 h-8 animate-spin text-indigo-200" />
                     <p className="text-gray-400 text-sm animate-pulse">Loading {activeTab}...</p>
                   </div>
-                ) : activeTab === 'courses' ? (
-                  courses.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-4">
-                      <BookMarked className="w-8 h-8 text-gray-200" />
-                      <p className="text-gray-400 text-sm">No courses yet</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="bg-gray-50/50 border-b border-gray-100">
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Code</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Type</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Cr. Hrs</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Semester</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {courses.map(c => (
-                            <tr key={c.id} className="hover:bg-gray-50/50 transition-colors group">
-                              <td className="px-6 py-4 font-mono text-sm text-indigo-600 font-bold">{c.code}</td>
-                              <td className="px-6 py-4 text-sm font-bold text-gray-900">{c.name}</td>
-                              <td className="px-6 py-4">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${c.course_type === 'theory' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
-                                  {c.course_type}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-center font-bold text-sm text-gray-600">{c.credit_hours}</td>
-                              <td className="px-6 py-4 text-sm text-gray-500">Sem {c.semester_number}</td>
-                              <td className="px-6 py-4 text-right">
-                                <div className="flex justify-end gap-1 transition-opacity">
-                                  <button onClick={() => { setEditingCourse(c); setCourseForm({ name: c.name, code: c.code, course_type: c.course_type, credit_hours: c.credit_hours, semester_id: c.semester_id }); setShowCourseForm(true); }} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit3 className="w-4 h-4" /></button>
-                                  <button onClick={() => handleDeleteCourse(c.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
                 ) : activeTab === 'batches' ? (
                   batches.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -656,6 +521,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                           <tr className="bg-gray-50/50 border-b border-gray-100">
                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Batch Name</th>
                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Duration</th>
+                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Curriculum</th>
                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Semester</th>
                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Status</th>
                             <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
@@ -671,6 +537,15 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                                 </div>
                               </td>
                               <td className="px-6 py-5 text-center text-sm text-gray-600 font-medium">{b.start_year} - {b.end_year}</td>
+                              <td className="px-6 py-5 text-center">
+                                {b.curriculum_version_no ? (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-100">
+                                    {b.curriculum_version_no}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400 italic">No Version</span>
+                                )}
+                              </td>
                               <td className="px-6 py-5 text-center">
                                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
                                   Semester {b.current_semester}

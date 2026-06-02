@@ -1,9 +1,10 @@
 from rest_framework import serializers 
+from curriculum.models import CurriculumVersion
 from .models import ( 
     PEO, GA, GAPEOMapping, 
     CLO, CLOGAMapping, 
     PerformanceIndicator, CLOPIMapping,
-    CourseSession, CurriculumVersion 
+    CourseSession
 ) 
  
  
@@ -63,15 +64,15 @@ class CLOSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField( 
         source='course.name', read_only=True 
     ) 
-    batch_name = serializers.CharField( 
-        source='batch.name', read_only=True 
+    version_no = serializers.CharField( 
+        source='curriculum_version.version_no', read_only=True 
     ) 
  
     class Meta: 
         model = CLO 
         fields = [ 
-            'id', 'course', 'batch', 
-            'course_name', 'batch_name', 
+            'id', 'course', 'curriculum_version', 
+            'course_name', 'version_no', 
             'title', 'description', 
             'order_number', 'bloom_level', 'kpi_target', 
             'is_active', 'created_at' 
@@ -159,7 +160,7 @@ class CurriculumVersionSerializer(
         model = CurriculumVersion 
         fields = [ 
             'id', 'batch', 
-            'batch_name', 'version_number', 
-            'is_effective', 'is_active', 'created_at' 
+            'batch_name', 'version_no', 
+            'status', 'is_active', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 

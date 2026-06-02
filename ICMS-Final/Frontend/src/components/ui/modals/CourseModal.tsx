@@ -60,6 +60,28 @@ const CourseModal: React.FC<CourseModalProps> = ({
   canDefineCLO = false
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'clos' | 'mapping'>('details');
+
+  const normalizeCourseType = (v: any) => {
+    const t = String(v || '').trim().toUpperCase();
+    return t === 'LAB' ? 'LAB' : 'LECTURE';
+  };
+
+  useEffect(() => {
+    // Keep course_type consistent if editingCourse or external code sets a non-normalized value.
+      setFormData((prev) => {
+      const normalized = normalizeCourseType(prev.course_type);
+      const isLAB = normalized === 'LAB';
+
+      // If switching away from LAB, clear parent_course to avoid sending mismatched values.
+      return {
+        ...prev,
+        course_type: normalized,
+        parent_course: isLAB ? prev.parent_course : ''
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingCourse]);
+
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -101,7 +123,7 @@ const CourseModal: React.FC<CourseModalProps> = ({
         code: editingCourse.code || '',
         description: editingCourse.description || '',
         credits: editingCourse.credits || 3,
-        course_type: editingCourse.course_type || 'LECTURE',
+        course_type: normalizeCourseType(editingCourse.course_type),
         parent_course:
           editingCourse.parent_course ||
           editingCourse.parent_course_details?.course_id ||
@@ -247,10 +269,11 @@ const CourseModal: React.FC<CourseModalProps> = ({
         setParentCourseOptions([]);
       }
     } else if (name === 'course_type') {
+      const normalized = normalizeCourseType(value);
       setFormData(prev => ({
         ...prev,
-        [name]: value,
-        parent_course: value === 'LAB' ? prev.parent_course : ''
+        [name]: normalized,
+        parent_course: normalized === 'LAB' ? prev.parent_course : ''
       }));
     } else {
       setFormData(prev => ({
@@ -273,6 +296,13 @@ const CourseModal: React.FC<CourseModalProps> = ({
         semester: Number(formData.semester),
         parent_course: formData.course_type === 'LAB' && formData.parent_course ? Number(formData.parent_course) : null
       };
+
+      // Client-side validation for lab courses requiring a parent course
+      if (courseData.course_type === 'LAB' && !courseData.parent_course) {
+        setError('Parent (Theory) Course is required for lab courses.');
+        setLoading(false);
+        return;
+      }
 
       const response = await onSubmit(courseData);
       const courseId = response?.data?.course_id || response?.data?.id || response?.course_id || response?.id;

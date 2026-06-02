@@ -20,13 +20,20 @@ class Course(models.Model):
     course_type = models.CharField(
         max_length=10,
         choices=[
-            ('theory', 'Theory'),
-            ('lab', 'Lab'),
+            ('LECTURE', 'Lecture'),
+            ('LAB', 'Lab'),
         ],
     )
     credit_hours = models.IntegerField(default=3)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    parent_course = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        related_name='lab_courses',
+        null=True,
+        blank=True,
+    )
 
     def save(self, *args, **kwargs):
         if not self.custom_id:
@@ -38,4 +45,3 @@ class Course(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.custom_id})"
-

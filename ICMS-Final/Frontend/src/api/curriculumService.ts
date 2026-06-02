@@ -4,10 +4,11 @@ export interface CurriculumVersion {
   id: number;
   program: number;
   program_name: string;
+  program_total_semesters?: number;
   batch: string;
   batch_name: string;
   version_no: string;
-  status: 'draft' | 'active' | 'archived';
+  status: 'draft' | 'finalized' | 'archived';
   cloned_from: number | null;
   cloned_from_version_no: string | null;
   created_by: number;
@@ -36,39 +37,77 @@ export interface CurriculumCourse {
 
 export const curriculumService = {
   getVersions: (params?: any) => 
-    api.get('curriculum-versions/curriculum-versions/', { params }),
+    api.get('curriculum-versions/', { params }),
   
   getVersion: (id: number) => {
     if (isNaN(id)) {
       console.warn('curriculumService.getVersion called with NaN');
       return Promise.reject(new Error('Invalid ID'));
     }
-    return api.get(`curriculum-versions/curriculum-versions/${id}/`);
+    return api.get(`curriculum-versions/${id}/`);
   },
   
-  createVersion: (data: any) => 
-    api.post('curriculum-versions/curriculum-versions/', data),
+  createCurriculumVersion: (data: any) => 
+    api.post('curriculum-versions/', data),
   
   updateVersion: (id: number, data: any) => 
-    api.patch(`curriculum-versions/curriculum-versions/${id}/`, data),
+    api.patch(`curriculum-versions/${id}/`, data),
   
-  activateVersion: (id: number) => 
-    api.post(`curriculum-versions/curriculum-versions/${id}/activate/`),
+  finalizeVersion: (id: number) => 
+    api.post(`curriculum-versions/${id}/finalize/`),
   syncVersionCourses: (id: number) =>
-    api.post(`curriculum-versions/curriculum-versions/${id}/sync_courses/`),
+    api.post(`curriculum-versions/${id}/sync_courses/`),
   cloneVersion: (id: number, targetBatchId: string) =>
-    api.post(`curriculum-versions/curriculum-versions/${id}/clone/`, { target_batch_id: targetBatchId }),
+    api.post(`curriculum-versions/${id}/clone/`, { target_batch_id: targetBatchId }),
+  getMasterCurricula: (programId: string) =>
+    api.get(`curriculum-versions/master/`, { params: { program_id: programId } }),
+  getAllMasterCurricula: () =>
+    api.get(`curriculum-versions/master/`),
+  getAllCourses: () =>
+    api.get('courses/'),
+  addCourseToVersion: (versionId: number, courseId: string | number, semester: number) => {
+    // Backend `Course` PK is UUID (string), so DO NOT convert to Number.
+    // Only guard against null/undefined-like values.
+    const isNullish =
+      courseId === null ||
+      courseId === undefined ||
+      courseId === 'null' ||
+      courseId === 'undefined' ||
+      courseId === '';
+
+    if (!versionId || isNullish) {
+      return Promise.reject(new Error('Invalid course selection'));
+    }
+
+    return api.post(`curriculum-versions/${versionId}/courses/`, {
+      course: courseId,
+      semester_no: semester,
+    });
+  },
+
+
 
   // Nested Courses
   getCourses: (versionId: number) => 
-    api.get(`curriculum-versions/curriculum-versions/${versionId}/courses/`),
+    api.get(`curriculum-versions/${versionId}/courses/`),
   
   addCourse: (versionId: number, data: any) => 
-    api.post(`curriculum-versions/curriculum-versions/${versionId}/courses/`, data),
+    api.post(`curriculum-versions/${versionId}/courses/`, data),
   
   updateCourse: (versionId: number, courseId: number, data: any) => 
-    api.patch(`curriculum-versions/curriculum-versions/${versionId}/courses/${courseId}/`, data),
+    api.patch(`curriculum-versions/${versionId}/courses/${courseId}/`, data),
   
   removeCourse: (versionId: number, courseId: number) => 
-    api.delete(`curriculum-versions/curriculum-versions/${versionId}/courses/${courseId}/`),
+    api.delete(`curriculum-versions/${versionId}/courses/${courseId}/`),
+
+  createCourse: (data: { 
+    name: string; 
+    code: string; 
+    credit_hours: number; 
+    course_type: string;
+    program_id: number | string;
+    semester_no: number;
+    parent_course?: string | number;
+  }) =>
+    api.post('courses/', data),
 };

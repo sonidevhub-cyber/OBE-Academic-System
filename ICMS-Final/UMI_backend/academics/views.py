@@ -32,6 +32,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         semester = self.request.query_params.get('semester', None)
         program = self.request.query_params.get('program', None)
         semester_num = self.request.query_params.get('semester_num', None)
+        batch_id = self.request.query_params.get('batch_id', None)
 
         if semester:
             queryset = queryset.filter(semester_id=semester)
@@ -44,6 +45,7 @@ class CourseViewSet(viewsets.ModelViewSet):
             # Using __iexact to be safe with casing
             queryset = queryset.filter(semester__name__iexact=f"Semester {semester_num}")
             
+        if batch_id:
+            queryset = queryset.filter(batch_id=batch_id)
+            
         return queryset
-
-

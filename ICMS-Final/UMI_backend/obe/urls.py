@@ -42,7 +42,7 @@ urlpatterns = [
  
     # CLO 
     path( 
-        'courses/<uuid:course_id>/batches/<uuid:batch_id>/clos/', 
+        'courses/<uuid:course_id>/versions/<int:version_id>/clos/', 
         CLOListCreateView.as_view() 
     ), 
     path( 
@@ -50,17 +50,17 @@ urlpatterns = [
         CLODetailView.as_view() 
     ), 
     path( 
-        'courses/<uuid:course_id>/batches/<uuid:batch_id>/clos/copy/', 
+        'courses/<uuid:course_id>/versions/<int:version_id>/clos/copy/', 
         CLOCopyView.as_view() 
     ), 
  
     # CLO-GA Matrix 
     path( 
-        'courses/<uuid:course_id>/batches/<uuid:batch_id>/clo-ga-matrix/', 
+        'courses/<uuid:course_id>/versions/<int:version_id>/clo-ga-matrix/', 
         CLOGAMatrixView.as_view() 
     ), 
     path( 
-        'courses/<uuid:course_id>/batches/<uuid:batch_id>/clo-pi-matrix/', 
+        'courses/<uuid:course_id>/versions/<int:version_id>/clo-pi-matrix/', 
         CLOPIMatrixView.as_view() 
     ), 
  

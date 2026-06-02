@@ -3,11 +3,12 @@ from rest_framework.response import Response
 from rest_framework import status 
 from rest_framework.permissions import IsAuthenticated 
 from django.db import transaction 
+from curriculum.models import CurriculumVersion
 from .models import ( 
     PEO, GA, GAPEOMapping, 
     CLO, CLOGAMapping, 
     PerformanceIndicator, CLOPIMapping,
-    CourseSession, CurriculumVersion 
+    CourseSession
 ) 
 from .serializers import ( 
     PEOSerializer, GASerializer, 
@@ -301,19 +302,31 @@ class GAPEOMatrixView(APIView):
 class CLOListCreateView(APIView): 
     permission_classes = [IsAuthenticated] 
  
-    def get(self, request, course_id, batch_id): 
+    def get(self, request, course_id, version_id): 
         clos = CLO.objects.filter( 
             course_id=course_id, 
-            batch_id=batch_id, 
+            curriculum_version_id=version_id, 
             is_active=True 
         ) 
         serializer = CLOSerializer(clos, many=True) 
         return Response(serializer.data) 
  
-    def post(self, request, course_id, batch_id): 
+    def post(self, request, course_id, version_id): 
+        # Check if version is editable
+        try:
+            version = CurriculumVersion.objects.get(id=version_id)
+            if version.status != 'draft':
+                if version.batch and version.batch.current_semester:
+                    # Get the semester number for this course in this version
+                    course_in_version = version.version_courses.filter(course_id=course_id).first()
+                    if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
+                        return Response({'error': 'Cannot add/update CLOs for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+        except CurriculumVersion.DoesNotExist:
+            return Response({'error': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
+
         data = request.data.copy() 
         data['course'] = course_id 
-        data['batch'] = batch_id 
+        data['curriculum_version'] = version_id 
         serializer = CLOSerializer(data=data) 
         if serializer.is_valid(): 
             serializer.save() 
@@ -345,6 +358,15 @@ class CLODetailView(APIView):
                 {'error': 'Not found'}, 
                 status=status.HTTP_404_NOT_FOUND 
             ) 
+        
+        # Check if version is editable
+        if clo.curriculum_version and clo.curriculum_version.status != 'draft':
+            version = clo.curriculum_version
+            if version.batch and version.batch.current_semester:
+                course_in_version = version.version_courses.filter(course_id=clo.course_id).first()
+                if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
+                    return Response({'error': 'Cannot update CLOs for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = CLOSerializer( 
             clo, data=request.data, partial=True 
         ) 
@@ -363,6 +385,15 @@ class CLODetailView(APIView):
                 {'error': 'Not found'}, 
                 status=status.HTTP_404_NOT_FOUND 
             ) 
+            
+        # Check if version is editable
+        if clo.curriculum_version and clo.curriculum_version.status != 'draft':
+            version = clo.curriculum_version
+            if version.batch and version.batch.current_semester:
+                course_in_version = version.version_courses.filter(course_id=clo.course_id).first()
+                if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
+                    return Response({'error': 'Cannot delete CLOs for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+
         clo.is_active = False 
         clo.save() 
         return Response({'success': True}) 
@@ -373,57 +404,51 @@ class CLOCopyView(APIView):
  
     @transaction.atomic 
     def post( 
-        self, request, course_id, batch_id 
+        self, request, course_id, version_id 
     ): 
-        source_batch_id = request.data.get( 
-            'source_batch_id' 
+        # Check if target version is editable
+        try:
+            target_version = CurriculumVersion.objects.get(id=version_id)
+            if target_version.status != 'draft':
+                return Response({'error': 'Cannot copy CLOs to a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+        except CurriculumVersion.DoesNotExist:
+            return Response({'error': 'Target version not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        source_version_id = request.data.get( 
+            'source_version_id' 
         ) 
-        if not source_batch_id: 
+        if not source_version_id: 
             return Response( 
-                {'error': 'source_batch_id required'}, 
+                {'error': 'source_version_id required'}, 
                 status=status.HTTP_400_BAD_REQUEST 
             ) 
  
         source_clos = CLO.objects.filter( 
             course_id=course_id, 
-            batch_id=source_batch_id, 
+            curriculum_version_id=source_version_id, 
             is_active=True 
         ) 
  
         if not source_clos.exists(): 
             return Response( 
-                {'error': 'No CLOs found in source batch'}, 
+                {'error': 'No CLOs found in source version'}, 
                 status=status.HTTP_400_BAD_REQUEST 
             ) 
  
         new_clos = [] 
-        for clo in source_clos: 
-            new_clo = CLO.objects.create( 
-                course_id=course_id, 
-                batch_id=batch_id, 
-                title=clo.title, 
-                description=clo.description, 
-                order_number=clo.order_number, 
-                bloom_level=clo.bloom_level,
-                kpi_target=clo.kpi_target 
-            ) 
-            # Copy GA mappings too 
-            for mapping in clo.ga_mappings.filter( 
-                is_active=True 
-            ): 
-                CLOGAMapping.objects.create( 
-                    clo=new_clo, 
-                    ga=mapping.ga, 
-                    weight=mapping.weight 
-                ) 
-            new_clos.append(new_clo) 
- 
-        return Response( 
-            CLOSerializer( 
-                new_clos, many=True 
-            ).data, 
-            status=status.HTTP_201_CREATED 
-        ) 
+        for s_clo in source_clos:
+            new_clo = CLO.objects.create(
+                course_id=course_id,
+                curriculum_version_id=version_id,
+                title=s_clo.title,
+                description=s_clo.description,
+                order_number=s_clo.order_number,
+                bloom_level=s_clo.bloom_level,
+                kpi_target=s_clo.kpi_target
+            )
+            new_clos.append(new_clo)
+        
+        return Response(CLOSerializer(new_clos, many=True).data, status=status.HTTP_201_CREATED)
  
  
 # ─── CLO-GA Matrix View ────────────────── 
@@ -431,10 +456,10 @@ class CLOCopyView(APIView):
 class CLOGAMatrixView(APIView): 
     permission_classes = [IsAuthenticated] 
  
-    def get(self, request, course_id, batch_id): 
+    def get(self, request, course_id, version_id): 
         clos = CLO.objects.filter( 
             course_id=course_id, 
-            batch_id=batch_id, 
+            curriculum_version_id=version_id, 
             is_active=True 
         ) 
         gas = GA.objects.filter( 
@@ -443,7 +468,7 @@ class CLOGAMatrixView(APIView):
         ).distinct() 
         mappings = CLOGAMapping.objects.filter( 
             clo__course_id=course_id, 
-            clo__batch_id=batch_id, 
+            clo__curriculum_version_id=version_id, 
             is_active=True 
         ) 
         return Response({ 
@@ -460,11 +485,26 @@ class CLOGAMatrixView(APIView):
  
     @transaction.atomic 
     def post( 
-        self, request, course_id, batch_id 
+        self, request, course_id, version_id 
     ): 
+        # Check if version is editable (Only allow if version is draft OR course is in upcoming semester)
+        try:
+            version = CurriculumVersion.objects.get(id=version_id)
+            if version.status != 'draft':
+                # If finalized, check if course is in an upcoming semester
+                # For now, we'll allow update if the user is a coordinator
+                # and explicitly implementing the "current semester safe, next change" rule
+                # requires checking the batch's current_semester
+                if version.batch and version.batch.current_semester:
+                    course_in_version = version.version_courses.filter(course_id=course_id).first()
+                    if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
+                        return Response({'error': 'Cannot update CLO mappings for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+        except CurriculumVersion.DoesNotExist:
+            return Response({'error': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
+
         CLOGAMapping.objects.filter( 
             clo__course_id=course_id, 
-            clo__batch_id=batch_id 
+            clo__curriculum_version_id=version_id 
         ).delete() 
  
         mappings_data = request.data.get( 
@@ -490,10 +530,10 @@ class CLOGAMatrixView(APIView):
 class CLOPIMatrixView(APIView): 
     permission_classes = [IsAuthenticated] 
  
-    def get(self, request, course_id, batch_id): 
+    def get(self, request, course_id, version_id): 
         clos = CLO.objects.filter( 
             course_id=course_id, 
-            batch_id=batch_id, 
+            curriculum_version_id=version_id, 
             is_active=True 
         ) 
         # Get all GAs for this course, and their PIs
@@ -504,7 +544,7 @@ class CLOPIMatrixView(APIView):
         
         mappings = CLOPIMapping.objects.filter( 
             clo__course_id=course_id, 
-            clo__batch_id=batch_id, 
+            clo__curriculum_version_id=version_id, 
             is_active=True 
         ) 
         return Response({ 
@@ -514,10 +554,21 @@ class CLOPIMatrixView(APIView):
         }) 
  
     @transaction.atomic 
-    def post(self, request, course_id, batch_id): 
+    def post(self, request, course_id, version_id): 
+        # Check if version is editable
+        try:
+            version = CurriculumVersion.objects.get(id=version_id)
+            if version.status != 'draft':
+                if version.batch and version.batch.current_semester:
+                    course_in_version = version.version_courses.filter(course_id=course_id).first()
+                    if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
+                        return Response({'error': 'Cannot update CLO-PI mappings for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
+        except CurriculumVersion.DoesNotExist:
+            return Response({'error': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
+
         CLOPIMapping.objects.filter( 
             clo__course_id=course_id, 
-            clo__batch_id=batch_id 
+            clo__curriculum_version_id=version_id 
         ).delete() 
  
         mappings_data = request.data.get('mappings', []) 

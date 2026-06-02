@@ -16,7 +16,7 @@ class IsCoordinator(permissions.BasePermission):
         secondary_role = (getattr(request.user, 'secondary_role', '') or '').lower()
         
         return (
-            user_role in ['coordinator', 'hod', 'sac'] or 
+            user_role in ['coordinator', 'hod'] or 
             secondary_role in ['coordinator', 'hod']
         )
 

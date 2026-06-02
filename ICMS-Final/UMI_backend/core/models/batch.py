@@ -35,13 +35,28 @@ class Batch(models.Model):
         default='active',
     )
     graduated_at = models.DateTimeField(null=True, blank=True)
+    curriculum_version = models.ForeignKey(
+        'curriculum.CurriculumVersion',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_batches'
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
         if not self.custom_id:
             session_prefix = 'F' if self.session_type == 'fall' else 'S'
-            self.custom_id = f"BAT-{self.program.code.upper()}-{self.start_year}-{session_prefix}"
+            base_custom_id = f"BAT-{self.program.code.upper()}-{self.start_year}-{session_prefix}"
+            
+            # Check for uniqueness and append a counter if necessary
+            counter = 0
+            unique_custom_id = base_custom_id
+            while Batch.objects.filter(custom_id=unique_custom_id).exists():
+                counter += 1
+                unique_custom_id = f"{base_custom_id}-{counter}"
+            self.custom_id = unique_custom_id
         super().save(*args, **kwargs)
 
     class Meta:
@@ -50,4 +65,3 @@ class Batch(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.custom_id})"
-

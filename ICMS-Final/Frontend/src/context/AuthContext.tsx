@@ -97,8 +97,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Set the active role based on enforceRole or default to user's primary role
       if (enforceRole) {
-        // Check if user has permission for the enforced role
-        // super_admin can access admin role
         const hasPermission =
           response.user.role === enforceRole ||
           (response.user.role === 'super_admin' && enforceRole === 'admin') ||
@@ -108,7 +106,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             response.user.role === 'coordinator' ||
             response.user.secondary_role === 'coordinator'
           )) ||
-
           (enforceRole === 'instructor' && (
             response.user.role === 'instructor' ||
             response.user.can_act_as_instructor ||
@@ -121,38 +118,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             (response.user.roles && response.user.roles.includes('hod'))
           ));
         
-        console.log('Permission check for', enforceRole, ':', {
-          userRole: response.user.role,
-          userType: response.user.user_type,
-          isCoordinator: response.user.is_coordinator,
-          canActAsInstructor: response.user.can_act_as_instructor,
-          hasPermission
-        });
-        
         if (!hasPermission) {
           throw new Error(`Access denied. You don't have ${enforceRole} permissions.`);
         }
         
         response.user.active_role = enforceRole;
         response.user.effective_role = enforceRole;
-        console.log('Set effective_role to enforceRole:', enforceRole);
       } else {
         // No role enforcement, use primary role
         response.user.active_role = response.user.role;
         response.user.effective_role = response.user.role;
-        console.log('Set effective_role to primary role:', response.user.role);
       }
-      
-      console.log('Final user data before storing:', {
-        role: response.user.role,
-        active_role: response.user.active_role,
-        effective_role: response.user.effective_role,
-        enforceRole: enforceRole
-      });
       
       const authData: AuthData = normalizeAuthData({
         user: response.user,
-        role: response.role,
+        role: response.user.effective_role, // Use effective_role here
         permissions: response.permissions || response.user?.permissions || [],
         access_token: response.access_token,
         refresh_token: response.refresh_token

@@ -131,10 +131,12 @@ class CLO(models.Model):
         on_delete=models.CASCADE, 
         related_name='clos' 
     ) 
-    batch = models.ForeignKey( 
-        'core.Batch', 
+    curriculum_version = models.ForeignKey( 
+        'curriculum.CurriculumVersion', 
         on_delete=models.CASCADE, 
-        related_name='clos' 
+        related_name='clos',
+        null=True,
+        blank=True
     ) 
     title = models.CharField(max_length=500, null=True, blank=True) 
     description = models.TextField( 
@@ -153,7 +155,7 @@ class CLO(models.Model):
     ) 
  
     class Meta: 
-        unique_together = ('course', 'batch', 'order_number') 
+        unique_together = ('course', 'curriculum_version', 'order_number') 
         ordering = ['order_number'] 
  
     def __str__(self): 
@@ -270,27 +272,3 @@ class CourseSession(models.Model):
  
     def __str__(self): 
         return f"{self.course} - {self.batch} ({self.instructor})" 
- 
- 
-class CurriculumVersion(models.Model): 
-    id = models.UUIDField( 
-        primary_key=True, 
-        default=uuid.uuid4, 
-        editable=False 
-    ) 
-    batch = models.ForeignKey( 
-        'core.Batch', 
-        on_delete=models.CASCADE, 
-        related_name='curriculum_versions' 
-    ) 
-    version_number = models.CharField(max_length=50, null=True, blank=True) 
-    is_effective = models.BooleanField(default=False) 
-    created_at = models.DateTimeField( 
-        auto_now_add=True 
-    ) 
- 
-    class Meta: 
-        unique_together = ('batch', 'version_number') 
- 
-    def __str__(self): 
-        return f"{self.batch} - v{self.version_number}" 

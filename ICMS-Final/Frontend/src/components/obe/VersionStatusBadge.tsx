@@ -1,13 +1,13 @@
 import React from 'react';
 
 interface Props {
-  status: 'draft' | 'active' | 'archived';
+  status: 'draft' | 'finalized' | 'archived';
 }
 
 const VersionStatusBadge: React.FC<Props> = ({ status }) => {
   const styles = {
     draft: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    active: 'bg-green-100 text-green-800 border-green-200',
+    finalized: 'bg-green-100 text-green-800 border-green-200',
     archived: 'bg-gray-100 text-gray-800 border-gray-200',
   };
 

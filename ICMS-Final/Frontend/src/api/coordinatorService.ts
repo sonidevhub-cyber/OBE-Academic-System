@@ -115,8 +115,9 @@ export const coordinatorService = {
   getInstructors: () => api.get('instructors/profiles/'),
   getBatches: () => api.get('batches/all/'),
   getBatchesByProgram: (programId: string) => api.get(`batches/all/?program=${programId}`),
+  getCoursesByProgram: (programId: string) => api.get(`courses/?program_id=${programId}`),
   getCoursesByBatch: (programId: string, semester: number) => 
-    api.get(`courses/?program=${programId}&semester=${semester}`),
+    api.get(`courses/?program_id=${programId}&semester_num=${semester}`),
 
   // --- HOD Specific Actions ---
   approveCourseAllocation: (id: number, data: any) => 

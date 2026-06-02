@@ -40,6 +40,7 @@ class TeacherAllocation(models.Model):
         verbose_name_plural = "Teacher Allocations"
 
     def clean(self):
+        from curriculum.models import CurriculumVersion
         if self.teacher.role.lower() != 'instructor' and self.teacher.role.lower() != 'teacher':
             # The spec says role == 'teacher', but current project uses 'instructor'
             # I will check for both or use the one from CustomUser choices
