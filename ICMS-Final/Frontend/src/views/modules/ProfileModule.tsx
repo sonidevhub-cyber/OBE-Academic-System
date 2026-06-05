@@ -55,7 +55,7 @@ interface ProfileData {
 
 interface ProfileModuleProps {
   profileData: ProfileData | null;
-  userType: 'student' | 'instructor' | 'hod' | 'admin' | 'principal' | 'sac';
+  userType: 'student' | 'instructor' | 'hod' | 'admin' | 'sac';
   darkMode?: boolean;
 }
 
@@ -70,7 +70,6 @@ const ROLE_LABELS: Record<string, string> = {
   instructor: 'Instructor',
   hod: 'Head of Department',
   admin: 'Administrator',
-  principal: 'Principal',
 };
 
 const ROLE_ACCENTS: Record<string, string> = {
@@ -79,7 +78,6 @@ const ROLE_ACCENTS: Record<string, string> = {
   instructor: 'from-violet-500 via-purple-500 to-indigo-600',
   hod: 'from-emerald-500 via-teal-500 to-cyan-600',
   admin: 'from-amber-500 via-orange-500 to-rose-600',
-  principal: 'from-rose-500 via-fuchsia-500 to-purple-600',
 };
 
 const addField = (

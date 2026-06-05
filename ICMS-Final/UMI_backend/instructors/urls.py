@@ -5,8 +5,8 @@ from .views import InstructorViewSet
 router = DefaultRouter()
 # Support both 'profiles/' (used by coordinatorService.ts) 
 # and 'instructor/' (used by studentInstructorService.ts)
-router.register(r'profiles', InstructorViewSet, basename='instructor-profiles')
-router.register(r'instructor', InstructorViewSet, basename='instructor-legacy')
+router = DefaultRouter()
+router.register(r'', InstructorViewSet, basename='instructor')
 
 urlpatterns = [
     path('', include(router.urls)),

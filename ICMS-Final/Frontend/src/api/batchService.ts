@@ -26,6 +26,8 @@ export interface BatchFlat {
     id: string;
     name: string;
     program_name: string;
+    program_id: string;
+    has_curriculum?: boolean;
 }
 
 const batchService = {

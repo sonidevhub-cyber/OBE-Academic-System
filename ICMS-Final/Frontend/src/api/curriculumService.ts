@@ -7,6 +7,7 @@ export interface CurriculumVersion {
   program_total_semesters?: number;
   batch: string;
   batch_name: string;
+  assigned_batches?: Array<{ id: string; name: string }>;
   version_no: string;
   status: 'draft' | 'finalized' | 'archived';
   cloned_from: number | null;
@@ -57,6 +58,8 @@ export const curriculumService = {
     api.post(`curriculum-versions/${id}/finalize/`),
   syncVersionCourses: (id: number) =>
     api.post(`curriculum-versions/${id}/sync_courses/`),
+  branchVersion: (id: number, batchId: string) =>
+    api.post(`curriculum-versions/${id}/branch/`, { batch_id: batchId }),
   cloneVersion: (id: number, targetBatchId: string) =>
     api.post(`curriculum-versions/${id}/clone/`, { target_batch_id: targetBatchId }),
   getMasterCurricula: (programId: string) =>

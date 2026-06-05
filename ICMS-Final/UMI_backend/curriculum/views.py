@@ -1,10 +1,11 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from django.db import models
 from core.models import Course
 from .models import CurriculumVersion, CurriculumVersionCourse
 from .serializers import CurriculumVersionSerializer, CurriculumVersionCourseSerializer
-from .services import activate_curriculum_version, clone_curriculum_for_batch, sync_courses_from_program
+from .services import activate_curriculum_version, clone_curriculum_for_batch, sync_courses_from_program, branch_version_if_needed
 from core.responses import api_response
 
 
@@ -19,8 +20,8 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = super().get_queryset()
         
-        # Global Rule: Coordinator sirf apne program ka data access kar sakta hai
-        if user.role.lower() == 'coordinator':
+        # Global Rule: Coordinator aur HOD sirf apne programs ka data access kar sakte hain
+        if user.role.lower() in ['coordinator', 'hod']:
             queryset = queryset.filter(program__in=user.programs.all())
         
         # Filters
@@ -31,7 +32,10 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         if program_id:
             queryset = queryset.filter(program_id=program_id)
         if batch_id:
-            queryset = queryset.filter(batch_id=batch_id)
+            # Check both the old batch field and the new assigned_batches relation
+            queryset = queryset.filter(
+                models.Q(batch_id=batch_id) | models.Q(assigned_batches__id=batch_id)
+            ).distinct()
         if status_filter:
             queryset = queryset.filter(status=status_filter)
             
@@ -80,6 +84,25 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
                 data=CurriculumVersionSerializer(version, context={'view_type': 'detail'}).data,
                 message="Courses synced from program successfully",
                 status_code=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return api_response(message=str(e), status_code=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def branch(self, request, pk=None):
+        version = self.get_object()
+        batch_id = request.data.get('batch_id')
+        if not batch_id:
+            return api_response(message="batch_id is required to branch version", status_code=status.HTTP_400_BAD_REQUEST)
+        
+        from core.models.batch import Batch
+        try:
+            batch = Batch.objects.get(pk=batch_id)
+            new_version = branch_version_if_needed(version, batch, request.user)
+            return api_response(
+                data=CurriculumVersionSerializer(new_version, context={'view_type': 'detail'}).data,
+                message="New version branch created successfully",
+                status_code=status.HTTP_201_CREATED
             )
         except Exception as e:
             return api_response(message=str(e), status_code=status.HTTP_400_BAD_REQUEST)

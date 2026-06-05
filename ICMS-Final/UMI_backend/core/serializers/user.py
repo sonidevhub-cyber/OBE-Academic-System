@@ -85,13 +85,13 @@ class UserCreateSerializer(serializers.ModelSerializer):
             attrs['secondary_role'] = 'none'
             return attrs
 
-        is_coordinator = role == 'coordinator' or secondary_role == 'coordinator'
-        if is_coordinator:
+        is_program_admin = role in ['coordinator', 'hod'] or secondary_role in ['coordinator', 'hod']
+        if is_program_admin:
             if not programs:
-                raise serializers.ValidationError('programs is required for coordinator')
+                raise serializers.ValidationError('programs is required for coordinator/hod')
         else:
             if programs:
-                raise serializers.ValidationError('Only coordinator users can have programs assigned')
+                raise serializers.ValidationError('Only coordinator or hod users can have programs assigned')
 
         if secondary_role != 'none' and secondary_role == role:
             raise serializers.ValidationError('Primary and secondary role cannot be same')

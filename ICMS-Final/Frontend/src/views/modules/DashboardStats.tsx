@@ -5,15 +5,16 @@ interface StatsProps {
     totalStudents: number;
     totalInstructors: number;
     totalHods: number;
+    totalAlumni?: number;
     totalBatches?: number;
   };
-  onNavigate?: (tab: 'students' | 'instructors' | 'hod' | 'program-setup') => void;
+  onNavigate?: (tab: 'students' | 'instructors' | 'hod' | 'program-setup' | 'users') => void;
 }
 const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
   const cardBase =
     'bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl border border-white/20 hover:shadow-2xl transition-all duration-300';
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}
@@ -24,7 +25,7 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
       >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-gray-600 text-sm font-medium">Total Students</p>
+            <p className="text-gray-600 text-sm font-medium">Active Students</p>
             <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalStudents}</p>
           </div>
           <div className="h-14 w-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
@@ -34,13 +35,36 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
           </div>
         </div>
       </motion.button>
+
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className={`${cardBase} text-left cursor-pointer`}
+        onClick={() => onNavigate?.('students')}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-gray-600 text-sm font-medium">Total Alumni</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalAlumni ?? 0}</p>
+          </div>
+          <div className="h-14 w-14 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg">
+            <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+            </svg>
+          </div>
+        </div>
+      </motion.button>
+
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
         className={`${cardBase} text-left cursor-pointer`}
-        onClick={() => onNavigate?.('instructors')}
+        onClick={() => onNavigate?.('users')}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -54,6 +78,28 @@ const DashboardStats: React.FC<StatsProps> = ({ stats, onNavigate }) => {
           </div>
         </div>
       </motion.button>
+
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25 }}
+        className={`${cardBase} text-left cursor-pointer`}
+        onClick={() => onNavigate?.('users')}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-gray-600 text-sm font-medium">Total HODs</p>
+            <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalHods}</p>
+          </div>
+          <div className="h-14 w-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-xl flex items-center justify-center shadow-lg">
+            <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          </div>
+        </div>
+      </motion.button>
+
       <motion.button
         type="button"
         initial={{ opacity: 0, y: 20 }}

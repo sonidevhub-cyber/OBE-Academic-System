@@ -1,6 +1,7 @@
 import React, { useState, useEffect, JSX } from 'react';
 import { studentService } from '../../../api/apiService';
 import batchService, { BatchFlat } from '../../../api/batchService';
+import academicStructureService, { Program } from '../../../api/academicStructureService';
 import { getFullImageUrl } from '../../../utils/imageHelpers';
 
 interface StudentModalProps {
@@ -14,6 +15,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [batches, setBatches] = useState<BatchFlat[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | undefined>(undefined);
 
@@ -25,6 +27,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     registration_number: '',
     role: 'student', // Default role
     batch: '', // Batch field
+    program: '', // Program field
     guardian_name: '',
     guardian_contact: '',
     address: '',
@@ -34,18 +37,22 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     phone: '',
   });
 
-  // Fetch batches
+  // Fetch batches and programs
   useEffect(() => {
     if (isOpen) {
-      const fetchBatches = async () => {
+      const fetchData = async () => {
         try {
-          const response = await batchService.getAllBatches();
-          setBatches(response.data);
+          const [batchRes, progRes] = await Promise.all([
+            batchService.getAllBatches(),
+            academicStructureService.getPrograms()
+          ]);
+          setBatches(batchRes.data);
+          setPrograms(progRes.data);
         } catch (err) {
-          console.error('Failed to fetch batches:', err);
+          console.error('Failed to fetch batches or programs:', err);
         }
       };
-      fetchBatches();
+      fetchData();
     }
   }, [isOpen]);
 
@@ -67,6 +74,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
               registration_number: student.registration_number || '',
               role: student.role || 'student',
               batch: student.batch || '',
+              program: student.program_id || student.program || '',
               guardian_name: student.guardian_name || '',
               guardian_contact: student.guardian_contact || '',
               address: student.address || '',
@@ -97,6 +105,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           registration_number: '',
           role: 'student',
           batch: '',
+          program: '',
           guardian_name: '',
           guardian_contact: '',
           address: '',
@@ -183,6 +192,11 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         setIsLoading(false);
         return;
       }
+      if ((formData.role === 'student') && !formData.program) {
+        setError(`Program is required for students.`);
+        setIsLoading(false);
+        return;
+      }
 
       // Prepare data for submission
       let dataToSend: FormData | any;
@@ -208,6 +222,9 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         if ((formData.role === 'student' || formData.role === 'alumni') && formData.batch) {
           dataToSend.append('batch', formData.batch);
         }
+        if (formData.role === 'student' && formData.program) {
+          dataToSend.append('program', formData.program);
+        }
 
         // Add password only for new users
         if (!studentId && formData.password.trim()) {
@@ -232,6 +249,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           ...(formData.address && { address: formData.address }),
           ...(formData.blood_group && { blood_group: formData.blood_group }),
           ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
+          ...(formData.role === 'student' && formData.program && { program: formData.program }),
           ...(formData.password.trim() && { password: formData.password }),
         };
       }
@@ -258,6 +276,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
             ...(formData.address && { address: formData.address }),
             ...(formData.blood_group && { blood_group: formData.blood_group }),
             ...((formData.role === 'student' || formData.role === 'alumni') && formData.batch && { batch: formData.batch }),
+            ...(formData.role === 'student' && formData.program && { program: formData.program }),
             ...(formData.password.trim() && { password: formData.password }),
           };
           
@@ -436,6 +455,30 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
                   </div>
 
                   <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="program">
+                      Program *
+                    </label>
+                    <select
+                      id="program"
+                      name="program"
+                      required
+                      value={formData.program}
+                      onChange={handleChange}
+                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    >
+                      <option value="">Select Program</option>
+                      {programs.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.code})
+                        </option>
+                      ))}
+                    </select>
+                    {programs.length === 0 && (
+                      <p className="text-blue-500 text-xs italic mt-1">Loading programs...</p>
+                    )}
+                  </div>
+
+                  <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="batch">
                       Batch *
                     </label>
@@ -448,7 +491,9 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                     >
                       <option value="">Select Batch</option>
-                      {batches.map(b => (
+                      {batches
+                        .filter(b => (!formData.program || b.program_id === formData.program))
+                        .map(b => (
                         <option key={b.id} value={b.id}>
                           {b.name} ({b.program_name})
                         </option>

@@ -212,9 +212,9 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
         <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 p-6 rounded-xl shadow-lg border border-indigo-200 hover:shadow-xl transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-indigo-600 mb-1">Total Students</p>
-              <p className="text-3xl font-bold text-indigo-900">{students.length}</p>
-            </div>
+            <p className="text-sm font-medium text-indigo-600 mb-1">Total Students</p>
+            <p className="text-3xl font-bold text-indigo-900">{filteredStudents.length}</p>
+          </div>
             <div className="p-3 bg-indigo-500 rounded-full shadow-lg">
               <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a.5.5 0 00-.5-.5h-11a.5.5 0 00-.5.5v3h12z"/>

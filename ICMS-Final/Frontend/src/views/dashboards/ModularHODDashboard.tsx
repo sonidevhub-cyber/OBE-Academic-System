@@ -6,6 +6,7 @@ import FeedbackButton from '../forms/FeedbackButton';
 import HODCoordinatorManagementModule from '../modules/HODCoordinatorManagementModule';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
+import { Toaster } from 'react-hot-toast';
 import { coordinatorService } from '../../api/coordinatorService';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
@@ -468,6 +469,7 @@ const ModularHODDashboard: React.FC = () => {
 
   return (
     <div className="flex min-h-screen w-full bg-[#E8EFF8]">
+      <Toaster position="top-right" reverseOrder={false} />
       {renderTabs()}
       <div className="flex-1">
         {/* Header */}

@@ -77,7 +77,6 @@ class MultiRoleService {
       'coordinator': 'Coordinator',
       'hod': 'Head of Department',
       'admin': 'Administrator',
-      'principal': 'Principal',
       'superuser': 'Super User'
     };
     return roleNames[role] || role.charAt(0).toUpperCase() + role.slice(1);
@@ -93,7 +92,6 @@ class MultiRoleService {
       'coordinator': '/coordinator-dashboard',
       'hod': '/hod-dashboard',
       'admin': '/admin-dashboard',
-      'principal': '/principal-dashboard'
     };
     return routes[role] || '/dashboard';
   }

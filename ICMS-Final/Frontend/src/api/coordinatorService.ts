@@ -45,6 +45,7 @@ export interface CourseAllocation {
   teacher_name?: string;
   batch: string;
   batch_name: string;
+  semester_no: number;
   coordinator: string;
   coordinator_name: string;
   status: 'proposed' | 'approved' | 'rejected' | 'active';
@@ -78,31 +79,31 @@ export interface TeacherAllocation {
 export const coordinatorService = {
   // --- Curriculum Versions ---
   getCurriculumVersions: (params?: any) => 
-    api.get('curriculum-versions/curriculum-versions/', { params }),
+    api.get('curriculum-versions/', { params }),
   
   getVersion: (id: number) => {
     if (isNaN(id)) {
       console.warn('coordinatorService.getVersion called with NaN');
       return Promise.reject(new Error('Invalid ID'));
     }
-    return api.get(`curriculum-versions/curriculum-versions/${id}/`);
+    return api.get(`curriculum-versions/${id}/`);
   },
   
   createVersion: (data: any) => 
-    api.post('curriculum-versions/curriculum-versions/', data),
+    api.post('curriculum-versions/', data),
   
   activateVersion: (id: number) => 
-    api.post(`curriculum-versions/curriculum-versions/${id}/activate/`),
+    api.post(`curriculum-versions/${id}/activate/`),
   
   cloneVersion: (id: number, target_batch_id: string) => 
-    api.post(`curriculum-versions/curriculum-versions/${id}/clone/`, { target_batch_id }),
+    api.post(`curriculum-versions/${id}/clone/`, { target_batch_id }),
 
   // --- Teacher Allocations ---
   getCourseAllocations: (params?: any) => 
     api.get('coordinators/', { params }),
   
   bulkAllocate: (data: any) => 
-    api.post('coordinators/bulk/', data),
+    api.post('coordinators/bulk-allocate/', data),
 
   cancelAllocation: (id: number, reason: string) => 
     api.post(`coordinators/${id}/cancel/`, { reason }),
@@ -112,7 +113,7 @@ export const coordinatorService = {
 
   // --- Supporting Data ---
   getPrograms: () => api.get('programs/'),
-  getInstructors: () => api.get('instructors/profiles/'),
+  getInstructors: () => api.get('instructors/'),
   getBatches: () => api.get('batches/all/'),
   getBatchesByProgram: (programId: string) => api.get(`batches/all/?program=${programId}`),
   getCoursesByProgram: (programId: string) => api.get(`courses/?program_id=${programId}`),

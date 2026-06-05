@@ -2,12 +2,12 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 from .models import TeacherAllocation
 
-def allocate_teacher(curriculum_version, course, teacher, allocated_by):
+def allocate_teacher(curriculum_version, course, teacher, batch, allocated_by):
     """
     transaction.atomic()
     1. Validate teacher.role == 'teacher'
     2. Validate course in version
-    3. Agar existing active allocation:
+    3. Agar existing active allocation for this batch:
        → Old status = 'changed'
        → Naya record banao
          cloned_from = old allocation
@@ -20,14 +20,19 @@ def allocate_teacher(curriculum_version, course, teacher, allocated_by):
         if not curriculum_version.version_courses.filter(course=course).exists():
             raise ValidationError("Course is not part of this curriculum version")
             
-        # Get existing active allocation
+        # Get existing active allocation for THIS batch
         existing = TeacherAllocation.objects.filter(
             curriculum_version=curriculum_version,
             course=course,
+            batch=batch,
             status='active'
         ).first()
         
         if existing:
+            # If the teacher is the same, no need to do anything
+            if existing.teacher == teacher:
+                return existing
+                
             existing.status = 'changed'
             existing.is_active = False
             existing.save()
@@ -35,8 +40,8 @@ def allocate_teacher(curriculum_version, course, teacher, allocated_by):
             new_allocation = TeacherAllocation.objects.create(
                 curriculum_version=curriculum_version,
                 course=course,
-                batch=curriculum_version.batch,
-                semester_no=existing.semester_no, # Copy semester_no
+                batch=batch,
+                semester_no=existing.semester_no,
                 teacher=teacher,
                 allocated_by=allocated_by,
                 cloned_from=existing,
@@ -48,7 +53,7 @@ def allocate_teacher(curriculum_version, course, teacher, allocated_by):
             new_allocation = TeacherAllocation.objects.create(
                 curriculum_version=curriculum_version,
                 course=course,
-                batch=curriculum_version.batch,
+                batch=batch,
                 semester_no=version_course.semester_no,
                 teacher=teacher,
                 allocated_by=allocated_by,

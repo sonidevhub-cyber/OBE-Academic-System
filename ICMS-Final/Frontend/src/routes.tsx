@@ -56,8 +56,6 @@ const getRedirectPath = () => {
       return '/hod';
     case 'admin':
       return '/admin';
-    case 'principal':
-      return '/principal';
     default:
       return '/dashboard';
   }
@@ -110,7 +108,7 @@ const getRedirectPath = () => {
         <Route path="/curriculum-versions/:id" element={<CurriculumVersionDetailPage />} />
       </Route>
 
-      <Route element={<ProtectedRoute allowedRoles={['admin', 'principal', 'director', 'coordinator']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'coordinator']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin-dashboard" element={<Navigate to="/admin" />} />
         <Route path="/sac/programs" element={<SacProgramSetup />} />
@@ -122,7 +120,7 @@ const getRedirectPath = () => {
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
       </Route>
 
-       <Route element={<ProtectedRoute allowedRoles={['admin', 'principal']} />}> 
+       <Route element={<ProtectedRoute allowedRoles={['admin']} />}> 
 </Route>
       
       {/* Fallback route */}

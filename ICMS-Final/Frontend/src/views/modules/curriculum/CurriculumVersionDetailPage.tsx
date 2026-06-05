@@ -3,8 +3,9 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../../api/curriculumService';
 import { coordinatorService } from '../../../api/coordinatorService';
+import obeService from '../../../api/obeService';
 import VersionStatusBadge from '../../../components/obe/VersionStatusBadge';
-import { ChevronLeft, Plus, CheckCircle, Copy, Book, Users, History, Save, Info, RefreshCw, User } from 'lucide-react';
+import { ChevronLeft, Plus, CheckCircle, Copy, Book, Users, History, Save, Info, RefreshCw, User, Target, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 interface CurriculumVersionDetailPageProps {
@@ -13,10 +14,10 @@ interface CurriculumVersionDetailPageProps {
   onVersionCreated?: (id: number) => void;
 }
 
-type ActiveTab = 'courses' | 'allocations' | 'history';
+type ActiveTab = 'courses' | 'obe' | 'history';
 
 const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = ({ id: propId, onClose, onVersionCreated }) => {
-  const { isSAC } = useAuth();
+  const { isSAC, currentUser } = useAuth();
   const { id: paramId } = useParams<{ id: string }>();
   const id = propId || paramId;
 
@@ -30,6 +31,11 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   const [syncing, setSyncing] = useState(false);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('courses');
+
+  // Lazy Branching state
+  const [showBranchModal, setShowBranchModal] = useState(false);
+  const [branchBatchId, setBranchBatchId] = useState('');
+  const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
 
   // Create/Add Course state
   const [showAddCourseModal, setShowAddCourseModal] = useState(false);
@@ -56,9 +62,21 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     cloned_from: '',
   });
 
-  // Allocations state
-  const [instructors, setInstructors] = useState<any[]>([]);
-  const [allocations, setAllocations] = useState<Record<string, string>>({});
+  // OBE state
+  const [selectedCourseForObe, setSelectedCourseForObe] = useState<any | null>(null);
+  const [mappingMatrix, setMappingMatrix] = useState<any | null>(null);
+  const [loadingMatrix, setLoadingMatrix] = useState(false);
+  const [isEditingObe, setIsEditingObe] = useState(false);
+  const [tempMappings, setTempMappings] = useState<Record<string, number>>({});
+  const [showCloModal, setShowCloModal] = useState(false);
+  const [editingClo, setEditingClo] = useState<any | null>(null);
+  const [cloFormData, setCloFormData] = useState({
+    title: '',
+    description: '',
+    bloom_level: 'K2',
+    kpi_target: 60,
+    order_number: 1
+  });
 
   const { idForRequests, isNew, isInvalidId } = useMemo(() => {
     if (!id) return { idForRequests: NaN, isNew: false, isInvalidId: true };
@@ -70,7 +88,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const tab = queryParams.get('tab');
-    if (tab === 'allocations' || tab === 'courses' || tab === 'history') setActiveTab(tab);
+    if (tab === 'courses' || tab === 'history') setActiveTab(tab);
   }, [location.search]);
 
   useEffect(() => {
@@ -84,14 +102,22 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       return;
     }
 
+    // Reset OBE state when switching versions
+    setSelectedCourseForObe(null);
+    setMappingMatrix(null);
+    setIsEditingObe(false);
+
     fetchVersion();
-    loadInstructors();
     loadAllCourses();
   }, [idForRequests, isNew, isInvalidId]);
 
   const handleBack = () => {
-    if (onClose) onClose();
-    else navigate(-1);
+    if (onClose) {
+      onClose();
+    } else {
+      // Fallback if not used in dashboard
+      navigate(-1);
+    }
   };
 
   const loadAllCourses = async () => {
@@ -104,32 +130,19 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     }
   };
 
-  const loadInstructors = async () => {
-    try {
-      const res = await coordinatorService.getInstructors();
-      const data = res.data?.data || res.data || [];
-      setInstructors(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Error loading instructors:', err);
-    }
-  };
-
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const [programsRes, batchesRes, instructorsRes] = await Promise.all([
+      const [programsRes, batchesRes] = await Promise.all([
         coordinatorService.getPrograms(),
         coordinatorService.getBatches(),
-        coordinatorService.getInstructors(),
       ]);
 
       const programsData = programsRes.data?.data || programsRes.data || [];
       const batchesData = batchesRes.data?.data || batchesRes.data || [];
-      const instructorsData = instructorsRes.data?.data || instructorsRes.data || [];
 
       setPrograms(Array.isArray(programsData) ? programsData : []);
       setBatches(Array.isArray(batchesData) ? batchesData : []);
-      setInstructors(Array.isArray(instructorsData) ? instructorsData : []);
     } catch (error) {
       console.error('Error fetching initial data:', error);
       toast.error('Failed to load programs or batches');
@@ -151,21 +164,6 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       const response = await curriculumService.getVersion(versionId);
       const data = response.data?.data || response.data;
       setVersion(data);
-
-      // Pre-fill allocations from version courses
-      if (data?.courses_by_semester) {
-        const initial: Record<string, string> = {};
-      Object.values(data.courses_by_semester).forEach((semesterCourses: any) => {
-          (semesterCourses as any[]).forEach((vc: any) => {
-            if (vc?.course && vc?.allocation?.teacher_id) {
-              initial[String(vc.course)] = String(vc.allocation.teacher_id);
-            }
-          });
-        });
-        setAllocations(initial);
-      } else {
-        setAllocations({});
-      }
     } catch (error) {
       console.error('Error fetching version detail:', error);
       toast.error('Failed to load version details');
@@ -186,7 +184,12 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       const response = await curriculumService.createCurriculumVersion(formData);
       const newVersion = response.data?.data || response.data;
       toast.success('Curriculum version created!');
-      navigate(`/curriculum-versions/${newVersion.id}`);
+      
+      if (onVersionCreated) {
+        onVersionCreated(newVersion.id);
+      } else {
+        navigate(`/curriculum-versions/${newVersion.id}`);
+      }
     } catch (error: any) {
       console.error('Error creating version:', error);
       toast.error(error.response?.data?.message || 'Failed to create version');
@@ -206,7 +209,12 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       const res = await curriculumService.cloneVersion(version.id, targetBatchId);
       const newVersion = res.data?.data || res.data;
       toast.success('Curriculum cloned successfully!');
-      navigate(`/curriculum-versions/${newVersion.id}`);
+      
+      if (onVersionCreated) {
+        onVersionCreated(newVersion.id);
+      } else {
+        navigate(`/curriculum-versions/${newVersion.id}`);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Clone failed');
     } finally {
@@ -242,94 +250,209 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     }
   };
 
-  const handleSaveAllocations = async () => {
+  const fetchMappingMatrix = async (courseId: string) => {
     if (!version) return;
+    try {
+      setLoadingMatrix(true);
+      // Use PI Mapping Matrix instead of GA
+      const data = await obeService.getPIMappingMatrix(courseId, version.id);
+      setMappingMatrix(data);
+      
+      // Initialize temp mappings for PIs
+      const initial: Record<string, number> = {};
+      data.mappings?.forEach((m: any) => {
+        // PI mapping key: cloId_piId
+        initial[`${m.clo}_${m.pi}`] = m.weight || 3;
+      });
+      setTempMappings(initial);
+    } catch (error) {
+      console.error('Error fetching PI mapping matrix:', error);
+      toast.error('Failed to load PI mapping matrix');
+    } finally {
+      setLoadingMatrix(false);
+    }
+  };
 
-    const allocationList = Object.entries(allocations)
-      .filter(([_, teacherId]) => teacherId && teacherId !== '')
-      .map(([courseId, teacherId]) => ({
-        course: courseId,
-        teacher: teacherId,
-      }));
+  const handleSaveObeMappings = async () => {
+    if (!selectedCourseForObe || !version) return;
 
-    if (allocationList.length === 0) {
-      toast.error('Please select at least one instructor to allocate');
+    const action = async () => {
+      try {
+        setSubmitting(true);
+        const mappingsList = Object.entries(tempMappings).map(([key, weight]) => {
+          const [cloId, piId] = key.split('_');
+          return { clo_id: cloId, pi_id: piId, weight };
+        });
+        
+        await obeService.saveCLOPIMappings(selectedCourseForObe.course, version.id, mappingsList);
+        toast.success('PI Mappings saved successfully');
+        setIsEditingObe(false);
+        fetchMappingMatrix(selectedCourseForObe.course);
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Failed to save mappings');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    await ensureEditable(action);
+  };
+
+  const handleSaveClo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCourseForObe || !version) return;
+
+    const action = async () => {
+      try {
+        setSubmitting(true);
+        if (editingClo) {
+          await obeService.updateCLO(editingClo.id, cloFormData);
+          toast.success('CLO updated successfully');
+        } else {
+          await obeService.createCLO(selectedCourseForObe.course, version.id, cloFormData);
+          toast.success('CLO created successfully');
+        }
+        setShowCloModal(false);
+        setEditingClo(null);
+        fetchMappingMatrix(selectedCourseForObe.course);
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Failed to save CLO');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    await ensureEditable(action);
+  };
+
+  const handleDeleteClo = async (cloId: any) => {
+    if (!window.confirm('Are you sure you want to delete this CLO?')) return;
+    
+    const action = async () => {
+      try {
+        setSubmitting(true);
+        await obeService.deleteCLO(cloId);
+        toast.success('CLO deleted successfully');
+        if (selectedCourseForObe) fetchMappingMatrix(selectedCourseForObe.course);
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Failed to delete CLO');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    await ensureEditable(action);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'obe' && selectedCourseForObe) {
+      fetchMappingMatrix(selectedCourseForObe.course);
+    }
+  }, [activeTab, selectedCourseForObe]);
+
+  const handleBranchAndExecute = async (batchId: string) => {
+    if (!version) return;
+    try {
+      setSubmitting(true);
+      const res = await curriculumService.branchVersion(version.id, batchId);
+      const newVersion = res.data?.data || res.data;
+      toast.success(`New version ${newVersion.version_no} created for the selected batch`);
+      
+      // Update local state to the new version
+      setVersion(newVersion);
+      if (onVersionCreated) onVersionCreated(newVersion.id);
+      
+      setShowBranchModal(false);
+      
+      // Execute the pending action on the new version
+      if (pendingAction) {
+        await pendingAction();
+        setPendingAction(null);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to branch version');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const ensureEditable = async (action: () => Promise<void>) => {
+    if (!version) return;
+    
+    // If it's a draft and only has one batch, it's safe to edit
+    if (version.status === 'draft' && version.assigned_batches?.length === 1) {
+      await action();
       return;
     }
 
-    try {
-      setSubmitting(true);
-      await coordinatorService.bulkAllocate({
-        curriculum_version: version.id,
-        allocations: allocationList,
-      });
-      toast.success('Allocations saved successfully');
-      fetchVersion();
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to save allocations';
-      toast.error(errorMessage);
-    } finally {
-      setSubmitting(false);
+    // If it's shared or finalized, we need to branch
+    setPendingAction(() => action);
+    
+    if (version.assigned_batches && version.assigned_batches.length > 1) {
+      setShowBranchModal(true);
+    } else if (version.assigned_batches && version.assigned_batches.length === 1) {
+      // Just one batch but finalized, auto-branch
+      handleBranchAndExecute(version.assigned_batches[0].id);
+    } else {
+      // Master version or no batches, ask to select a batch to branch for
+      if (batches.length === 0) await fetchInitialData();
+      setShowBranchModal(true);
     }
   };
 
   const handleAddCourse = async () => {
     if (!version) return;
 
-    try {
-      setSubmitting(true);
-      let courseIdToAdd: string | number;
+    const action = async () => {
+      try {
+        setSubmitting(true);
+        let courseIdToAdd: string | number;
 
-      if (addCourseMode === 'existing') {
-        if (!newCourse.course || newCourse.course === 'null' || newCourse.course === 'undefined') {
-          toast.error('Please select a valid course.');
-          return;
-        }
-        courseIdToAdd = newCourse.course;
-      } else {
-        // Create New Course
-        if (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours) {
-          toast.error('Please fill all fields for the new course.');
-          return;
+        if (addCourseMode === 'existing') {
+          if (!newCourse.course || newCourse.course === 'null' || newCourse.course === 'undefined') {
+            toast.error('Please select a valid course.');
+            return;
+          }
+          courseIdToAdd = newCourse.course;
+        } else {
+          // Create New Course
+          if (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours) {
+            toast.error('Please fill all fields for the new course.');
+            return;
+          }
+
+          if (!version?.program) {
+            toast.error('Program information missing from version');
+            return;
+          }
+
+          const createCourseResponse = await curriculumService.createCourse({
+            name: newCourseData.name,
+            code: newCourseData.code,
+            credit_hours: newCourseData.credit_hours,
+            course_type: newCourseData.course_type,
+            program_id: version.program,
+            semester_no: newCourse.semester_no,
+            parent_course: newCourseData.parent_course_id || undefined,
+          });
+          const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
+          courseIdToAdd = createdCourse.id;
+          toast.success('New course created successfully!');
         }
 
-        if (!version?.program) {
-          toast.error('Program information missing from version');
-          return;
-        }
-
-        const createCourseResponse = await curriculumService.createCourse({
-          name: newCourseData.name,
-          code: newCourseData.code,
-          credit_hours: newCourseData.credit_hours,
-          course_type: newCourseData.course_type,
-          program_id: version.program,
-          semester_no: newCourse.semester_no,
-          parent_course: newCourseData.parent_course_id || undefined,
-        });
-        const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
-        courseIdToAdd = createdCourse.id;
-        toast.success('New course created successfully!');
+        await curriculumService.addCourseToVersion(version.id, courseIdToAdd, newCourse.semester_no);
+        toast.success('Course added successfully!');
+        setShowAddCourseModal(false);
+        setNewCourse({ course: '', semester_no: 1 });
+        fetchVersion();
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Failed to add course.');
+      } finally {
+        setSubmitting(false);
       }
+    };
 
-      if (!newCourse.semester_no) {
-        toast.error('Please select a semester.');
-        return;
-      }
-
-      await curriculumService.addCourseToVersion(version.id, courseIdToAdd, newCourse.semester_no);
-      toast.success('Course added successfully!');
-      setShowAddCourseModal(false);
-      setNewCourse({ course: '', semester_no: 1 });
-      setNewCourseData({ name: '', code: '', credit_hours: 3, course_type: 'LECTURE', parent_course_id: '' }); // Reset new course form
-      setAddCourseMode('existing'); // Reset to existing course tab
-      fetchVersion();
-    } catch (err: any) {
-      console.error('Error adding course:', err);
-      toast.error(err.response?.data?.message || 'Failed to add course.');
-    } finally {
-      setSubmitting(false);
-    }
+    await ensureEditable(action);
   };
 
   const [showCloneModal, setShowCloneModal] = useState(false);
@@ -385,9 +508,10 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                 {batches
                   .filter(
                     (b) =>
-                      !formData.program ||
+                      (!formData.program ||
                       b.program === formData.program ||
-                      b.program_id === formData.program
+                      b.program_id === formData.program) &&
+                      !b.has_curriculum
                   )
                   .map((b) => (
                     <option key={b.id} value={b.id}>
@@ -447,7 +571,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     : [];
 
   return (
-    <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <button onClick={handleBack} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
@@ -459,7 +583,9 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
               <VersionStatusBadge status={version.status} />
             </div>
             <p className="text-sm text-gray-500">
-              {version.program_name} - {version.batch_name}
+              {version.program_name} - {version.assigned_batches && version.assigned_batches.length > 0 
+                ? version.assigned_batches.map(b => b.name).join(', ') 
+                : version.batch_name}
             </p>
           </div>
         </div>
@@ -502,8 +628,18 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
               <p className="font-semibold text-gray-900">{version.program_name}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Batch</p>
-              <p className="font-semibold text-gray-900">{version.batch_name}</p>
+              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Batches</p>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {version.assigned_batches && version.assigned_batches.length > 0 ? (
+                  version.assigned_batches.map(b => (
+                    <span key={b.id} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium border border-blue-100">
+                      {b.name}
+                    </span>
+                  ))
+                ) : (
+                  <p className="font-semibold text-gray-900">{version.batch_name || 'No batches'}</p>
+                )}
+              </div>
             </div>
             <div>
               <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Total Courses</p>
@@ -599,15 +735,13 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
           <Book className="w-4 h-4 inline mr-2" />
           Courses
         </button>
-        {!isSAC && (
-          <button
-            onClick={() => setActiveTab('allocations')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'allocations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            Allocations
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('obe')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'obe' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+        >
+          <Target className="w-4 h-4 inline mr-2" />
+          OBE Mapping
+        </button>
         <button
           onClick={() => setActiveTab('history')}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
@@ -900,82 +1034,402 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
           </div>
         )}
 
-        {activeTab === 'allocations' && (
+        {activeTab === 'obe' && (
           <div className="space-y-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900 flex items-center">
-                <Users className="w-5 h-5 mr-2 text-green-600" />
-                Teacher Allocations
+                <Target className="w-5 h-5 mr-2 text-indigo-600" />
+                OBE Course Mapping (CLO-GA)
               </h3>
-              <button
-                onClick={handleSaveAllocations}
-                disabled={submitting}
-                className="flex items-center px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold shadow-md disabled:bg-gray-400"
-              >
-                {submitting ? <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                Save All Allocations
-              </button>
+              {selectedCourseForObe && version.status === 'draft' && !isSAC && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setEditingClo(null);
+                      setCloFormData({
+                        title: '',
+                        description: '',
+                        bloom_level: 'K2',
+                        kpi_target: 60,
+                        order_number: (mappingMatrix?.clos?.length || 0) + 1
+                      });
+                      setShowCloModal(true);
+                    }}
+                    className="flex items-center px-4 py-2 border border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors text-sm font-semibold"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add CLO
+                  </button>
+                  {isEditingObe ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setIsEditingObe(false)}
+                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-semibold"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveObeMappings}
+                        disabled={submitting}
+                        className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-semibold shadow-md"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Mappings
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setIsEditingObe(true)}
+                      className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-semibold shadow-md"
+                    >
+                      <Edit className="w-4 h-4 mr-2" />
+                      Edit Mappings
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="overflow-hidden bg-white border border-gray-100 rounded-xl">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Semester</th>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Course</th>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Instructor</th>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {courseEntries.map(([semester, courses]) => (
-                    <React.Fragment key={semester}>
-                      {(courses as any[]).map((vc: any, idx: number) => (
-                        <tr key={vc.id || vc.course || `${semester}-${idx}`} className="hover:bg-gray-50 transition-colors">
-                          {idx === 0 && (
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 border-r border-gray-100" rowSpan={(courses as any[]).length}>
-                              {semester.replace('_', ' ')}
-                            </td>
-                          )}
-                          <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900">{vc.course_name}</div>
-                            <div className="text-xs text-gray-500">
-                              {vc.course_code} • {vc.credit_hours} Cr.
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <select
-                              value={allocations[String(vc.course)] || ''}
-                              onChange={(e) => setAllocations({ ...allocations, [String(vc.course)]: e.target.value })}
-                              className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-green-500 outline-none"
-                            >
-                              <option value="">Assign Teacher...</option>
-                              {instructors.map((inst) => (
-                                <option key={inst.id} value={inst.user}>
-                                  {inst.name} ({inst.email})
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {allocations[String(vc.course)] ? (
-                              <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-700 rounded-full">Allocated</span>
-                            ) : (
-                              <span className="px-2 py-1 text-xs font-semibold bg-orange-100 text-orange-700 rounded-full">Pending</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              <div className="lg:col-span-1 space-y-2">
+                <h4 className="text-sm font-bold text-gray-500 uppercase mb-2">Select Course</h4>
+                <div className="space-y-1 max-h-[600px] overflow-y-auto pr-2">
+                  {courseEntries.flatMap(([_, courses]) => (courses as any[])).map((vc: any) => (
+                    <button
+                      key={vc.course}
+                      onClick={() => {
+                        setSelectedCourseForObe(vc);
+                        setIsEditingObe(false);
+                      }}
+                      className={`w-full text-left p-3 rounded-lg transition-all border ${
+                        selectedCourseForObe?.course === vc.course
+                          ? 'bg-indigo-50 border-indigo-200 shadow-sm'
+                          : 'bg-white border-gray-100 hover:bg-gray-50'
+                      }`}
+                    >
+                      <p className="text-xs font-bold text-indigo-600 uppercase">{vc.course_code}</p>
+                      <p className="text-sm font-semibold text-gray-900 truncate">{vc.course_name}</p>
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </div>
+
+              <div className="lg:col-span-3 bg-gray-50 rounded-xl p-6 border border-gray-100 min-h-[400px]">
+                {!selectedCourseForObe ? (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                    <Target className="w-12 h-12 mb-2 opacity-20" />
+                    <p>Select a course from the left to view OBE mappings</p>
+                  </div>
+                ) : loadingMatrix ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                  </div>
+                ) : mappingMatrix ? (
+                  <div className="space-y-6">
+                    <div>
+                      <h4 className="font-bold text-gray-900 mb-4">CLO to PI Mapping Matrix</h4>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full bg-white border border-gray-200 rounded-lg overflow-hidden table-fixed">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase border-b border-r w-32 sticky left-0 bg-gray-50 z-10">CLOs \ PIs</th>
+                              {mappingMatrix.gas?.map((ga: any) => (
+                                <th 
+                                  key={ga.id} 
+                                  colSpan={Math.max(1, ga.performance_indicators?.length || 0)}
+                                  className="px-4 py-3 text-center text-xs font-black text-indigo-700 uppercase border-b border-r bg-indigo-50/50"
+                                >
+                                  GA-{ga.order_number}
+                                </th>
+                              ))}
+                            </tr>
+                            <tr className="bg-white">
+                              <th className="border-b border-r sticky left-0 bg-white z-10"></th>
+                              {mappingMatrix.gas?.map((ga: any) => {
+                                const pis = ga.performance_indicators || [];
+                                if (pis.length === 0) {
+                                  return (
+                                    <th key={`${ga.id}-none`} className="px-2 py-2 text-center text-[10px] font-black text-gray-300 uppercase border-b border-r min-w-[60px]">
+                                      No PIs
+                                    </th>
+                                  );
+                                }
+                                return pis.map((pi: any) => (
+                                  <th 
+                                    key={pi.id} 
+                                    className="px-2 py-2 text-center text-[10px] font-black text-gray-500 uppercase border-b border-r min-w-[80px]"
+                                    title={pi.description}
+                                  >
+                                    <div className="flex flex-col items-center">
+                                      <span>{pi.code}</span>
+                                      <span className="text-[8px] text-gray-400 font-normal normal-case truncate max-w-[70px]">{pi.description}</span>
+                                    </div>
+                                  </th>
+                                ));
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mappingMatrix.clos?.map((clo: any) => (
+                              <tr key={clo.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-b sticky left-0 bg-white z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                                  CLO-{clo.order_number}
+                                </td>
+                                {mappingMatrix.gas?.map((ga: any) => 
+                                  (ga.performance_indicators || []).map((pi: any) => {
+                                    const weight = tempMappings[`${clo.id}_${pi.id}`];
+                                    return (
+                                      <td key={`${clo.id}-${pi.id}`} className="px-2 py-3 text-center border-b border-r">
+                                        {isEditingObe ? (
+                                          <input
+                                            type="checkbox"
+                                            checked={!!weight}
+                                            onChange={(e) => {
+                                              const checked = e.target.checked;
+                                              const newTemp = { ...tempMappings };
+                                              if (!checked) delete newTemp[`${clo.id}_${pi.id}`];
+                                              else newTemp[`${clo.id}_${pi.id}`] = 3; // Default weight 3
+                                              setTempMappings(newTemp);
+                                            }}
+                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                          />
+                                        ) : (
+                                          weight ? (
+                                            <div className="flex justify-center">
+                                              <CheckCircle className="w-4 h-4 text-indigo-600" />
+                                            </div>
+                                          ) : (
+                                            <span className="text-gray-200">-</span>
+                                          )
+                                        )}
+                                      </td>
+                                    );
+                                  })
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <h5 className="text-sm font-bold text-gray-900 mb-3 border-b pb-2 flex justify-between items-center">
+                          CLO Descriptions
+                        </h5>
+                        <div className="space-y-3">
+                          {mappingMatrix.clos?.map((clo: any) => (
+                            <div key={clo.id} className="text-sm flex justify-between items-start group">
+                              <div className="flex-1 pr-4">
+                                <span className="font-bold text-indigo-600 mr-2">CLO-{clo.order_number}:</span>
+                                <span className="text-gray-700">{clo.title}</span>
+                              </div>
+                              {version.status === 'draft' && !isSAC && (
+                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => {
+                                      setEditingClo(clo);
+                                      setCloFormData({
+                                        title: clo.title,
+                                        description: clo.description,
+                                        bloom_level: clo.bloom_level,
+                                        kpi_target: clo.kpi_target,
+                                        order_number: clo.order_number
+                                      });
+                                      setShowCloModal(true);
+                                    }}
+                                    className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteClo(clo.id)}
+                                    className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <h5 className="text-sm font-bold text-gray-900 mb-3 border-b pb-2">Graduate Attributes</h5>
+                        <div className="space-y-3">
+                          {mappingMatrix.gas?.map((ga: any) => (
+                            <div key={ga.id} className="text-sm">
+                              <span className="font-bold text-indigo-600 mr-2">GA-{ga.order_number}:</span>
+                              <span className="text-gray-700">{ga.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-10 text-gray-500">No mappings found for this course.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CLO Modal */}
+        {showCloModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+                <Target className="w-5 h-5 mr-2 text-indigo-600" />
+                {editingClo ? 'Edit CLO' : 'Add New CLO'}
+              </h2>
+              <form onSubmit={handleSaveClo} className="space-y-4">
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="col-span-1">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">No.</label>
+                    <input
+                      type="number"
+                      value={cloFormData.order_number}
+                      onChange={(e) => setCloFormData({ ...cloFormData, order_number: parseInt(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                      required
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Bloom Level</label>
+                    <select
+                      value={cloFormData.bloom_level}
+                      onChange={(e) => setCloFormData({ ...cloFormData, bloom_level: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="K1">K1 - Remembering</option>
+                      <option value="K2">K2 - Understanding</option>
+                      <option value="K3">K3 - Applying</option>
+                      <option value="K4">K4 - Analyzing</option>
+                      <option value="K5">K5 - Evaluating</option>
+                      <option value="K6">K6 - Creating</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CLO Title</label>
+                  <input
+                    type="text"
+                    value={cloFormData.title}
+                    onChange={(e) => setCloFormData({ ...cloFormData, title: e.target.value })}
+                    placeholder="e.g. Design basic algorithms"
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description (Optional)</label>
+                  <textarea
+                    value={cloFormData.description}
+                    onChange={(e) => setCloFormData({ ...cloFormData, description: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">KPI Target (%)</label>
+                  <input
+                    type="number"
+                    value={cloFormData.kpi_target}
+                    onChange={(e) => setCloFormData({ ...cloFormData, kpi_target: parseFloat(e.target.value) })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCloModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-md flex items-center justify-center"
+                  >
+                    {submitting ? (
+                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      'Save CLO'
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
 
         {activeTab === 'history' && (
           <div className="text-center py-10 text-gray-400">Version history timeline coming soon...</div>
+        )}
+
+        {/* Lazy Branching Modal */}
+        {showBranchModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-200">
+              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+                <Copy className="w-5 h-5 mr-2 text-purple-600" />
+                Branch Version
+              </h2>
+              <p className="text-sm text-gray-500 mb-6">
+                This version is shared or finalized. To make changes, we need to create a new <b>Draft</b> version for a specific batch.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Batch to Branch For</label>
+                  <select
+                    value={branchBatchId}
+                    onChange={(e) => setBranchBatchId(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                  >
+                    <option value="">Choose a batch...</option>
+                    {version?.assigned_batches?.map((b: any) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                    <optgroup label="Other Batches">
+                      {batches
+                        .filter(b => !version?.assigned_batches?.some((ab: any) => ab.id === b.id))
+                        .filter(b => b.program === version?.program || b.program_id === version?.program)
+                        .filter(b => !b.has_curriculum)
+                        .map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="flex space-x-3 pt-4">
+                  <button
+                    onClick={() => {
+                      setShowBranchModal(false);
+                      setPendingAction(null);
+                    }}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleBranchAndExecute(branchBatchId)}
+                    disabled={submitting || !branchBatchId}
+                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium shadow-md flex items-center justify-center"
+                  >
+                    {submitting ? (
+                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      'Branch & Save'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

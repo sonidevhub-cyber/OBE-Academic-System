@@ -4,6 +4,8 @@ from .models import Instructor
 class InstructorSerializer(serializers.ModelSerializer):
     custom_id = serializers.ReadOnlyField(source='user.custom_id')
     user_email = serializers.ReadOnlyField(source='user.email')
+    role = serializers.ReadOnlyField(source='user.role')
+    active_role = serializers.ReadOnlyField(source='user.active_role')
     
     class Meta:
         model = Instructor
@@ -12,7 +14,8 @@ class InstructorSerializer(serializers.ModelSerializer):
             'department', 'department_name', 'employment_type', 
             'qualification', 'experience', 'joining_date', 'image',
             'user_email', 'employee_id', 'designation', 'address',
-            'specialization', 'experience_years', 'hire_date'
+            'specialization', 'experience_years', 'hire_date',
+            'role', 'active_role'
         ]
 
     def create(self, validated_data):

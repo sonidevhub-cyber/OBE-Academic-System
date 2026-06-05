@@ -105,6 +105,7 @@ class AllBatchesView(generics.ListAPIView):
                 'program_name': b.program.name,
                 'session_type': b.session_type,
                 'current_semester': b.current_semester,
+                'has_curriculum': b.curriculum_version_id is not None,
             }
             for b in items
         ]

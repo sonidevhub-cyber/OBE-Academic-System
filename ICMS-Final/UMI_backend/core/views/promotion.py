@@ -30,6 +30,9 @@ class ProvisionalPromoteAllView(generics.GenericAPIView):
         batch.current_semester = next_sem
         batch.save(update_fields=['current_semester'])
 
+        # Auto-copy teacher allocations for the new semester
+        self.copy_allocations_from_previous_batch(batch, next_sem)
+
         count = User.objects.filter(
             batch=batch,
             role='student',
@@ -37,6 +40,47 @@ class ProvisionalPromoteAllView(generics.GenericAPIView):
         ).update(current_semester=next_sem, promotion_status='provisional')
 
         return Response({'success': True, 'new_semester': next_sem, 'promoted_count': count}, status=status.HTTP_200_OK)
+
+    def copy_allocations_from_previous_batch(self, batch, semester_no):
+        """
+        Jab naya semester start hota hai, last batch (jis ka curriculum same ho) se 
+        teacher allocations copy karo.
+        """
+        from coordinators.models import TeacherAllocation
+        
+        # Find the last batch that used the same curriculum version and has allocations for this semester
+        last_batch = Batch.objects.filter(
+            curriculum_version=batch.curriculum_version,
+            status='active'
+        ).exclude(id=batch.id).order_by('-created_at').first()
+
+        if not last_batch:
+            # Try graduated batches if no active ones found
+            last_batch = Batch.objects.filter(
+                curriculum_version=batch.curriculum_version,
+                status='graduated'
+            ).order_by('-graduated_at').first()
+
+        if last_batch:
+            prev_allocs = TeacherAllocation.objects.filter(
+                batch=last_batch,
+                semester_no=semester_no,
+                status='active'
+            )
+            
+            for pa in prev_allocs:
+                # Avoid duplicates
+                TeacherAllocation.objects.get_or_create(
+                    batch=batch,
+                    course=pa.course,
+                    semester_no=semester_no,
+                    curriculum_version=batch.curriculum_version,
+                    defaults={
+                        'teacher': pa.teacher,
+                        'allocated_by': pa.allocated_by,
+                        'status': 'active'
+                    }
+                )
 
 
 class MarkAsRepeatView(generics.GenericAPIView):
@@ -57,6 +101,28 @@ class MarkAsRepeatView(generics.GenericAPIView):
         student.save(update_fields=['promotion_status', 'current_semester'])
 
         return Response({'success': True, 'student_name': student.full_name, 'repeat_semester': student.current_semester}, status=status.HTTP_200_OK)
+
+
+class ConfirmPromotionsView(generics.GenericAPIView):
+    permission_classes = [IsSAC]
+
+    @transaction.atomic
+    def patch(self, request, program_id, batch_id):
+        batch = Batch.objects.select_for_update().get(program_id=program_id, pk=batch_id)
+        
+        # Confirm all provisional students in this batch
+        count = User.objects.filter(
+            batch=batch,
+            role='student',
+            promotion_status='provisional',
+            is_active=True
+        ).update(promotion_status='confirmed')
+
+        return Response({
+            'success': True, 
+            'message': f'Confirmed promotions for {count} students',
+            'confirmed_count': count
+        }, status=status.HTTP_200_OK)
 
 
 from rest_framework.views import APIView

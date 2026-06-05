@@ -21,6 +21,9 @@ class StudentSerializer(serializers.ModelSerializer):
     batch_id = serializers.UUIDField(source='user.batch.id', read_only=True)
     batch_name = serializers.CharField(source='user.batch.name', read_only=True)
     program_id = serializers.UUIDField(source='user.batch.program.id', read_only=True)
+    program_name = serializers.CharField(source='user.batch.program.name', read_only=True)
+    program_code = serializers.CharField(source='user.batch.program.code', read_only=True)
+    courses = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -28,9 +31,28 @@ class StudentSerializer(serializers.ModelSerializer):
             'student_id', 'custom_id', 'first_name', 'last_name', 'email', 'password', 'batch',
             'registration_number', 'name', 'department', 'phone', 'date_of_birth',
             'gender', 'blood_group', 'guardian_name', 'guardian_contact', 'address',
-            'user_email', 'full_name', 'role', 'batch_id', 'batch_name', 'program_id', 'image'
+            'user_email', 'full_name', 'role', 'batch_id', 'batch_name', 'program_id', 
+            'program_name', 'program_code', 'image', 'courses'
         ]
         read_only_fields = ['student_id', 'name']
+
+    def get_courses(self, obj):
+        if not obj.user or not obj.user.batch or not obj.user.batch.curriculum_version:
+            return []
+        
+        version = obj.user.batch.curriculum_version
+        current_semester = obj.user.batch.current_semester or 1
+        
+        # Filter courses by the batch's current semester
+        courses = version.version_courses.filter(semester_no=current_semester)
+        
+        return [{
+            'course_id': vc.course.id,
+            'name': vc.course.name,
+            'code': vc.course.code,
+            'credit_hours': vc.course.credit_hours,
+            'semester_no': vc.semester_no
+        } for vc in courses]
 
     def validate_email(self, value):
         user_id = self.instance.user.id if self.instance else None

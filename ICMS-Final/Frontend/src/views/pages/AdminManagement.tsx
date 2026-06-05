@@ -43,7 +43,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
     { code: 'manage_students', label: 'Student Management', hint: 'Add/edit/remove students and profiles' },
     { code: 'manage_instructors', label: 'Instructor Management', hint: 'Add/edit/remove instructors and profiles' },
     { code: 'manage_hods', label: 'HOD Management', hint: 'Create/update HOD accounts' },
-    { code: 'manage_principals', label: 'Principal Management', hint: 'Create/update Principal accounts' },
     { code: 'manage_jsc_users', label: 'Admin (JSC) Management', hint: 'Create/deactivate JSC accounts' },
     { code: 'assign_jsc_permissions', label: 'Assign JSC Permissions', hint: 'Grant/revoke JSC permissions' },
     { code: 'manage_attendance', label: 'Attendance Management', hint: 'Review attendance and edit requests' },

@@ -5,15 +5,15 @@ import { FaBook, FaTasks, FaUsers } from "react-icons/fa";
 
 // TYPES
 type Student = {
-  student_id: number;
+  student_id: string;
   name: string;
 };
 
 type CLO = {
   id: number;
-  clo_number: string;
-  name: string;
-  level: string;
+  title: string;
+  description: string;
+  bloom_level: string;
 };
 
 type Question = {
@@ -24,10 +24,12 @@ type Question = {
 
 // PROPS
 interface Props {
-  courseId: number;
+  courseId: string | number;
+  versionId?: number;
+  batchId?: string;
 }
 
-const ManageClass: React.FC<Props> = ({ courseId }) => {
+const ManageClass: React.FC<Props> = ({ courseId, versionId, batchId }) => {
 
   const [type, setType] = useState("");
   const [title, setTitle] = useState("");
@@ -40,7 +42,7 @@ const ManageClass: React.FC<Props> = ({ courseId }) => {
 
   const [students, setStudents] = useState<Student[]>([]);
   const [clos, setClos] = useState<CLO[]>([]);
-  const [marks, setMarks] = useState<{ [key: number]: number }>({});
+  const [marks, setMarks] = useState<{ [key: string]: number }>({});
 
   // WEIGHTAGE
   const getWeightage = () => {
@@ -59,21 +61,25 @@ const ManageClass: React.FC<Props> = ({ courseId }) => {
   useEffect(() => {
     if (!courseId) return;
 
-    api.get(`/obe/clos-by-course/?course=${courseId}`)
+    const url = versionId 
+      ? `/obe/courses/${courseId}/versions/${versionId}/clos/`
+      : `/obe/clos-by-course/?course=${courseId}`; // Fallback
+
+    api.get(url)
       .then((res) => setClos(res.data))
       .catch(err => console.error(err));
 
-  }, [courseId]);
+  }, [courseId, versionId]);
 
   // FETCH STUDENTS
   useEffect(() => {
-    if (!courseId) return;
+    if (!batchId) return;
 
-    api.get(`/students/?course=${courseId}`)
+    api.get(`/students/?batch=${batchId}`)
       .then((res) => setStudents(res.data))
       .catch(err => console.error(err));
 
-  }, [courseId]);
+  }, [batchId]);
 
   // CLO SELECT
   const handleCLOChange = (value: number, index: number) => {
@@ -82,8 +88,8 @@ const ManageClass: React.FC<Props> = ({ courseId }) => {
 
     const updated = [...questions];
     updated[index].clo = value;
-    updated[index].description = selected.name;
-    updated[index].level = selected.level;
+    updated[index].description = selected.description;
+    updated[index].level = selected.bloom_level;
 
     setQuestions(updated);
   };
@@ -94,7 +100,7 @@ const ManageClass: React.FC<Props> = ({ courseId }) => {
   };
 
   // MARKS
-  const handleMarksChange = (studentId: number, value: string) => {
+  const handleMarksChange = (studentId: string, value: string) => {
     const num = Number(value);
 
     if (num > Number(totalMarks)) {
@@ -267,7 +273,7 @@ const ManageClass: React.FC<Props> = ({ courseId }) => {
                     <option value="">Select CLO</option>
                     {clos.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.clo_number}
+                        {c.title}
                       </option>
                     ))}
                   </select>

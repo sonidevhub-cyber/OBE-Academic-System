@@ -81,6 +81,12 @@ class BatchListSerializer(serializers.ModelSerializer):
         User = self.context['request'].user.__class__
         # Avoid importing user model directly in serializer for minimal coupling
         from django.contrib.auth import get_user_model
+        from django.db.models import Q
 
         user_model = get_user_model()
-        return user_model.objects.filter(batch=obj, role='student').count()
+        # Count both active students and alumni in this batch, case-insensitive
+        return user_model.objects.filter(
+            batch=obj
+        ).filter(
+            Q(role__iexact='student') | Q(role__iexact='alumni')
+        ).count()

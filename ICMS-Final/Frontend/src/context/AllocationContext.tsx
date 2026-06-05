@@ -74,7 +74,10 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
   const getInstructorAllocations = (instructorId: number) =>
     allocations.filter(
       a =>
-      a.status === 'active' || a.status === 'approved'
+      (Number(a.instructor) === instructorId || Number(a.teacher) === instructorId) &&
+      (a.status === 'active' || a.status === 'approved') &&
+      (a as any).batch_status !== 'graduated' &&
+      a.semester_no === (a as any).batch_current_semester
     );
   const getAllocationsByBatch = (batchId: string) => allocations.filter(a => a.batch === batchId && (a.status === 'approved' || a.status === 'active'));
 

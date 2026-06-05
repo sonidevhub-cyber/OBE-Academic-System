@@ -33,6 +33,7 @@ class CurriculumVersionCourseSerializer(serializers.ModelSerializer):
 
 class CurriculumVersionSerializer(serializers.ModelSerializer):
     batch_name = serializers.ReadOnlyField(source='batch.name')
+    assigned_batches = serializers.SerializerMethodField()
     program_name = serializers.ReadOnlyField(source='program.name')
     program_total_semesters = serializers.ReadOnlyField(source='program.total_semesters')
     created_by_name = serializers.ReadOnlyField(source='created_by.full_name')
@@ -44,11 +45,14 @@ class CurriculumVersionSerializer(serializers.ModelSerializer):
         model = CurriculumVersion
         fields = [
             'id', 'program', 'program_name', 'program_total_semesters', 'batch', 'batch_name', 
-            'version_no', 'status', 'cloned_from', 'cloned_from_version_no',
+            'assigned_batches', 'version_no', 'status', 'cloned_from', 'cloned_from_version_no',
             'created_by', 'created_by_name', 'activated_by', 'activated_at',
             'created_at', 'updated_at', 'is_active', 'total_courses', 'is_editable'
         ]
         read_only_fields = ['version_no', 'status', 'created_by', 'activated_by', 'activated_at']
+
+    def get_assigned_batches(self, obj):
+        return [{"id": b.id, "name": b.name} for b in obj.assigned_batches.all()]
 
     def get_total_courses(self, obj):
         return obj.version_courses.count()
@@ -58,7 +62,7 @@ class CurriculumVersionSerializer(serializers.ModelSerializer):
         if self.context.get('view_type') == 'detail':
             from coordinators.models import TeacherAllocation
             from coordinators.serializers import TeacherAllocationSerializer
-            courses = instance.version_courses.all()
+            courses = instance.version_courses.filter(is_active=True)
             grouped_courses = {}
             for vc in courses:
                 sem_key = f"semester_{vc.semester_no}"

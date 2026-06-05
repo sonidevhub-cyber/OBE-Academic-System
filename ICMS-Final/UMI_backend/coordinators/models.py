@@ -34,7 +34,7 @@ class TeacherAllocation(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ['curriculum_version', 'course', 'batch', 'semester_no']
+        # unique_together = ['curriculum_version', 'course', 'batch', 'semester_no']
         ordering = ['semester_no', 'course__name']
         verbose_name = "Teacher Allocation"
         verbose_name_plural = "Teacher Allocations"

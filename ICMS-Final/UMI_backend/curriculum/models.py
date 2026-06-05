@@ -24,7 +24,7 @@ class CurriculumVersion(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ['program', 'version_no', 'batch']
+        unique_together = ['program', 'version_no']
         ordering = ['-created_at']
         verbose_name = "Curriculum Version"
         verbose_name_plural = "Curriculum Versions"
@@ -34,14 +34,19 @@ class CurriculumVersion(models.Model):
 
     def clean(self):
         if self.pk:
-            old_instance = CurriculumVersion.objects.get(pk=self.pk)
-            if old_instance.status in ['finalized', 'archived'] and self.status == old_instance.status:
-                # Allow status change from finalized to archived, but not editing content
-                raise ValidationError("Finalized/Archived version edit nahi ho sakti")
+            try:
+                old_instance = CurriculumVersion.objects.get(pk=self.pk)
+                if old_instance.status in ['finalized', 'archived'] and self.status == old_instance.status:
+                    # Allow status change from finalized to archived, but not editing content
+                    raise ValidationError("Finalized/Archived version edit nahi ho sakti")
+            except CurriculumVersion.DoesNotExist:
+                pass
 
     def __str__(self):
-        if self.batch:
-            return f"{self.program.name} - {self.batch.name} ({self.version_no})"
+        batches = self.assigned_batches.all()
+        batch_names = ", ".join([b.name for b in batches])
+        if batch_names:
+            return f"{self.program.name} - {batch_names} ({self.version_no})"
         return f"{self.program.name} ({self.version_no})"
 
 class CurriculumVersionCourse(models.Model):

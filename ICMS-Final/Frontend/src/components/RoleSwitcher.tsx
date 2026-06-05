@@ -60,7 +60,6 @@ const RoleSwitcher: React.FC<RoleSwitcherProps> = ({ className = '' }) => {
       'coordinator': React.createElement('span', { className: 'w-4 h-4' }, '👥'),
       'hod': React.createElement('span', { className: 'w-4 h-4' }, '🏢'),
       'admin': React.createElement('span', { className: 'w-4 h-4' }, '⚙️'),
-      'principal': React.createElement('span', { className: 'w-4 h-4' }, '👔')
     };
     return icons[role] || React.createElement('span', { className: 'w-4 h-4' }, '👤');
   };

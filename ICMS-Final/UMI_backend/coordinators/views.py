@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from .models import TeacherAllocation
 from .serializers import TeacherAllocationSerializer, BulkAllocationSerializer
 from .services import allocate_teacher, cancel_allocation
@@ -14,23 +15,30 @@ class IsCoordinator(permissions.BasePermission):
         
         user_role = (getattr(request.user, 'role', '') or '').lower()
         secondary_role = (getattr(request.user, 'secondary_role', '') or '').lower()
+        active_role = (getattr(request.user, 'active_role', '') or '').lower()
         
+        # SAC (Super Admin) and HOD/Coordinator are allowed
         return (
-            user_role in ['coordinator', 'hod'] or 
-            secondary_role in ['coordinator', 'hod']
+            user_role in ['sac', 'coordinator', 'hod'] or 
+            secondary_role in ['coordinator', 'hod'] or
+            active_role in ['coordinator', 'hod']
         )
 
 class TeacherAllocationViewSet(viewsets.ModelViewSet):
     queryset = TeacherAllocation.objects.filter(is_active=True)
     serializer_class = TeacherAllocationSerializer
-    permission_classes = [permissions.IsAuthenticated, IsCoordinator]
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsCoordinator()]
 
     def get_queryset(self):
         user = self.request.user
         queryset = super().get_queryset()
         
-        # Global Rule: Coordinator sirf apne program ka data access kar sakta hai
-        if user.role.lower() == 'coordinator':
+        # Global Rule: Coordinator aur HOD sirf apne programs ka data access kar sakte hain
+        if user.role.lower() in ['coordinator', 'hod']:
             queryset = queryset.filter(curriculum_version__program__in=user.programs.all())
         
         # Filters
@@ -65,6 +73,7 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     curriculum_version=serializer.validated_data['curriculum_version'],
                     course=serializer.validated_data['course'],
                     teacher=serializer.validated_data['teacher'],
+                    batch=serializer.validated_data['batch'],
                     allocated_by=request.user
                 )
                 return api_response(
@@ -103,15 +112,18 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
             
         return api_response(data=data, message="Coordinator profile retrieved successfully")
 
-    @action(detail=False, methods=['post'])
-    def bulk(self, request):
+    @action(detail=False, methods=['post'], url_path='bulk-allocate')
+    def bulk_allocate(self, request):
         serializer = BulkAllocationSerializer(data=request.data)
         if serializer.is_valid():
             version_id = serializer.validated_data['curriculum_version']
+            batch_id = serializer.validated_data['batch']
             allocations_data = serializer.validated_data['allocations']
             
             try:
                 version = CurriculumVersion.objects.get(pk=version_id)
+                from core.models.batch import Batch
+                batch = Batch.objects.get(pk=batch_id)
                 
                 # Auto-sync if version is empty (Option A support)
                 if not version.version_courses.exists():
@@ -135,13 +147,13 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                         try:
                             # Django's .get() handles both UUID objects and UUID strings automatically
                             course = Course.objects.get(pk=course_id)
-                        except (Course.DoesNotExist, ValidationError, ValueError):
+                        except (Course.DoesNotExist, ValueError):
                             raise ValidationError(f"Course with ID {course_id} not found or invalid")
                             
                         try:
                             # teacher_id might be a UUID string or integer string
                             teacher = User.objects.get(pk=teacher_id)
-                        except (User.DoesNotExist, ValidationError, ValueError):
+                        except (User.DoesNotExist, ValueError):
                             raise ValidationError(f"Instructor with ID {teacher_id} not found or invalid")
                         
                         # Double check if course is in version, if not, add it (flexible allocation)
@@ -149,13 +161,16 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                             CurriculumVersionCourse.objects.create(
                                 version=version,
                                 course=course,
-                                semester_no=course.semester.number
+                                semester_no=course.semester.number if hasattr(course, 'semester') else 1
                             )
                         
+                        # Use update_or_create logic or ensure previous ones are handled
+                        # Here we use our updated allocate_teacher which handles existing ones
                         allocation = allocate_teacher(
                             curriculum_version=version,
                             course=course,
                             teacher=teacher,
+                            batch=batch,
                             allocated_by=request.user
                         )
                         created_allocations.append(TeacherAllocationSerializer(allocation).data)
@@ -165,12 +180,16 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     message=f"Successfully allocated {len(created_allocations)} teachers",
                     status_code=status.HTTP_201_CREATED
                 )
+            except CurriculumVersion.DoesNotExist:
+                return api_response(message="Curriculum version not found", status_code=status.HTTP_404_NOT_FOUND)
+            except Batch.DoesNotExist:
+                return api_response(message="Batch not found", status_code=status.HTTP_404_NOT_FOUND)
             except ValidationError as e:
-                return api_response(message=str(e), status_code=status.HTTP_400_BAD_REQUEST)
+                return api_response(message=str(e.detail if hasattr(e, 'detail') else e), status_code=status.HTTP_400_BAD_REQUEST)
             except Exception as e:
                 import traceback
                 print(traceback.format_exc())
-                return api_response(message="An internal error occurred while saving allocations", status_code=status.HTTP_400_BAD_REQUEST)
+                return api_response(message=f"An internal error occurred: {str(e)}", status_code=status.HTTP_400_BAD_REQUEST)
         return api_response(data=serializer.errors, status_code=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])

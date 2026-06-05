@@ -6,51 +6,55 @@ from coordinators.models import TeacherAllocation
 
 def clone_curriculum_for_batch(source_version, target_batch, created_by):
     """
-    transaction.atomic()
-    1. Nayi CurriculumVersion banao:
-       - status = 'draft'
-       - cloned_from = source_version
-       - version_no = same as source (now allowed by unique_together update)
-       - batch = target_batch
-    2. Sab CurriculumVersionCourse copy karo
-    3. clone_allocations_for_version() call karo
-    4. Link batch to this version
-    5. Return naya draft version
+    Lazy Versioning:
+    Cloning initially just links the target_batch to the source_version.
+    No new CurriculumVersion record is created immediately.
     """
     with transaction.atomic():
-        # Use the same version number as master, but linked to this batch
-        new_version_no = source_version.version_no
-        
+        if target_batch:
+            target_batch.curriculum_version = source_version
+            target_batch.save()
+        return source_version
+
+def branch_version_if_needed(version, batch, user):
+    """
+    Helper to create a new draft version if changes are made to a shared or finalized version.
+    Used for Lazy Versioning.
+    """
+    # If it's already a draft and ONLY used by this batch, no need to branch
+    if version.status == 'draft' and version.assigned_batches.count() == 1 and version.assigned_batches.first() == batch:
+        return version
+
+    # Otherwise, create a new draft branch
+    with transaction.atomic():
+        base_version_no = version.version_no.split('.')[0]
+        existing_count = CurriculumVersion.objects.filter(program=version.program, version_no__startswith=base_version_no).count()
+        new_version_no = f"{base_version_no}.{existing_count}"
+
         new_version = CurriculumVersion.objects.create(
-            program=source_version.program,
-            batch=target_batch,
+            program=version.program,
             version_no=new_version_no,
             status='draft',
-            cloned_from=source_version,
-            created_by=created_by
+            cloned_from=version,
+            created_by=user
         )
-        
-        # Link batch to this version immediately
-        target_batch.curriculum_version = new_version
-        target_batch.save()
-        
+
+        # Update this specific batch to point to the new branch
+        batch.curriculum_version = new_version
+        batch.save()
+
         # Copy courses
-        for vc in source_version.version_courses.all():
+        for vc in version.version_courses.all():
             CurriculumVersionCourse.objects.create(
                 version=new_version,
                 course=vc.course,
                 semester_no=vc.semester_no
             )
-            
-        # Clone allocations
-        clone_allocations_for_version(source_version, new_version)
         
-        # Clone CLOs and Mappings (OBE)
+        # Copy OBE data
         from obe.models import CLO, CLOGAMapping, CLOPIMapping
-        source_clos = CLO.objects.filter(curriculum_version=source_version, is_active=True)
-        
+        source_clos = CLO.objects.filter(curriculum_version=version, is_active=True)
         for s_clo in source_clos:
-            # Create new CLO
             new_clo = CLO.objects.create(
                 course=s_clo.course,
                 curriculum_version=new_version,
@@ -61,38 +65,33 @@ def clone_curriculum_for_batch(source_version, target_batch, created_by):
                 kpi_target=s_clo.kpi_target,
                 is_active=True
             )
-            
-            # Copy GA Mappings for this CLO
-            ga_mappings = CLOGAMapping.objects.filter(clo=s_clo, is_active=True)
-            for gm in ga_mappings:
+            # Copy GA mappings
+            for gm in CLOGAMapping.objects.filter(clo=s_clo, is_active=True):
                 CLOGAMapping.objects.create(
                     clo=new_clo,
                     ga=gm.ga,
                     weight=gm.weight,
                     is_active=True
                 )
-                
-            # Copy PI Mappings for this CLO
-            pi_mappings = CLOPIMapping.objects.filter(clo=s_clo, is_active=True)
-            for pm in pi_mappings:
+            # Copy PI mappings
+            for pm in CLOPIMapping.objects.filter(clo=s_clo, is_active=True):
                 CLOPIMapping.objects.create(
                     clo=new_clo,
                     pi=pm.pi,
                     weight=pm.weight,
                     is_active=True
                 )
-        
+
         return new_version
 
 def suggest_curriculum_for_new_batch(batch):
     """
     1. batch.program ki latest finalized version nikalo
     2. Agar milti hai:
-       → clone_curriculum_for_batch()
-       → Coordinator ko flag: "Suggested curriculum ready for review"
+       → Reuse existing version (Standardization)
     3. Agar nahi milti:
        → Empty draft banao
-    4. Return draft version
+    4. Return version
     """
     latest_finalized = CurriculumVersion.objects.filter(
         program=batch.program, 
@@ -100,16 +99,15 @@ def suggest_curriculum_for_new_batch(batch):
     ).first()
     
     if latest_finalized:
-        # We need a user to 'create' this. In a signal, we might not have one.
-        # For now, use the program's created_by or a system user.
-        created_by = batch.program.created_by
-        return clone_curriculum_for_batch(latest_finalized, batch, created_by)
+        # Link batch to existing finalized version instead of cloning immediately
+        batch.curriculum_version = latest_finalized
+        batch.save()
+        return latest_finalized
     else:
-        # Create empty draft
+        # Create empty draft if no finalized version exists
         existing_count = CurriculumVersion.objects.filter(program=batch.program).count()
         version = CurriculumVersion.objects.create(
             program=batch.program,
-            batch=batch,
             version_no=f"v{existing_count + 1}.0",
             status='draft',
             created_by=batch.program.created_by
@@ -154,8 +152,8 @@ def activate_curriculum_version(version, activated_by):
         version.activated_at = timezone.now()
         version.save()
         
-        # Create offerings (Module 3)
-        create_offerings_from_version(version)
+        # Create offerings (Module 3) - Disabled as per user request to separate allocation from versioning
+        # create_offerings_from_version(version)
         
         return version
 
@@ -189,32 +187,51 @@ def create_offerings_from_version(version):
     from obe.models import CourseSession
     offerings = []
     
-    with transaction.atomic():
-        for vc in version.version_courses.all():
-            allocation = TeacherAllocation.objects.filter(
-                curriculum_version=version, 
-                course=vc.course, 
-                status='active'
-            ).first()
-            
-            # Find the core.Semester object for the course's semester_no in this batch's program
-            from core.models import Semester as CoreSemester
-            semester_obj = CoreSemester.objects.filter(
-                program=version.program,
-                number=vc.semester_no
-            ).first()
+    # Get all batches assigned to this version
+    # Since Batch model has curriculum_version as FK with related_name 'assigned_batches'
+    batches = version.assigned_batches.all()
+    
+    # If no batches linked via assigned_batches, try the single 'batch' FK on version
+    if not batches.exists() and version.batch:
+        import django.db.models.query
+        if isinstance(batches, django.db.models.query.QuerySet):
+             from core.models.batch import Batch
+             batches = Batch.objects.filter(id=version.batch.id)
+        else:
+             batches = [version.batch]
 
-            # Use CourseSession since it exists in obe app
-            session, created = CourseSession.objects.update_or_create(
-                course=vc.course,
-                batch=version.batch,
-                semester=semester_obj,
-                defaults={
-                    'instructor': allocation.teacher if allocation else None,
-                    'is_active': True
-                }
-            )
-            offerings.append(session)
+    if not batches:
+        return []
+
+    with transaction.atomic():
+        for batch in batches:
+            for vc in version.version_courses.all():
+                # Check for allocation specific to THIS batch
+                allocation = TeacherAllocation.objects.filter(
+                    curriculum_version=version, 
+                    course=vc.course,
+                    batch=batch,
+                    status='active'
+                ).first()
+                
+                # Find the core.Semester object for the course's semester_no in this batch's program
+                from core.models import Semester as CoreSemester
+                semester_obj = CoreSemester.objects.filter(
+                    program=version.program,
+                    number=vc.semester_no
+                ).first()
+
+                # Use CourseSession since it exists in obe app
+                session, created = CourseSession.objects.update_or_create(
+                    course=vc.course,
+                    batch=batch,
+                    semester=semester_obj,
+                    defaults={
+                        'instructor': allocation.teacher if allocation else None,
+                        'is_active': True
+                    }
+                )
+                offerings.append(session)
             
     return offerings
 
@@ -230,10 +247,16 @@ def clone_allocations_for_version(source_version, new_version):
         )
         
         for alloc in allocations:
+            # Use new_version.batch if set, otherwise fallback to original allocation's batch
+            target_batch = new_version.batch or alloc.batch
+            
+            if not target_batch:
+                continue # Skip if no batch can be determined
+
             TeacherAllocation.objects.create(
                 curriculum_version=new_version,
                 course=alloc.course,
-                batch=new_version.batch,
+                batch=target_batch,
                 semester_no=alloc.semester_no,
                 teacher=alloc.teacher,
                 allocated_by=new_version.created_by,

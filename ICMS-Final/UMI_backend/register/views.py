@@ -29,10 +29,16 @@ def _build_login_response_for_user(user):
     if user.secondary_role and user.secondary_role != 'none':
         roles.append(user.secondary_role)
     
-    # Faculty are also instructors
+    # Faculty are also instructors IF they have active allocations
     if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
         if 'instructor' not in roles:
-            roles.append('instructor')
+            from coordinators.models import TeacherAllocation
+            if TeacherAllocation.objects.filter(teacher=user, is_active=True).exists():
+                roles.append('instructor')
+
+    # Ensure current_role is still valid
+    if current_role not in roles:
+        current_role = user.role
 
     payload = {
         "id": str(user.id),
@@ -280,9 +286,12 @@ def available_roles(request):
             "is_primary": False
         })
     
-    # Faculty are also instructors
+    # Faculty are also instructors IF they have allocations
     if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
-        if not any(r['role'] == 'instructor' for r in roles):
+        from coordinators.models import TeacherAllocation
+        has_allocations = TeacherAllocation.objects.filter(teacher=user, is_active=True).exists()
+        
+        if has_allocations and not any(r['role'] == 'instructor' for r in roles):
             roles.append({
                 "role": 'instructor',
                 "name": 'Instructor',
@@ -313,8 +322,10 @@ def switch_active_role(request):
         allowed_roles.append(user.secondary_role)
     
     if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
-        if 'instructor' not in allowed_roles:
-            allowed_roles.append('instructor')
+        from coordinators.models import TeacherAllocation
+        if TeacherAllocation.objects.filter(teacher=user, is_active=True).exists():
+            if 'instructor' not in allowed_roles:
+                allowed_roles.append('instructor')
             
     if target_role not in allowed_roles:
         return Response({"error": "Role not allowed"}, status=status.HTTP_400_BAD_REQUEST)

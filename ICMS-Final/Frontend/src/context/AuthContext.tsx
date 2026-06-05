@@ -7,7 +7,7 @@ import authService from "../api/authService";
 // Define types
 interface User {
   id: number;
-  role: "student" | "staff" | "admin" | "principal" | "director" | "instructor" | "hod" | "coordinator" | "super_admin" | "SAC";
+  role: "student" | "staff" | "admin" | "director" | "instructor" | "hod" | "coordinator" | "super_admin" | "SAC";
   rbac_role?: string;
   permissions?: string[];
   roles?: string[]; // Multi-role support
@@ -168,7 +168,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else if (activeRole === "instructor") {
         console.log('Navigating to instructor dashboard');
         navigate("/teacher");
-      } else if (authData.user.role === "admin" || authData.user.role === "principal" || authData.user.role === "director" || authData.user.role === "super_admin" || authData.user.is_superuser || authData.user.role === "SAC") {
+      } else if (authData.user.role === "admin" || authData.user.role === "director" || authData.user.role === "super_admin" || authData.user.is_superuser || authData.user.role === "SAC") {
         navigate("/admin");
       } else if (authData.user.role === "staff") {
         navigate("/staff");

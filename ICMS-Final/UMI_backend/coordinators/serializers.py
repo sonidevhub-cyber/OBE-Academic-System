@@ -6,6 +6,8 @@ class TeacherAllocationSerializer(serializers.ModelSerializer):
     course_code = serializers.ReadOnlyField(source='course.code')
     teacher_name = serializers.ReadOnlyField(source='teacher.full_name')
     batch_name = serializers.ReadOnlyField(source='batch.name')
+    batch_status = serializers.ReadOnlyField(source='batch.status')
+    batch_current_semester = serializers.ReadOnlyField(source='batch.current_semester')
     allocated_by_name = serializers.ReadOnlyField(source='allocated_by.full_name')
     version_no = serializers.ReadOnlyField(source='curriculum_version.version_no')
 
@@ -13,7 +15,7 @@ class TeacherAllocationSerializer(serializers.ModelSerializer):
         model = TeacherAllocation
         fields = [
             'id', 'curriculum_version', 'course', 'course_name', 'course_code',
-            'batch', 'batch_name', 'semester_no', 'teacher', 'teacher_name',
+            'batch', 'batch_name', 'batch_status', 'batch_current_semester', 'semester_no', 'teacher', 'teacher_name',
             'allocated_by', 'allocated_by_name', 'allocated_at', 'status',
             'change_reason', 'cloned_from', 'version_no'
         ]
@@ -21,6 +23,7 @@ class TeacherAllocationSerializer(serializers.ModelSerializer):
 
 class BulkAllocationSerializer(serializers.Serializer):
     curriculum_version = serializers.IntegerField()
+    batch = serializers.UUIDField()
     allocations = serializers.ListField(
         child=serializers.DictField()
     )

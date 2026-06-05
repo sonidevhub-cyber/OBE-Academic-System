@@ -11,6 +11,7 @@ import {
   LogOut,
   LayoutGrid
 } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
@@ -104,8 +105,10 @@ const ModularCoordinatorDashboard: React.FC = () => {
         if (selectedVersionId) {
           return (
             <CurriculumVersionDetailPage 
+              key={`version-${selectedVersionId}`}
               id={selectedVersionId} 
               onClose={() => setSelectedVersionId(null)} 
+              onVersionCreated={(id: number) => setSelectedVersionId(String(id))}
             />
           );
         }
@@ -130,6 +133,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
 
   return (
     <div className="flex min-h-screen w-full bg-[#F0FDF4]">
+      <Toaster position="top-right" reverseOrder={false} />
       {/* Sidebar */}
       <div className="w-72 bg-gradient-to-b from-green-700 via-emerald-800 to-teal-900 text-white p-4 space-y-2 min-h-screen shadow-xl">
         <div className="mb-8 text-center">

@@ -284,7 +284,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
       {/* Header */}
       <div className="flex justify-between items-end border-b pb-4 border-gray-100">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Academic Structure</h1>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Program Setup</h1>
           <p className="text-gray-500 mt-1">Manage programs, semesters, courses, and batches.</p>
         </div>
         {!showProgramForm && (
@@ -484,11 +484,13 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
                           >
                             <option value="">Do Not Use Master Curriculum</option>
-                            {masterCurricula.map(cv => (
-                              <option key={cv.id} value={cv.id}>
-                                {cv.version_no}
-                              </option>
-                            ))}
+                            {masterCurricula
+                              .filter(cv => cv.status === 'finalized')
+                              .map(cv => (
+                                <option key={cv.id} value={cv.id}>
+                                  {cv.version_no}
+                                </option>
+                              ))}
                           </select>
                         </div>
                         <div className="md:col-span-3 flex justify-end gap-2 pt-2">

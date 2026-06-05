@@ -68,17 +68,17 @@ export interface CourseDetails {
 export const instructorCourseService = {
   // Get all active courses for instructor
   getMyCourses: () => {
-    return api.get('/instructors/courses/');
+    return api.get('/instructors/my-courses/');
   },
 
-  // Get courses summary
+  // Get courses summary (mapped to the new endpoint for now to avoid 404)
   getCoursesSummary: () => {
-    return api.get('/instructors/courses/my_courses_summary/');
+    return api.get('/instructors/my-courses/');
   },
 
   // Get detailed information about a specific course
   getCourseDetails: (courseId: number) => {
-    return api.get(`/instructors/courses/course_details/?course_id=${courseId}`);
+    return api.get(`/instructors/my-courses/?course_id=${courseId}`);
   },
 
   // Get course allocations (including pending ones)

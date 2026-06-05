@@ -85,39 +85,62 @@ const CourseAllocationBulkModule: React.FC = () => {
       const loadCourses = async () => {
         try {
           setLoading(true);
+          console.log('Loading courses for batch:', selectedBatch.name, 'ID:', selectedBatch.id, 'Semester:', selectedBatch.current_semester);
           
-          // Load curriculum version for this batch
+          // 1. Load curriculum version for this batch
           const versionRes = await coordinatorService.getCurriculumVersions({ batch: selectedBatch.id });
           const versions = versionRes.data?.data || versionRes.data || [];
           const version = versions.length > 0 ? versions[0] : null;
-          setCurrentVersion(version);
+          
+          console.log('Found version for batch:', version);
 
-          const res = await coordinatorService.getCoursesByBatch(selectedProgram, selectedBatch.current_semester);
-          const courseList = res.data?.data || res.data || [];
-          setCourses(Array.isArray(courseList) ? courseList : []);
-          
-          // Try to load existing allocations for this version
-          let existingAllocations: any[] = [];
-          if (version) {
-            try {
-              const existingAllocationsRes = await coordinatorService.getCourseAllocations({ version: version.id });
-              existingAllocations = existingAllocationsRes.data?.data || existingAllocationsRes.data || [];
-            } catch (err) {
-              console.warn('Could not load existing allocations:', err);
-            }
+          if (!version) {
+            setCourses([]);
+            setCurrentVersion(null);
+            toast.error('No curriculum version linked to this batch.');
+            return;
           }
+
+          // 2. Fetch full version details to get courses_by_semester
+          const detailRes = await coordinatorService.getVersion(version.id);
+          const detailData = detailRes.data?.data || detailRes.data;
+          setCurrentVersion(detailData);
+          console.log('Version details:', detailData);
+
+          // 3. Extract courses for the batch's current semester
+          const semNum = selectedBatch.current_semester || 1;
+          const semesterKey = `semester_${semNum}`;
+          const courseList = detailData.courses_by_semester?.[semesterKey] || [];
+          console.log(`Courses for ${semesterKey}:`, courseList);
           
+          if (courseList.length === 0) {
+            console.warn('No courses found in curriculum for this semester key. Available keys:', Object.keys(detailData.courses_by_semester || {}));
+          }
+
+          // Transform courseList
+          const transformedCourses = courseList.map((vc: any) => ({
+            id: vc.course,
+            code: vc.course_code,
+            name: vc.course_name,
+            course_type: vc.course_type || 'lecture',
+            credit_hours: vc.credit_hours,
+            allocation: vc.allocation
+          }));
+          
+          setCourses(transformedCourses);
+          
+          // 4. Initialize allocations
           const initialAllocations: Record<string, string> = {};
-          courseList.forEach((course: any) => {
-            const existing = existingAllocations.find((a: any) => a.course === course.id);
-            if (existing) {
-              initialAllocations[course.id] = String(existing.teacher);
+          transformedCourses.forEach((course: any) => {
+            if (course.allocation?.teacher) {
+              initialAllocations[course.id] = String(course.allocation.teacher);
             }
           });
           setAllocations(initialAllocations);
+
         } catch (err) {
-          console.error('Error loading courses:', err);
-          toast.error('Failed to load courses');
+          console.error('Error loading courses for allocation:', err);
+          toast.error('Failed to load courses for this batch.');
         } finally {
           setLoading(false);
         }
@@ -126,7 +149,7 @@ const CourseAllocationBulkModule: React.FC = () => {
     } else {
       setCourses([]);
     }
-  }, [selectedBatch, selectedProgram]);
+  }, [selectedBatch]);
 
   const handleInstructorChange = (courseId: string, instructorId: string) => {
     setAllocations(prev => ({
@@ -177,6 +200,7 @@ const CourseAllocationBulkModule: React.FC = () => {
 
       await coordinatorService.bulkAllocate({
         curriculum_version: versionId,
+        batch: selectedBatch.id,
         allocations: allocationList
       });
       toast.success('Allocated successfully');
