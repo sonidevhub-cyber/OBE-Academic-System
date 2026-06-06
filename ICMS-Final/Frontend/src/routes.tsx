@@ -19,6 +19,12 @@ import PendingTransfers from './views/pages/PendingTransfers';
 import Users from './pages/sac/Users';
 import TeacherManagement from './views/pages/TeacherManagement';
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
+import GAReport from './pages/GAReport';
+import PEOReport from './pages/PEOReport';
+import StudentOBEList from './pages/StudentOBEList';
+import StudentOBEReport from './pages/StudentOBEReport';
+import AlumniDashboard from './pages/alumni/AlumniDashboard';
+import AlumniSurvey from './pages/alumni/AlumniSurvey';
 // import CourseDetails from 'views/pages/CourseDetails';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
@@ -56,6 +62,8 @@ const getRedirectPath = () => {
       return '/hod';
     case 'admin':
       return '/admin';
+    case 'alumni':
+      return '/alumni';
     default:
       return '/dashboard';
   }
@@ -87,7 +95,13 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />
         <Route path="/student-dashboard" element={<Navigate to="/student" />} />
+      </Route>
 
+      {/* Alumni Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['alumni']} />}>
+        <Route path="/alumni" element={<AlumniDashboard />} />
+        <Route path="/alumni-dashboard" element={<Navigate to="/alumni" />} />
+        <Route path="/alumni/survey" element={<AlumniSurvey />} />
       </Route>
       
       {/* Student Profile Route - accessible by multiple roles */}
@@ -118,6 +132,10 @@ const getRedirectPath = () => {
         <Route path="/sac/programs/:programId/batches/:batchId/promotion" element={<ManagePromotion />} />
         <Route path="/sac/users" element={<Users />} />
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
+        <Route path="/reports/ga-attainment" element={<GAReport />} />
+        <Route path="/reports/peo-attainment" element={<PEOReport />} />
+        <Route path="/reports/student-obe" element={<StudentOBEList />} />
+        <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
       </Route>
 
        <Route element={<ProtectedRoute allowedRoles={['admin']} />}> 

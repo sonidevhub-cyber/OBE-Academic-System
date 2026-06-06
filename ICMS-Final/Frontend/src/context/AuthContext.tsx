@@ -7,7 +7,7 @@ import authService from "../api/authService";
 // Define types
 interface User {
   id: number;
-  role: "student" | "staff" | "admin" | "director" | "instructor" | "hod" | "coordinator" | "super_admin" | "SAC";
+  role: "student" | "staff" | "admin" | "director" | "instructor" | "hod" | "coordinator" | "super_admin" | "SAC" | "alumni";
   rbac_role?: string;
   permissions?: string[];
   roles?: string[]; // Multi-role support
@@ -174,6 +174,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         navigate("/staff");
       } else if (authData.user.role === "student") {
         navigate("/student");
+      } else if (authData.user.role === "alumni") {
+        navigate("/alumni");
       } else {
         console.log('Navigating to default dashboard');
         navigate("/dashboard");
@@ -243,6 +245,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         navigate("/staff");
       } else if (newRole === "student") {
         navigate("/student");
+      } else if (newRole === "alumni") {
+        navigate("/alumni");
       } else {
         navigate("/dashboard");
       }

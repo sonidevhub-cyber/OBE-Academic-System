@@ -9,7 +9,9 @@ import {
   Settings,
   CheckCircle,
   LogOut,
-  LayoutGrid
+  LayoutGrid,
+  FileBarChart,
+  Award
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
@@ -23,8 +25,11 @@ import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationB
 import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
+import GAReport from '../../pages/GAReport';
+import PEOReport from '../../pages/PEOReport';
+import StudentOBEList from '../../pages/StudentOBEList';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'ga-report' | 'peo-report' | 'student-obe';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -65,6 +70,9 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
     { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
+    { id: 'ga-report', label: 'GA Report', icon: FileBarChart },
+    { id: 'peo-report', label: 'PEO Report', icon: Award },
+    { id: 'student-obe', label: 'Student OBE', icon: Users },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
   ];
@@ -122,6 +130,12 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <CourseAllocationBulkModule />;
       case 'obe-mapping':
         return <CoordinatorOBEMappingModule />;
+      case 'ga-report':
+        return <GAReport />;
+      case 'peo-report':
+        return <PEOReport />;
+      case 'student-obe':
+        return <StudentOBEList />;
       case 'instructors':
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
