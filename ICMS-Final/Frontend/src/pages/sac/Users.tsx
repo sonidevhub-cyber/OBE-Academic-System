@@ -462,7 +462,7 @@ const Users: React.FC = () => {
                                         </div>
                                     )}
 
-                                    {(formData.role === 'coordinator' || formData.secondary_role === 'coordinator') && (
+                                    {(formData.role === 'hod' || formData.role === 'coordinator' || formData.secondary_role === 'hod' || formData.secondary_role === 'coordinator') && (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Programs Assignment</label>
                                             <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white">

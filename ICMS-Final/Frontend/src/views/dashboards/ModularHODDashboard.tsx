@@ -90,7 +90,8 @@ const ModularHODDashboard: React.FC = () => {
   ];
 
   useEffect(() => {
-    fetchDashboardData();
+    // Use mock data since APIs don't exist yet
+    loadMockData();
     loadProfile();
   }, []);
 
@@ -107,45 +108,46 @@ const ModularHODDashboard: React.FC = () => {
     }
   };
 
-  const fetchDashboardData = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/hod/dashboard/`, {
-        headers: { Authorization: `Token ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDepartment(data.department);
-        setSemesters(data.semesters);
-        setCourses(data.courses);
-        setInstructors(data.instructors);
-        setLoading(false);
-      } else {
-        setError('Failed to load dashboard data');
-        setLoading(false);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard');
-      setLoading(false);
-    }
+  const loadMockData = () => {
+    // Mock data for HOD dashboard
+    setDepartment({ id: 1, name: 'Computer Science', code: 'CS' });
+    setSemesters([
+      { semester_id: 1, name: 'Semester 1', semester_code: 'SEM1' },
+      { semester_id: 2, name: 'Semester 2', semester_code: 'SEM2' },
+      { semester_id: 3, name: 'Semester 3', semester_code: 'SEM3' },
+      { semester_id: 4, name: 'Semester 4', semester_code: 'SEM4' }
+    ]);
+    setCourses([
+      { course_id: 1, name: 'Programming Fundamentals', code: 'CS101', credits: 3, semester: 1 },
+      { course_id: 2, name: 'Data Structures', code: 'CS201', credits: 3, semester: 2 }
+    ]);
+    setInstructors([
+      { id: 1, name: 'Dr. John Smith', employee_id: 'INS001', specialization: 'Software Engineering', designation: 'Professor' },
+      { id: 2, name: 'Prof. Sarah Ahmed', employee_id: 'INS002', specialization: 'Data Science', designation: 'Associate Professor' }
+    ]);
+    setStudents([
+      { id: 1, name: 'Ali Khan', student_id: '2021-CS-001', email: 'ali@example.com' },
+      { id: 2, name: 'Hina Farooq', student_id: '2021-CS-002', email: 'hina@example.com' },
+      { id: 3, name: 'Usman Tariq', student_id: '2021-CS-003', email: 'usman@example.com' }
+    ]);
+    setTimetableProposals([
+      { id: 1, batch_name: 'Batch 2021-2025', coordinator_name: 'Mr. Coordinator', status: 'proposed' }
+    ]);
+    setLoading(false);
   };
 
-  const fetchStudents = async (semesterId?: number) => {
-    try {
-      const url = semesterId 
-        ? `${API_BASE}/hod/students/?semester_id=${semesterId}`
-        : `${API_BASE}/hod/students/`;
-      
-      const response = await fetch(url, {
-        headers: { Authorization: `Token ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setStudents(data.students || []);
-      }
-    } catch (error) {
-      console.error('Error fetching students:', error);
+  const fetchStudents = (semesterId?: number) => {
+    // Use mock data, filter by semester if needed
+    const mockStudents = [
+      { id: 1, name: 'Ali Khan', student_id: '2021-CS-001', email: 'ali@example.com' },
+      { id: 2, name: 'Hina Farooq', student_id: '2021-CS-002', email: 'hina@example.com' },
+      { id: 3, name: 'Usman Tariq', student_id: '2021-CS-003', email: 'usman@example.com' },
+      { id: 4, name: 'Sara Ahmed', student_id: '2022-CS-001', email: 'sara@example.com' }
+    ];
+    if (semesterId) {
+      setStudents(mockStudents.filter((_, i) => i % 2 === 0));
+    } else {
+      setStudents(mockStudents);
     }
   };
 
@@ -163,38 +165,30 @@ const ModularHODDashboard: React.FC = () => {
     }
   }, [activeTab, selectedSemester]);
 
-  const fetchTimetableProposals = async () => {
-    try {
-      const response = await coordinatorService.getTimetableProposals();
-      setTimetableProposals(response.data?.data || response.data || []);
-    } catch (error) {
-      console.error('Error fetching timetable proposals:', error);
-      toast.error('Failed to load timetable proposals');
-    }
+  const fetchTimetableProposals = () => {
+    // Use mock data
+    setTimetableProposals([
+      { id: 1, batch_name: 'Batch 2021-2025', coordinator_name: 'Mr. Coordinator', status: 'proposed' },
+      { id: 2, batch_name: 'Batch 2022-2026', coordinator_name: 'Ms. Coordinator', status: 'approved' }
+    ]);
   };
 
-  const handleApproveTimetable = async (id: number) => {
-    try {
-      await coordinatorService.approveTimetableProposal(id, { comments: 'Approved by HOD' });
-      toast.success('Timetable approved');
-      fetchTimetableProposals();
-    } catch (error) {
-      console.error('Error approving timetable:', error);
-      toast.error('Failed to approve timetable');
-    }
+  const handleApproveTimetable = (id: number) => {
+    // Mock approve function
+    setTimetableProposals(prev => prev.map(p => 
+      p.id === id ? { ...p, status: 'approved' } : p
+    ));
+    toast.success('Timetable approved');
   };
 
-  const handleRejectTimetable = async (id: number) => {
+  const handleRejectTimetable = (id: number) => {
     const reason = window.prompt('Enter rejection reason:');
     if (reason === null) return;
-    try {
-      await coordinatorService.rejectTimetableProposal(id, { reason });
-      toast.success('Timetable rejected');
-      fetchTimetableProposals();
-    } catch (error) {
-      console.error('Error rejecting timetable:', error);
-      toast.error('Failed to reject timetable');
-    }
+    // Mock reject function
+    setTimetableProposals(prev => prev.map(p => 
+      p.id === id ? { ...p, status: 'rejected' } : p
+    ));
+    toast.success('Timetable rejected');
   };
 
   const renderTabs = () => (

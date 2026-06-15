@@ -10,6 +10,7 @@ import StudentDashboard from './roles/student/StudentDashboard';
 import StudentProfile from './components/ui/EnhancedStudentProfile';
 import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
 import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
+import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
 import SacProgramSetup from './views/pages/SacProgramSetup';
 import MasterCurriculumManagement from './views/pages/MasterCurriculumManagement';
 import MasterCurriculumDetailPage from './views/pages/MasterCurriculumDetailPage';
@@ -122,7 +123,11 @@ const getRedirectPath = () => {
         <Route path="/curriculum-versions/:id" element={<CurriculumVersionDetailPage />} />
       </Route>
 
-      <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'coordinator']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['hod']} />}>
+        <Route path="/hod" element={<ModularHODDashboard />} />
+      </Route>
+
+      <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'coordinator', 'hod']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin-dashboard" element={<Navigate to="/admin" />} />
         <Route path="/sac/programs" element={<SacProgramSetup />} />
