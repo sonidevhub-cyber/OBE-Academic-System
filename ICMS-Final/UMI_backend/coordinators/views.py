@@ -6,6 +6,7 @@ from .services import allocate_teacher, cancel_allocation
 from curriculum.models import CurriculumVersion
 from core.responses import api_response
 from django.db import transaction
+from django.core.exceptions import ValidationError
 
 class IsCoordinator(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -65,7 +66,10 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     curriculum_version=serializer.validated_data['curriculum_version'],
                     course=serializer.validated_data['course'],
                     teacher=serializer.validated_data['teacher'],
-                    allocated_by=request.user
+                    allocated_by=request.user,
+                    batch=serializer.validated_data['batch'],
+                    semester_no=serializer.validated_data['semester_no']
+
                 )
                 return api_response(
                     data=TeacherAllocationSerializer(allocation).data,
@@ -156,7 +160,9 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                             curriculum_version=version,
                             course=course,
                             teacher=teacher,
-                            allocated_by=request.user
+                            allocated_by=request.user,
+                            # batch=version.batch,
+                            # semester_no=course.semester.number
                         )
                         created_allocations.append(TeacherAllocationSerializer(allocation).data)
                 

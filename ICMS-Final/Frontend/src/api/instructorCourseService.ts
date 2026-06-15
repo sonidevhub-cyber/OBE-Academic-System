@@ -65,24 +65,19 @@ export interface CourseDetails {
   hod_comments: string;
 }
 
+
 export const instructorCourseService = {
-  // Get all active courses for instructor
+
   getMyCourses: () => {
     return api.get('/instructors/courses/');
   },
 
-  // Get courses summary
   getCoursesSummary: () => {
-    return api.get('/instructors/courses/my_courses_summary/');
+    return api.get('/instructors/courses_summary/');
   },
 
-  // Get detailed information about a specific course
   getCourseDetails: (courseId: number) => {
-    return api.get(`/instructors/courses/course_details/?course_id=${courseId}`);
+    return api.get(`/instructors/course_details/?course_id=${courseId}`);
   },
 
-  // Get course allocations (including pending ones)
-  getAllAllocations: () => {
-    return api.get('/coordinators/');
-  }
 };

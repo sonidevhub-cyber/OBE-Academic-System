@@ -24,6 +24,13 @@ class Course(models.Model):
             ('lab', 'Lab'),
         ],
     )
+    parent_course = models.ForeignKey(
+    'self',
+    null=True,
+    blank=True,
+    on_delete=models.SET_NULL,
+    related_name='lab_children'
+)
     credit_hours = models.IntegerField(default=3)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

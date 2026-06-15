@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -22,16 +23,74 @@ import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationB
 import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
+import { api } from '../../api/api';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs'| 'clo-reports';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [coordinatorProfile, setCoordinatorProfile] = useState<any>(null);
-
+  const [selectedCourse, setSelectedCourse] = useState<any>(null);
+ const [selectedBatch, setSelectedBatch] = useState<any>(null);
+const [batches, setBatches] = useState<any[]>([]);
+const [semesters, setSemesters] = useState<any[]>([]);
+const [selectedSemester, setSelectedSemester] = useState<any>(null);
+  const [courses, setCourses] = useState<any[]>([]);
   useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const [courseRes, batchRes] = await Promise.all([
+        api.get("courses/"),
+        api.get("batches/all/"),
+        
+      ]);
+
+      // ✅ SAFE HANDLING
+      setCourses(
+        Array.isArray(courseRes.data)
+          ? courseRes.data
+          : courseRes.data.results || []
+      );
+
+      setBatches(
+        Array.isArray(batchRes.data)
+          ? batchRes.data
+          : batchRes.data.results || []
+      );
+
+      
+
+      // 🔍 DEBUG (optional but useful)
+      console.log("Courses:", courseRes.data);
+      console.log("Batches:", batchRes.data);
+      
+
+    } catch (err) {
+      console.error("Dropdown error:", err);
+    }
+  };
+
+  fetchData();
+}, []);
+//   useEffect(() => {
+//   const fetchData = async () => {
+//     try {
+//       const courseRes = await api.get("courses/");
+
+//       setCourses(courseRes.data.results || courseRes.data || []);
+
+//       console.log("Courses:", courseRes.data);
+
+//     } catch (err: any) {
+//       console.error("Dropdown error:", err.response?.data || err);
+//     }
+//   };
+
+//   fetchData();
+// }, []);
+ useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'coordinator');
 
@@ -66,6 +125,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
+    { id: 'clo-reports', label: 'Clo-Reports', icon: CheckCircle },
   ];
 
   const renderContent = () => {
@@ -123,7 +183,101 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
         return <SacProgramSetup onManagePromotion={() => {}} />; // Coordinator might not manage promotion but can see setup
-      default:
+    case 'clo-reports':
+  return (
+    <>
+      {/* 🔽 FILTER UI */}
+      <div className="p-6 bg-white rounded-xl shadow mb-4">
+        <h2 className="font-bold mb-3">Select Filters</h2>
+
+        <div className="flex gap-4 flex-wrap">
+
+          {/* ✅ COURSE */}
+          <select
+            className="border p-2 rounded"
+            onChange={(e) => setSelectedCourse({ id: e.target.value })}
+          >
+            <option value="">Select Course</option>
+            {courses.map((c: any) => (
+              <option key={c.id} value={c.id}>
+                {c.name || c.code}
+              </option>
+            ))}
+          </select>
+
+          {/* ✅ BATCH */}
+          <select
+            className="border p-2 rounded"
+            onChange={(e) => {
+              const batch = batches.find(b => b.id === e.target.value);
+              setSelectedBatch(batch);
+
+              // 🔥 AUTO SET SEMESTER
+              if (batch) {
+                setSelectedSemester({
+                  id: batch.current_semester,
+                  name: `Semester ${batch.current_semester}`
+                });
+              }
+            }}
+          >
+            <option value="">Select Batch</option>
+            {batches.map((b: any) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+
+          {/* ✅ SEMESTER (AUTO + MANUAL BOTH) */}
+          <select
+            className="border p-2 rounded"
+            value={selectedSemester?.id || ''}
+            onChange={(e) =>
+              setSelectedSemester({
+                id: e.target.value,
+                name: `Semester ${e.target.value}`
+              })
+            }
+          >
+            <option value="">Select Semester</option>
+
+            {selectedBatch &&
+              Array.from(
+                { length: selectedBatch.current_semester },
+                (_, i) => i + 1
+              ).map((sem) => (
+                <option key={sem} value={sem}>
+                  Semester {sem}
+                </option>
+              ))}
+          </select>
+
+        </div>
+
+        {/* ✅ SHOW CURRENT SEM */}
+        {selectedBatch && (
+          <p className="text-sm text-gray-600 mt-2">
+            Current Semester: Semester {selectedBatch.current_semester}
+          </p>
+        )}
+      </div>
+
+      {/* 🔒 CONDITION */}
+      {!selectedCourse?.id || !selectedBatch?.id || !selectedSemester?.id ? (
+        <div className="p-6 text-center text-gray-500">
+          Please select Course, Batch and Semester
+        </div>
+      ) : (
+        <CoordinatorCQIReport
+          courseId={selectedCourse.id}
+          batchId={selectedBatch.id}
+          semesterId={String(selectedSemester.id)} // ✅ FINAL FIX
+        />
+      )}
+    </>
+  );
+        default:
         return null;
     }
   };

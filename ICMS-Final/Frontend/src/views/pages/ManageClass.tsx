@@ -1,361 +1,451 @@
 import React, { useState, useEffect } from "react";
 import { api } from "../../api/api";
 import { motion } from "framer-motion";
-import { FaBook, FaTasks, FaUsers } from "react-icons/fa";
+import { FaTasks, FaUsers } from "react-icons/fa";
+import { toast } from "react-toastify";
+// import PresentationRubrics from "./PresentationRubrics";
+import CQI from "./CQI";
 
-// TYPES
+const TaskIcon = FaTasks as unknown as React.FC<any>;
+const UserIcon = FaUsers as unknown as React.FC<any>;
+
 type Student = {
-  student_id: number;
+  student_id: string;
   name: string;
 };
 
 type CLO = {
-  id: number;
-  clo_number: string;
-  name: string;
-  level: string;
+  id: string;
+  order_number: number;
+  description: string;
+  bloom_level: string;
+  kpi_target: number;
 };
 
 type Question = {
-  clo: number | "";
+  clo: string;
   description: string;
   level: string;
+  kpi: number;
+  marks: number;
 };
 
-// PROPS
 interface Props {
-  courseId: number;
+  courseId: string;
+  batchId: string;
+  semesterId: string;
 }
 
-const ManageClass: React.FC<Props> = ({ courseId }) => {
+const ManageClass: React.FC<Props> = ({ courseId, batchId, semesterId }) => {
 
   const [type, setType] = useState("");
   const [title, setTitle] = useState("");
   const [totalMarks, setTotalMarks] = useState("");
   const [date, setDate] = useState("");
-
+  const [weakClos, setWeakClos] = useState<any[]>([]);
+  const [showCQI, setShowCQI] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([
-    { clo: "", description: "", level: "" }
+    { clo: "", description: "", level: "", kpi: 0, marks: 0 }
   ]);
 
   const [students, setStudents] = useState<Student[]>([]);
   const [clos, setClos] = useState<CLO[]>([]);
-  const [marks, setMarks] = useState<{ [key: number]: number }>({});
-
-  // WEIGHTAGE
-  const getWeightage = () => {
-    switch (type) {
-      case "quiz": return 5;
-      case "assignment": return 5;
-      case "presentation": return 5;
-      case "midterm": return 25;
-      case "final": return 50;
-      case "lab": return 10;
-      default: return 0;
-    }
+  const [marks, setMarks] = useState<{ [key: string]: number }>({});
+  const [checkedCQI, setCheckedCQI] = useState(false);
+  // ================= TYPE RESET =================
+  const handleTypeChange = (value: string) => {
+    setType(value);
+    setQuestions([{ clo: "", description: "", level: "", kpi: 0, marks: 0 }]);
+    setMarks({});
   };
 
-  // FETCH CLOs
+  // ================= FETCH CLO =================
   useEffect(() => {
-    if (!courseId) return;
+    if (!courseId || !batchId) return;
 
-    api.get(`/obe/clos-by-course/?course=${courseId}`)
-      .then((res) => setClos(res.data))
-      .catch(err => console.error(err));
+    api.get(`/obe/courses/${courseId}/batches/${batchId}/clos/`)
+      .then(res => setClos(res.data || []))
+      .catch(() => setClos([]));
+  }, [courseId, batchId]);
 
-  }, [courseId]);
-
-  // FETCH STUDENTS
+  // ================= FETCH STUDENTS =================
   useEffect(() => {
-    if (!courseId) return;
+    if (!batchId) return;
 
-    api.get(`/students/?course=${courseId}`)
-      .then((res) => setStudents(res.data))
-      .catch(err => console.error(err));
+    api.get(`/students/?batch=${batchId}`)
+      .then(res => setStudents(res.data))
+      .catch(() => setStudents([]));
+  }, [batchId]);
+  // 🔥 CHECK REJECTED CQI
+useEffect(() => {
+  if (!courseId || !batchId || !semesterId) {
+    console.log("Missing params:", { courseId, batchId, semesterId });
+    return;
+  }
 
-  }, [courseId]);
+  api.get(`/assessments/cqi/check-status/`, {
+    params: {
+      course: courseId,
+      batch: batchId,
+      semester: semesterId
+    }
+  })
+  .then(res => {
 
-  // CLO SELECT
-  const handleCLOChange = (value: number, index: number) => {
-    const selected = clos.find((c) => c.id === value);
-    if (!selected) return;
+    const items = res.data.items || [];
 
+    // 🔥 Check agar koi bhi rejected hai
+    const rejected = items.filter((i: any) => i.status === "rejected");
+
+    if (rejected.length > 0) {
+      setShowCQI(true);
+      toast.error("Some CQIs rejected. Please update.");
+    }
+
+    setCheckedCQI(true);
+
+  })
+  .catch(() => {});
+}, [courseId, batchId, semesterId]);
+  // ================= CLO SELECT =================
+  const handleCLOChange = (value: string, index: number) => {
+
+  // ❌ duplicate check
+  const alreadySelected = questions.some(
+    (q, i) => q.clo === value && i !== index
+  );
+
+  if (alreadySelected) {
+    toast.error("This CLO is already selected");
+    return;
+  }
+
+  const selected = clos.find(c => c.id === value);
+  if (!selected) return;
+
+  const updated = [...questions];
+  updated[index] = {
+    clo: value,
+    description: selected.description,
+    level: selected.bloom_level,
+    kpi: selected.kpi_target,
+    marks: 0
+  };
+
+  setQuestions(updated);
+};
+
+  const handleQuestionMarks = (value: string, index: number) => {
     const updated = [...questions];
-    updated[index].clo = value;
-    updated[index].description = selected.name;
-    updated[index].level = selected.level;
-
+    updated[index].marks = Number(value);
     setQuestions(updated);
   };
 
-  // ADD CLO
   const addCLO = () => {
-    setQuestions([...questions, { clo: "", description: "", level: "" }]);
+    setQuestions([
+      ...questions,
+      { clo: "", description: "", level: "", kpi: 0, marks: 0 }
+    ]);
   };
 
-  // MARKS
-  const handleMarksChange = (studentId: number, value: string) => {
-    const num = Number(value);
-
-    if (num > Number(totalMarks)) {
-      alert("Marks cannot exceed total marks");
-      return;
-    }
-
-    setMarks({
-      ...marks,
-      [studentId]: num
-    });
+  // ================= MARKS =================
+  const handleMarksChange = (key: string, value: string) => {
+    setMarks({ ...marks, [key]: Number(value) });
   };
 
-  // SUBMIT
+  // ================= SUBMIT =================
   const handleSubmit = async () => {
     try {
 
       if (!title || !type || !totalMarks || !date) {
-        alert("Please fill all fields");
+        toast.error("Fill all fields");
         return;
       }
 
-      const validCLOs = questions.filter(q => q.clo !== "");
+      // // ================= PRESENTATION =================
+      // if (type === "presentation") {
 
-      if (type !== "final" && validCLOs.length === 0) {
-        alert("Please select at least one CLO");
+      //   const res = await api.post("/assessments/create/", {
+      //     course: courseId,
+      //     batch: batchId,
+      //     title,
+      //     type,
+      //     total_marks: Number(totalMarks),
+      //     date,
+      //     questions: [] // no CLO
+      //   });
+
+      //   const assessmentId = res.data.assessment_id;
+
+      //   const payload: any[] = [];
+
+      //   students.forEach(s => {
+      //     const total =
+      //       (marks[`${s.student_id}-content`] || 0) +
+      //       (marks[`${s.student_id}-delivery`] || 0) +
+      //       (marks[`${s.student_id}-confidence`] || 0);
+
+      //     payload.push({
+      //       student_id: s.student_id,
+      //       marks: total
+      //     });
+      //   });
+
+      //   await api.post(`/assessments/${assessmentId}/enter-marks/`, payload);
+
+      //   toast.success("Presentation saved ✅");
+      //   return;
+      // }
+
+      // ================= NORMAL ASSESSMENT =================
+      const totalQ = questions.reduce((sum, q) => sum + q.marks, 0);
+
+      if (totalQ !== Number(totalMarks)) {
+        toast.error("Question marks must equal total marks");
         return;
       }
 
-      const cloWeight = validCLOs.length > 0
-        ? +(100 / validCLOs.length).toFixed(2)
-        : 0;
+      const cleanQuestions = questions.map(q => ({
+        clo: q.clo,
+        description: q.description,
+        level: q.level,
+        marks: Number(q.marks)
+      }));
 
-      // CREATE ASSESSMENT
-      const res = await api.post("/obe/assessments/", {
+      const res = await api.post("/assessments/create/", {
         course: courseId,
+        batch: batchId,
         title,
-        assessment_type: type,
-        total_marks: totalMarks,
-        assessment_date: date,
-        weightage: getWeightage()
+        type,
+        total_marks: Number(totalMarks),
+        date,
+        questions: cleanQuestions
       });
 
       const assessmentId = res.data.assessment_id;
+      const backendQuestions = res.data.questions;
 
-      // CLO MAPPING
-      if (type === "final") {
-        await api.post("/obe/assessment-clo-mappings/auto-map-final/", {
-          assessment: assessmentId
-        });
-      } else {
-        await api.post("/obe/assessment-clo-mappings/bulk-create/", {
-          mappings: validCLOs.map(q => ({
-            assessment: assessmentId,
-            clo: q.clo,
-            weightage: cloWeight
-          }))
-        });
-      }
-
-      // STUDENT MARKS
-      await api.post("/obe/student-assessments/bulk-create/", {
-        records: students.map(s => ({
-          student: s.student_id,
-          assessment: assessmentId,
-          marks: ((marks[s.student_id] || 0) / Number(totalMarks)) * 100
-        }))
+      const cloMap: any = {};
+      backendQuestions.forEach((q: any) => {
+        cloMap[q.clo] = q.id;
       });
 
-      alert("Assessment Saved Successfully!");
+      const payload: any[] = [];
 
-      // RESET
-      setTitle("");
-      setType("");
-      setTotalMarks("");
-      setDate("");
-      setQuestions([{ clo: "", description: "", level: "" }]);
-      setMarks({});
+      students.forEach(s => {
+        questions.forEach(q => {
+          const key = `${s.student_id}-${q.clo}`;
 
-    } catch (err) {
-      console.error(err);
-      alert("Error saving assessment");
+          payload.push({
+            student_id: s.student_id,
+            question_id: cloMap[q.clo],
+            marks: Number(marks[key] || 0)
+          });
+        });
+      });
+
+      const response = await api.post(
+  `/assessments/${assessmentId}/enter-marks/`,
+  payload
+);
+
+// 🔥 CQI trigger
+if (response.data.is_final) {
+
+  const cqiCheck = await api.get(
+    `/assessments/cqi/check/${assessmentId}/`
+  );
+
+  if (cqiCheck.data.show_cqi) {
+    setWeakClos(cqiCheck.data.weak_clos); // 🔥 MUST
+    setShowCQI(true);
+  } else if (cqiCheck.data.message) {
+    toast.info(cqiCheck.data.message);
+  }
+}
+
+toast.success("Assessment completed ✅");
+                        
+    } catch (err: any) {
+      console.error(err?.response?.data);
+      toast.error(JSON.stringify(err?.response?.data));
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      
-    >
-
-      <div className="p-4">
-
-        {/* HEADER */}
-        <div className="flex justify-between items-center mb-6">
-          
-        </div>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <div className="p-5 bg-white rounded shadow">
 
         {/* FORM */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-4 gap-4 mb-6">
 
           <input
             placeholder="Title"
-            className="border p-3 rounded-lg"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={e => setTitle(e.target.value)}
+            className="border p-2 rounded"
           />
 
           <select
-            className="border p-3 rounded-lg"
             value={type}
-            onChange={(e) => setType(e.target.value)}
+            onChange={e => handleTypeChange(e.target.value)}
+            className="border p-2 rounded"
           >
-            <option value="">Select Type</option>
+            <option value="">Type</option>
             <option value="quiz">Quiz</option>
             <option value="assignment">Assignment</option>
             <option value="presentation">Presentation</option>
-            <option value="lab">Lab</option>
             <option value="midterm">Mid</option>
             <option value="final">Final</option>
           </select>
 
           <input
-            placeholder="Total Marks"
             type="number"
-            className="border p-3 rounded-lg"
+            placeholder="Total Marks"
             value={totalMarks}
-            onChange={(e) => setTotalMarks(e.target.value)}
+            onChange={e => setTotalMarks(e.target.value)}
+            className="border p-2 rounded"
           />
 
           <input
             type="date"
-            className="border p-3 rounded-lg"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={e => setDate(e.target.value)}
+            className="border p-2 rounded"
           />
 
         </div>
 
-        {/* WEIGHT */}
-        <div className="bg-gray-100 p-3 rounded-lg text-center mb-6">
-          <p className="text-sm text-gray-500">Assessment Weight</p>
-          <p className="text-xl font-bold text-blue-600">
-            {getWeightage()}%
-          </p>
+        {/* CLO SECTION */}
+        <div>
+  <h3 className="font-bold flex gap-2 items-center mb-2">
+    <TaskIcon />
+    CLO Mapping
+  </h3>
+
+  {questions.map((q, index) => (
+    <div key={index} className="border p-3 mt-3 rounded bg-gray-50">
+
+      <select
+        value={q.clo}
+        onChange={(e) => handleCLOChange(e.target.value, index)}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Select CLO</option>
+        {clos.map(c => (
+          <option key={c.id} value={c.id}>
+            CLO-{c.order_number}
+          </option>
+        ))}
+      </select>
+
+      {q.clo && (
+        <div className="mt-2 flex gap-3 items-center">
+          <span>{q.description}</span>
+          <span>{q.level}</span>
+          <span>{q.kpi}%</span>
+
+          <input
+            type="number"
+            className="w-20 border text-center"
+            placeholder="Marks"
+            onChange={(e) =>
+              handleQuestionMarks(e.target.value, index)
+            }
+          />
         </div>
+      )}
 
-        {/* CLO */}
-        {type !== "final" && (
-          <div className="mb-6">
+    </div>
+  ))}
 
-            <h3 className="font-semibold mb-3 flex items-center gap-2">
-              {FaTasks({ className: "text-blue-600" })}
-              CLO Mapping
+  {/* <button
+    onClick={addCLO}
+    className="mt-2 bg-gray-200 px-3 py-1 rounded"
+  >
+    {type === "presentation" ? "+ Add Criteria" : "+ Add CLO"}
+  </button>
+</div>
+
+  {type === "presentation" && (
+  <PresentationRubrics
+    students={students}
+    questions={questions}
+    clos={clos}
+    marks={marks}
+    handleMarksChange={handleMarksChange}
+  />
+)} */}
+</div>
+
+        {/* STUDENTS NORMAL */}
+       
+          <div className="mt-6">
+            <h3 className="font-bold flex gap-2 items-center">
+              <UserIcon /> Student Marks
             </h3>
 
-            {questions.map((q, index) => {
+            {students.map(s => (
+              <div key={s.student_id} className="mt-2 border p-2 rounded">
 
-              const cloWeight = (100 / questions.length).toFixed(2);
+                <div className="font-bold">{s.name}</div>
 
-              return (
-                <div key={index} className="mb-3 bg-gray-50 p-4 rounded-xl shadow-sm">
+                <div className="flex gap-2 mt-1">
+                  {questions.map(q => {
+                    const key = `${s.student_id}-${q.clo}`;
 
-                  <select
-                    className="border p-3 w-full rounded-lg"
-                    value={q.clo}
-                    onChange={(e) => handleCLOChange(Number(e.target.value), index)}
-                  >
-                    <option value="">Select CLO</option>
-                    {clos.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.clo_number}
-                      </option>
-                    ))}
-                  </select>
-
-                  <p className="text-sm text-gray-500 mt-1">
-                    {q.description}
-                  </p>
-
-                  <p className="text-sm text-purple-600 font-semibold">
-                    Level: {q.level || "-"}
-                  </p>
-
-                  <p className="text-sm text-blue-600 font-semibold">
-                    Weight: {cloWeight}%
-                  </p>
-
+                    return (
+                      <input
+                        key={key}
+                        type="number"
+                        className="w-16 border text-center"
+                        onChange={(e) =>
+                          handleMarksChange(key, e.target.value)
+                        }
+                      />
+                    );
+                  })}
                 </div>
-              );
-            })}
 
-            <button
-              onClick={addCLO}
-              className="text-blue-600 text-sm mt-2"
-            >
-              + Add CLO
-            </button>
-
+              </div>
+            ))}
           </div>
-        )}
+        
 
-        {/* STUDENTS */}
-        <div className="mb-6">
-
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            {FaUsers({ className: "text-blue-600" })}
-            Enter Marks
-          </h3>
-
-          <table className="w-full border rounded-lg overflow-hidden">
-
-            <thead className="bg-gray-200">
-              <tr>
-                <th className="p-2">#</th>
-                <th className="p-2">Student</th>
-                <th className="p-2">Marks</th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {students.map((s, i) => (
-
-                <tr key={s.student_id} className="text-center">
-
-                  <td className="p-2 border">{i + 1}</td>
-
-                  <td className="p-2 border">{s.name}</td>
-
-                  <td className="p-2 border">
-                    <input
-                      type="number"
-                      className="border p-2 w-20 rounded text-center"
-                      onChange={(e) =>
-                        handleMarksChange(s.student_id, e.target.value)
-                      }
-                    />
-                  </td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-        {/* SUBMIT */}
         <button
           onClick={handleSubmit}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg w-full"
+          className="bg-blue-600 text-white w-full mt-6 py-2 rounded"
         >
           Save Assessment
         </button>
 
       </div>
+      {showCQI && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
 
+    {/* MODAL BOX */}
+    <div className="bg-white w-[90%] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl shadow-lg p-6 relative">
+
+      {/* CLOSE BUTTON */}
+      <button
+        onClick={() => setShowCQI(false)}
+        className="absolute top-3 right-3 text-red-500 font-bold text-lg"
+      >
+        ✕
+      </button>
+
+      {/* CQI COMPONENT */}
+      <CQI
+        weakClos={weakClos}
+        courseId={courseId}
+        batchId={batchId}
+        semesterId={semesterId}
+        onComplete={() => setShowCQI(false)}
+      />
+
+    </div>
+  </div>
+)}
     </motion.div>
   );
 };

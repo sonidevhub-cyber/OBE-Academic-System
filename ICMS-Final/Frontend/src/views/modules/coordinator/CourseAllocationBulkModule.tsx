@@ -13,7 +13,7 @@ const CourseAllocationBulkModule: React.FC = () => {
   const [selectedProgram, setSelectedProgram] = useState<string>('');
   const [selectedBatch, setSelectedBatch] = useState<any>(null);
   const [currentVersion, setCurrentVersion] = useState<any>(null);
-  const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [allocations, setAllocations] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -107,13 +107,14 @@ const CourseAllocationBulkModule: React.FC = () => {
             }
           }
           
-          const initialAllocations: Record<string, string> = {};
-          courseList.forEach((course: any) => {
-            const existing = existingAllocations.find((a: any) => a.course === course.id);
-            if (existing) {
-              initialAllocations[course.id] = String(existing.teacher);
-            }
-          });
+          const initialAllocations: Record<string, number> = {};
+
+courseList.forEach((course: any) => {
+  const existing = existingAllocations.find((a: any) => a.course === course.id);
+  if (existing) {
+    initialAllocations[String(course.id)] = Number(existing.teacher);
+  }
+});
           setAllocations(initialAllocations);
         } catch (err) {
           console.error('Error loading courses:', err);
@@ -129,12 +130,11 @@ const CourseAllocationBulkModule: React.FC = () => {
   }, [selectedBatch, selectedProgram]);
 
   const handleInstructorChange = (courseId: string, instructorId: string) => {
-    setAllocations(prev => ({
-      ...prev,
-      [courseId]: instructorId
-    }));
-  };
-
+  setAllocations(prev => ({
+    ...prev,
+    [courseId]: instructorId ? Number(instructorId) : 0
+  }));
+};
   const handleSave = async () => {
     if (!selectedBatch) {
       toast.error('Please select a batch first');
@@ -143,11 +143,11 @@ const CourseAllocationBulkModule: React.FC = () => {
 
     // Filter valid allocations
     const allocationList = Object.entries(allocations)
-      .filter(([_, teacherId]) => teacherId && teacherId !== '')
-      .map(([courseId, teacherId]) => ({
-        course: courseId,
-        teacher: teacherId
-      }));
+  .filter(([_, teacherId]) => teacherId && teacherId > 0)
+  .map(([courseId, teacherId]) => ({
+    course: Number(courseId),
+    teacher: teacherId
+  }));
 
     if (allocationList.length === 0) {
       toast.error('No valid allocations to save');
@@ -179,7 +179,7 @@ const CourseAllocationBulkModule: React.FC = () => {
         curriculum_version: versionId,
         allocations: allocationList
       });
-      toast.success('Allocated successfully');
+      alert("Allocated successfully");
     } catch (err: any) {
       console.error('Error saving allocations:', err);
       toast.error(err.response?.data?.message || 'Failed to save allocations');
@@ -301,7 +301,7 @@ const CourseAllocationBulkModule: React.FC = () => {
             </div>
             <button
               onClick={handleSave}
-              disabled={saving || Object.keys(allocations).length === 0}
+              disabled={saving || Object.values(allocations).filter(v => v > 0).length === 0}
               className="flex items-center px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
             >
               {saving ? (
@@ -350,20 +350,20 @@ const CourseAllocationBulkModule: React.FC = () => {
                       <td className="px-6 py-4">
                         <div className="relative">
                           <select
-                            value={allocations[course.id] || ''}
-                            onChange={(e) => handleInstructorChange(course.id, e.target.value)}
+                            value={allocations[String(course.id)] || ''}
+                            onChange={(e) => handleInstructorChange(String(course.id), e.target.value)}
                             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none appearance-none bg-white"
                           >
                             <option value="">Select Instructor</option>
                             {instructors.map(inst => (
-                              <option key={inst.id} value={inst.user}>{inst.name}</option>
+                              <option key={inst.id} value={inst.id}>{inst.name}</option>
                             ))}
                           </select>
                           <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {allocations[course.id] ? (
+                        {allocations[String(course.id)] ? (
                           <div className="flex items-center text-green-600 text-sm">
                             <CheckCircle className="h-4 w-4 mr-1" />
                             Ready

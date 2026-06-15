@@ -112,7 +112,7 @@ export const coordinatorService = {
 
   // --- Supporting Data ---
   getPrograms: () => api.get('programs/'),
-  getInstructors: () => api.get('instructors/profiles/'),
+  getInstructors: () => api.get('instructors/'),
   getBatches: () => api.get('batches/all/'),
   getBatchesByProgram: (programId: string) => api.get(`batches/all/?program=${programId}`),
   getCoursesByBatch: (programId: string, semester: number) => 

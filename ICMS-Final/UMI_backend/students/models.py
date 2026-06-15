@@ -11,6 +11,13 @@ class Student(models.Model):
     department = models.ForeignKey(
         "core.Program", on_delete=models.SET_NULL, null=True, blank=True
     )
+    batch = models.ForeignKey(
+        "core.Batch",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="profile_students"
+    )
     phone = models.CharField(max_length=20, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
     gender = models.CharField(max_length=20, blank=True, null=True)

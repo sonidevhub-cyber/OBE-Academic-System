@@ -34,6 +34,7 @@ interface Student {
   user_email: string;
   phone: string;
   semester?: { name: string };
+  
 }
 
 interface SacProgramSetupProps {
@@ -79,7 +80,8 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     code: '',
     course_type: 'theory' as 'theory' | 'lab',
     credit_hours: 3,
-    semester_id: ''
+    semester_id: '',
+    parent_course: null as string | null
   });
 
   const [showBatchForm, setShowBatchForm] = useState(false);
@@ -89,6 +91,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     end_year: new Date().getFullYear() + 4,
     session_type: 'fall'
   });
+ 
 
   // Fetch Programs
   const fetchData = useCallback(async () => {
@@ -213,7 +216,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
       }
       setShowCourseForm(false);
       setEditingCourse(null);
-      setCourseForm({ name: '', code: '', course_type: 'theory', credit_hours: 3, semester_id: '' });
+      setCourseForm({ name: '', code: '', course_type: 'theory', credit_hours: 3, semester_id: '', parent_course: '' });
       fetchContent();
     } catch (err: any) {
       const data = err.response?.data;
@@ -388,7 +391,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
           </form>
         </motion.div>
       )}
-
+  
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
@@ -534,6 +537,35 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                             ))}
                           </select>
                         </div>
+                        {/* ✅ Parent Course Dropdown (ONLY for LAB) */}
+{courseForm.course_type === 'lab' && (
+  <div className="space-y-1">
+    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+      Parent Theory Course
+    </label>
+
+    <select
+      required
+      value={courseForm.parent_course || ''}
+      onChange={e => setCourseForm({
+        ...courseForm,
+        parent_course: e.target.value
+      })}
+      className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
+    >
+      <option value="">Select Parent Course</option>
+
+      {courses
+        .filter(c => c.course_type === 'theory') // sirf theory courses
+        .map(c => (
+          <option key={c.id} value={c.id}>
+            {c.code} - {c.name}
+          </option>
+        ))
+      }
+    </select>
+  </div>
+)}
                         <div className="md:col-span-3 flex justify-end gap-2 pt-2">
                           <button type="button" onClick={() => setShowCourseForm(false)} className="px-4 py-2 text-sm text-gray-500">Cancel</button>
                           <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2">
@@ -633,7 +665,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                               <td className="px-6 py-4 text-sm text-gray-500">Sem {c.semester_number}</td>
                               <td className="px-6 py-4 text-right">
                                 <div className="flex justify-end gap-1 transition-opacity">
-                                  <button onClick={() => { setEditingCourse(c); setCourseForm({ name: c.name, code: c.code, course_type: c.course_type, credit_hours: c.credit_hours, semester_id: c.semester_id }); setShowCourseForm(true); }} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit3 className="w-4 h-4" /></button>
+                                  <button onClick={() => { setEditingCourse(c); setCourseForm({ name: c.name, code: c.code, course_type: c.course_type, credit_hours: c.credit_hours, semester_id: c.semester_id, parent_course: c.parent_course ?? null }); setShowCourseForm(true); }} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Edit3 className="w-4 h-4" /></button>
                                   <button onClick={() => handleDeleteCourse(c.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                                 </div>
                               </td>

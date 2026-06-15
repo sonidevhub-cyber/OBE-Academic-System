@@ -292,7 +292,7 @@ const ModularInstructorDashboard: React.FC = () => {
       case 'dashboard':
         return renderDashboard();
       case 'obe':
-        return <OBEModule departmentId={currentUser?.department_id || 0} />;
+        return <OBEModule />;
       default:
         return renderDashboard();
     }

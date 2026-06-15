@@ -37,6 +37,8 @@ urlpatterns += [
     path('api/coordinators/', include('coordinators.urls')),
     path('api/hods/', include('coordinators.urls')),
     path('api/curriculum-versions/', include('curriculum.urls')),
+    path('api/assessments/', include('assessments.urls')),
+    path('api/noticeboard/', include('noticeboard.urls')),
 
 ]
 

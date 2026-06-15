@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { coordinatorService, CourseAllocation } from '../api/coordinatorService';
+import { instructorCourseService } from '../api/instructorCourseService'; // ✅ NEW
 import { useAuth } from './AuthContext';
 
 interface AllocationContextType {
@@ -24,17 +25,29 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
   const fetchAllocations = async () => {
     try {
       setLoading(true);
-      const response = await coordinatorService.getCourseAllocations();
-      const data = response.data.data; // Use .data.data for new API response format
+
+      let data: any[] = [];
+
+      // ✅ ROLE BASED API CALL
+      if (currentUser?.role === 'coordinator' || currentUser?.role === 'hod') {
+        // 👉 Coordinator / HOD
+        const response = await coordinatorService.getCourseAllocations();
+        data = response.data.data || [];
+      } 
+      else if (currentUser?.role === 'instructor') {
+        // 👉 Instructor (IMPORTANT FIX)
+        const response = await instructorCourseService.getMyCourses();
+        data = response.data.data || [];
+      }
+
       if (Array.isArray(data)) {
         setAllocations(data);
       } else {
-        console.warn('Expected array for allocations, received:', data);
         setAllocations([]);
       }
+
     } catch (error) {
       console.error('Error fetching allocations:', error);
-      // Fallback to empty array on error
       setAllocations([]);
     } finally {
       setLoading(false);
@@ -43,53 +56,69 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
 
   useEffect(() => {
     if (currentUser && !authLoading) {
-      fetchAllocations();
+      fetchAllocations(); // ✅ now safe for all roles
     }
   }, [currentUser, authLoading]);
 
   const addAllocation = (allocation: CourseAllocation) => {
     setAllocations(prev => [...prev, allocation]);
-    // Immediately refresh from server to get latest data
     fetchAllocations();
   };
 
   const updateAllocation = (id: number, updates: Partial<CourseAllocation>) => {
-    setAllocations(prev => prev.map(allocation => {
-      if (allocation.allocation_id === id) {
-        const updated = { ...allocation, ...updates };
-        // Auto-activate approved allocations
-        if (updated.status === 'approved') {
-          updated.status = 'active';
+    setAllocations(prev =>
+      prev.map(allocation => {
+        if (allocation.allocation_id === id) {
+          const updated = { ...allocation, ...updates };
+
+          if (updated.status === 'approved') {
+            updated.status = 'active';
+          }
+
+          return updated;
         }
-        return updated;
-      }
-      return allocation;
-    }));
-    // Refresh from server after update
+        return allocation;
+      })
+    );
+
     setTimeout(() => fetchAllocations(), 500);
   };
 
-  const getProposedAllocations = () => allocations.filter(a => a.status === 'proposed');
-  const getApprovedAllocations = () => allocations.filter(a => a.status === 'approved' || a.status === 'active');
+  const getProposedAllocations = () =>
+    allocations.filter(a => a.status === 'proposed');
+
+  const getApprovedAllocations = () =>
+    allocations.filter(a => a.status === 'approved' || a.status === 'active');
+
+  // ✅ IMPORTANT FIX: instructor filter properly
   const getInstructorAllocations = (instructorId: number) =>
     allocations.filter(
       a =>
-      a.status === 'active' || a.status === 'approved'
+        (a.teacher === instructorId || a.instructor === instructorId) &&
+        (a.status === 'active' || a.status === 'approved')
     );
-  const getAllocationsByBatch = (batchId: string) => allocations.filter(a => a.batch === batchId && (a.status === 'approved' || a.status === 'active'));
+
+  const getAllocationsByBatch = (batchId: string) =>
+    allocations.filter(
+      a =>
+        a.batch === batchId &&
+        (a.status === 'approved' || a.status === 'active')
+    );
 
   return (
-    <AllocationContext.Provider value={{
-      allocations,
-      loading,
-      fetchAllocations,
-      addAllocation,
-      updateAllocation,
-      getProposedAllocations,
-      getApprovedAllocations,
-      getInstructorAllocations,
-      getAllocationsByBatch
-    }}>
+    <AllocationContext.Provider
+      value={{
+        allocations,
+        loading,
+        fetchAllocations,
+        addAllocation,
+        updateAllocation,
+        getProposedAllocations,
+        getApprovedAllocations,
+        getInstructorAllocations,
+        getAllocationsByBatch
+      }}
+    >
       {children}
     </AllocationContext.Provider>
   );

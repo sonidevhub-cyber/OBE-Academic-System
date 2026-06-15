@@ -6,7 +6,8 @@ import { useAuth } from './context/AuthContext';
 
 // Import Role-Based Dashboards from organized structure
 import AdminDashboard from './roles/admin/AdminDashboard';
-import StudentDashboard from './roles/student/StudentDashboard';
+import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
+import StudentDashboard from './views/dashboards/ModularStudentDashboard';
 import StudentProfile from './components/ui/EnhancedStudentProfile';
 import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
 import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
@@ -82,7 +83,9 @@ const getRedirectPath = () => {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<Dashboard />} />
       </Route>
-      
+      <Route element={<ProtectedRoute allowedRoles={['hod']} />}>
+  <Route path="/hod" element={<ModularHODDashboard />} />
+</Route>
       {/* Role-specific routes */}
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />

@@ -9,36 +9,37 @@ import Sports from "assets/sports.jpg";
 const slides = [
   {
     id: 1,
-    title: "Welcome to F.G postgradute college _ WahCant ",
-    subtitle: "Quality education | Research | Innovation",
+    title: "Welcome to Computer Science Department",
+    subtitle: "Building Future IT Professionals",
     image: welcome,
- },
+  },
   {
     id: 2,
-    title: "Programs & Departments",
-    subtitle: "IT, psychology, BS programs across disciplines",
+    title: "Computer Science Programs",
+    subtitle: "BSCS & BSIT with modern curriculum",
     image: department,
   },
   {
     id: 3,
-    title: "Campus Life",
-    subtitle: "Vibrant student life & activities",
+    title: "Advanced Computer Labs",
+    subtitle: "Programming, AI & Software Development Labs",
     image: campus,
   },
   {
     id: 4,
-    title: "Activity",
-    subtitle: "Vollyball,cricket,Badminton",
+    title: "Student Activities",
+    subtitle: "Coding competitions & tech events",
     image: activity,
   },
-{
+  {
     id: 5,
-    title: "Sports",
-    subtitle: "Vollyball,cricket,Badminton",
+    title: "Achievements & Projects",
+    subtitle: "Innovative student projects & success stories",
     image: Sports,
-},
-
+  },
 ];
+
+
 
 export default function HeroSlider() {
   const [index, setIndex] = useState(0);
