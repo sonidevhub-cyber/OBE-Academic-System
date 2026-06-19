@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+// import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -25,19 +26,136 @@ import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationB
 import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
-import GAReport from '../../pages/GAReport';
+import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
+import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import PEOReport from '../../pages/PEOReport';
 import StudentOBEList from '../../pages/StudentOBEList';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'ga-report' | 'peo-report' | 'student-obe';
+import { api } from '../../api/api';
+
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'peo-report' | 'student-obe';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [coordinatorProfile, setCoordinatorProfile] = useState<any>(null);
-
+  const [selectedCourse, setSelectedCourse] = useState<any>(null);
+ const [selectedBatch, setSelectedBatch] = useState<any>(null);
+const [batches, setBatches] = useState<any[]>([]);
+const [semesters, setSemesters] = useState<any[]>([]);
+const [selectedSemester, setSelectedSemester] = useState<any>(null);
+  const [allCourses, setAllCourses] = useState<any[]>([]);
+  const [filteredCourses, setFilteredCourses] = useState<any[]>([]);
+  const [allocations, setAllocations] = useState<any[]>([]);
   useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const [courseRes, batchRes, allocRes] = await Promise.all([
+        api.get("courses/"),
+        api.get("batches/all/"),
+        api.get("coordinators/"),
+      ]);
+
+      // ✅ EXTRACT DATA WITH ALL POSSIBLE FALLBACKS
+      const extractArrayData = (res: any) => {
+        if (Array.isArray(res.data)) return res.data;
+        if (Array.isArray(res.data?.data)) return res.data.data;
+        if (Array.isArray(res.data?.results)) return res.data.results;
+        return [];
+      };
+
+      const courses = extractArrayData(courseRes);
+      const batches = extractArrayData(batchRes);
+      const allocs = extractArrayData(allocRes);
+
+      console.log("🔍 Debug:");
+      console.log("- Course Response:", courseRes.data);
+      console.log("- Extracted Courses:", courses);
+      console.log("- Batch Response:", batchRes.data);
+      console.log("- Extracted Batches:", batches);
+      console.log("- Alloc Response:", allocRes.data);
+      console.log("- Extracted Allocs:", allocs);
+
+      setAllCourses(courses);
+      setBatches(batches);
+      setAllocations(allocs);
+
+      // Initially show all courses
+      setFilteredCourses(courses);
+
+    } catch (err) {
+      console.error("❌ Dropdown error:", err);
+      // Set defaults to empty arrays if something fails
+      setAllCourses([]);
+      setBatches([]);
+      setAllocations([]);
+      setFilteredCourses([]);
+    }
+  };
+
+  fetchData();
+}, []);
+
+// Filter courses when selectedBatch changes
+useEffect(() => {
+  if (!selectedBatch) {
+    // If no batch selected, show all courses
+    setFilteredCourses(allCourses);
+    setSelectedCourse(null);
+    return;
+  }
+
+  // Get course IDs from allocations for selected batch
+  const allocatedCourseIds = new Set(
+    allocations
+      .filter((alloc: any) => {
+        // Check all possible batch ID locations
+        const allocBatchId = alloc.batch?.id || alloc.batch_id;
+        return allocBatchId === selectedBatch.id;
+      })
+      .map((alloc: any) => {
+        // Check all possible course ID locations
+        return alloc.course?.id || alloc.course_id;
+      })
+  );
+
+  console.log("🔍 Allocated course IDs for batch", selectedBatch.id, ":", Array.from(allocatedCourseIds));
+
+  // Filter allCourses to only those in allocatedCourseIds
+  let filtered = allCourses;
+  if (allocatedCourseIds.size > 0) {
+    filtered = allCourses.filter((course: any) =>
+      allocatedCourseIds.has(course.id)
+    );
+  }
+
+  console.log("🔍 Filtered courses:", filtered);
+
+  setFilteredCourses(filtered);
+  
+  // Clear selected course if it's not in the new filtered list
+  if (selectedCourse && !filtered.find((c: any) => c.id === selectedCourse.id)) {
+    setSelectedCourse(null);
+  }
+}, [selectedBatch, allCourses, allocations]);
+//   useEffect(() => {
+//   const fetchData = async () => {
+//     try {
+//       const courseRes = await api.get("courses/");
+
+//       setCourses(courseRes.data.results || courseRes.data || []);
+
+//       console.log("Courses:", courseRes.data);
+
+//     } catch (err: any) {
+//       console.error("Dropdown error:", err.response?.data || err);
+//     }
+//   };
+
+//   fetchData();
+// }, []);
+ useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'coordinator');
 
@@ -70,7 +188,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
     { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
-    { id: 'ga-report', label: 'GA Report', icon: FileBarChart },
+    { id: 'clo-reports', label: 'CLO Reports', icon: FileBarChart },
+    { id: 'ga-reports', label: 'GA Reports', icon: Award },
     { id: 'peo-report', label: 'PEO Report', icon: Award },
     { id: 'student-obe', label: 'Student OBE', icon: Users },
     { id: 'instructors', label: 'Instructors', icon: Users },
@@ -130,8 +249,10 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <CourseAllocationBulkModule />;
       case 'obe-mapping':
         return <CoordinatorOBEMappingModule />;
-      case 'ga-report':
-        return <GAReport />;
+      case 'clo-reports':
+        return <CoordinatorCLOReportModule />;
+      case 'ga-reports':
+        return <CoordinatorGAReportModule />;
       case 'peo-report':
         return <PEOReport />;
       case 'student-obe':
@@ -139,8 +260,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
       case 'instructors':
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
-        return <SacProgramSetup onManagePromotion={() => {}} />; // Coordinator might not manage promotion but can see setup
-      default:
+        return <SacProgramSetup onManagePromotion={() => {}} />;
+        default:
         return null;
     }
   };

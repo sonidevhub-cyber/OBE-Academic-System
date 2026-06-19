@@ -163,23 +163,6 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const handleOpenModal = (type: 'peo' | 'ga' | 'clo', item?: any) => {
     setModalType(type);
     setEditingItem(item || null);
-    
-    let initialPIs: any[] = [];
-    if (type === 'ga') {
-      if (item && item.performance_indicators) {
-        initialPIs = item.performance_indicators;
-      } else {
-        const order = item ? item.order_number : (gas.length + 1);
-        const count = getPiCount(order);
-        for (let i = 1; i <= count; i++) {
-          initialPIs.push({
-            code: `${order}.${i}`,
-            description: '',
-            kpi: 60
-          });
-        }
-      }
-    }
 
     setFormData(item ? { 
       title: item.title, 
@@ -187,55 +170,21 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       order_number: item.order_number,
       kpi_target: item.kpi_target || 60,
       bloom_level: item.bloom_level || 'K2',
-      performance_indicators: initialPIs
+      performance_indicators: []
     } : { 
       title: '', 
       description: '', 
       order_number: (type === 'peo' ? peos.length : type === 'ga' ? gas.length : clos.length) + 1,
       kpi_target: 60,
       bloom_level: 'K2',
-      performance_indicators: initialPIs
+      performance_indicators: []
     });
     setIsModalOpen(true);
-  };
-
-  const handleRemovePI = (index: number) => {
-    const newPIs = [...formData.performance_indicators];
-    newPIs.splice(index, 1);
-    setFormData({ ...formData, performance_indicators: newPIs });
-  };
-
-  const handleAddPI = () => {
-    const nextSubNumber = formData.performance_indicators.length + 1;
-    const newPI = {
-      code: `${formData.order_number}.${nextSubNumber}`,
-      description: '',
-      kpi: formData.kpi_target || 60
-    };
-    setFormData({
-      ...formData,
-      performance_indicators: [...formData.performance_indicators, newPI]
-    });
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProgram) return;
-
-    // Validation for GA: Must have at least one PI
-    if (modalType === 'ga') {
-      if (!formData.performance_indicators || formData.performance_indicators.length === 0) {
-        toast.error('At least one Performance Indicator (PI) is required for a GA');
-        return;
-      }
-      
-      // Ensure all PIs have description and KPI
-      const invalidPI = formData.performance_indicators.some((pi: any) => !pi.description || pi.kpi === undefined || pi.kpi === null);
-      if (invalidPI) {
-        toast.error('Please fill in all PI descriptions and KPI targets');
-        return;
-      }
-    }
 
     try {
       if (modalType === 'peo') {
@@ -302,18 +251,10 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     }
   };
 
-  const getPiCount = (gaOrder: number) => {
-    const counts: Record<number, number> = {
-      1: 3, 2: 4, 3: 4, 4: 3, 5: 3, 6: 3,
-      7: 2, 8: 2, 9: 3, 10: 3, 11: 3, 12: 2
-    };
-    return counts[gaOrder] || 2;
-  };
-
-  const loadCloPiMatrix = async () => {
+  const loadCloGaMatrix = async () => {
     if (!selectedCourse || !selectedVersion) return;
     try {
-      const res = await obeService.getCLOPIMappingMatrix(selectedCourse.id, selectedVersion.id);
+      const res = await obeService.getMappingMatrix(selectedCourse.id, selectedVersion.id);
       setCloPiMatrix(res);
       setMatrixChanges(new Set());
     } catch (error: any) {
@@ -321,23 +262,23 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         // Try fallback or show empty
         setCloPiMatrix({ clos: [], gas: [], mappings: [] });
       } else {
-        toast.error('Failed to load CLO-PI matrix');
+        toast.error('Failed to load CLO-GA matrix');
       }
     }
   };
 
   useEffect(() => {
     if (activeSubTab === 'ga-peo' && selectedProgram) loadGaPeoMatrix();
-    if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloPiMatrix();
+    if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloGaMatrix();
   }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion]);
 
-  const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-pi') => {
+  const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-ga') => {
      const changeKey = `${rowId}-${colId}`;
      const newChanges = new Set(matrixChanges);
      if (newChanges.has(changeKey)) newChanges.delete(changeKey);
      else newChanges.add(changeKey);
      setMatrixChanges(newChanges);
- 
+
      if (type === 'ga-peo') {
         const newMappings = [...gaPeoMatrix!.mappings];
         const existingIdx = newMappings.findIndex(m => (m.ga === rowId && m.peo === colId) || (m.ga_id === rowId && m.peo_id === colId));
@@ -346,14 +287,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         setGaPeoMatrix({ ...gaPeoMatrix!, mappings: newMappings });
       } else {
        const newMappings = [...cloPiMatrix!.mappings];
-       const existingIdx = newMappings.findIndex(m => (m.clo === rowId && m.pi === colId) || (m.clo_id === rowId && m.pi_id === colId));
+       const existingIdx = newMappings.findIndex(m => (m.clo === rowId && m.ga === colId) || (m.clo_id === rowId && m.ga_id === colId));
        if (existingIdx >= 0) newMappings.splice(existingIdx, 1);
-       else newMappings.push({ id: '', clo: rowId, pi: colId, clo_id: rowId, pi_id: colId, weight: 3 });
+       else newMappings.push({ id: '', clo: rowId, ga: colId, clo_id: rowId, ga_id: colId, weight: 3 });
        setCloPiMatrix({ ...cloPiMatrix!, mappings: newMappings });
      }
    };
- 
-   const handleSaveMatrix = async (type: 'ga-peo' | 'clo-pi') => {
+
+   const handleSaveMatrix = async (type: 'ga-peo' | 'clo-ga') => {
       try {
         if (type === 'ga-peo') {
           const mappings = gaPeoMatrix!.mappings.map(m => ({
@@ -366,12 +307,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         } else {
           const mappings = cloPiMatrix!.mappings.map((m: any) => ({
             clo_id: (m.clo || m.clo_id)!,
-            pi_id: (m.pi || m.pi_id)!,
+            ga_id: (m.ga || m.ga_id)!,
             weight: m.weight || 3
           }));
-          await obeService.updateCLOPIMappings(selectedCourse!.id, selectedVersion!.id, mappings);
-          toast.success('CLO-PI mappings saved');
-          loadCloPiMatrix();
+          await obeService.saveCLOGAMappings(selectedCourse!.id, selectedVersion!.id, mappings);
+          toast.success('CLO-GA mappings saved');
+          loadCloGaMatrix();
         }
         setMatrixChanges(new Set());
       } catch (error) {
@@ -384,7 +325,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     { id: 'peo', label: 'PEO Definitions', icon: Award },
     { id: 'ga', label: 'GA Definitions', icon: Info },
     { id: 'ga-peo', label: 'GA-PEO Mapping', icon: LayoutGrid },
-    { id: 'clo-pi', label: 'CLO-PI Mapping', icon: LayoutGrid },
+    { id: 'clo-pi', label: 'CLO-GA Mapping', icon: BookOpen },
   ];
 
   return (
@@ -604,7 +545,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
               <div className="bg-white p-12 text-center rounded-[40px] border-2 border-dashed border-gray-100 shadow-xl shadow-gray-50/50">
                 <BookOpen className="w-16 h-16 text-gray-200 mx-auto mb-6" />
                 <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">Select a Course</h3>
-                <p className="text-gray-500 font-bold mt-2">Please select a course to define CLOs and map them to PIs</p>
+                <p className="text-gray-500 font-bold mt-2">Please select a course to define CLOs and map them to GAs</p>
               </div>
             ) : (
               <>
@@ -657,11 +598,11 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                 <div className="bg-white p-8 rounded-[40px] shadow-xl border border-gray-100">
                   <div className="flex items-center justify-between mb-8">
                     <div>
-                      <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">CLO-PI Mapping Matrix</h3>
-                      <p className="text-gray-500 font-bold mt-1">Map Course Learning Outcomes to Performance Indicators</p>
+                      <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">CLO-GA Mapping Matrix</h3>
+                      <p className="text-gray-500 font-bold mt-1">Map Course Learning Outcomes to Graduate Attributes</p>
                     </div>
                     <button
-                      onClick={() => handleSaveMatrix('clo-pi')}
+                      onClick={() => handleSaveMatrix('clo-ga')}
                       className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-indigo-200"
                     >
                       <Save size={18} />
@@ -674,29 +615,15 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-gray-50">
-                            <th className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest border-b border-r border-gray-100 w-48 sticky left-0 bg-gray-50 z-10">CLOs \ PIs</th>
+                            <th className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest border-b border-r border-gray-100 w-48 sticky left-0 bg-gray-50 z-10">CLOs \ GAs</th>
                             {cloPiMatrix.gas.map((ga: any) => (
-                          <th 
-                            key={ga.id} 
-                            colSpan={ga.performance_indicators?.length || 1}
-                            className="p-4 text-xs font-black text-gray-700 uppercase tracking-widest text-center border-b border-r border-gray-100 bg-indigo-50/50"
-                          >
-                            GA-{ga.order_number}: {ga.title}
-                          </th>
-                        ))}
-                          </tr>
-                          <tr className="bg-white">
-                            <th className="p-6 border-b border-r border-gray-100 sticky left-0 bg-white z-10"></th>
-                            {cloPiMatrix.gas.flatMap((ga: any) => 
-                              (ga.performance_indicators || [{ id: 'empty', code: 'N/A' }]).map((pi: any) => (
-                                <th 
-                                  key={pi.id} 
-                                  className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center border-b border-r border-gray-100 min-w-[80px]"
-                                >
-                                  {pi.code}
-                                </th>
-                              ))
-                            )}
+                              <th 
+                                key={ga.id}
+                                className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest text-center border-b border-r border-gray-100 bg-indigo-50/50"
+                              >
+                                GA-{ga.order_number}: {ga.title}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
@@ -708,28 +635,26 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                                   <span className="text-[10px] text-gray-400 font-bold uppercase">{clo.bloom_level}</span>
                                 </div>
                               </td>
-                              {cloPiMatrix.gas.flatMap((ga: any) => 
-                                (ga.performance_indicators || [{ id: 'empty' }]).map((pi: any) => {
-                                  const isSelected = cloPiMatrix.mappings.some((m: any) => 
-                                    (m.clo === clo.id || m.clo_id === clo.id) && (m.pi === pi.id || m.pi_id === pi.id)
-                                  );
-                                  return (
-                                    <td key={`${clo.id}-${pi.id}`} className="p-4 border-b border-r border-gray-100 text-center">
-                                      <label className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={isSelected}
-                                          onChange={() => handleMatrixChange(clo.id, pi.id, 'clo-pi')}
-                                          className="sr-only peer"
-                                        />
-                                        <div className="w-10 h-10 bg-gray-100 rounded-xl peer-checked:bg-indigo-600 flex items-center justify-center transition-all peer-checked:shadow-lg peer-checked:shadow-indigo-100">
-                                          {isSelected && <Check size={20} className="text-white" />}
-                                        </div>
-                                      </label>
-                                    </td>
-                                  );
-                                })
-                              )}
+                              {cloPiMatrix.gas.map((ga: any) => {
+                                const isSelected = cloPiMatrix.mappings.some((m: any) => 
+                                  (m.clo === clo.id || m.clo_id === clo.id) && (m.ga === ga.id || m.ga_id === ga.id)
+                                );
+                                return (
+                                  <td key={`${clo.id}-${ga.id}`} className="p-4 border-b border-r border-gray-100 text-center">
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => handleMatrixChange(clo.id, ga.id, 'clo-ga')}
+                                        className="sr-only peer"
+                                      />
+                                      <div className="w-10 h-10 bg-gray-100 rounded-xl peer-checked:bg-indigo-600 flex items-center justify-center transition-all peer-checked:shadow-lg peer-checked:shadow-indigo-100">
+                                        {isSelected && <Check size={20} className="text-white" />}
+                                      </div>
+                                    </label>
+                                  </td>
+                                );
+                              })}
                             </tr>
                           ))}
                         </tbody>
@@ -834,87 +759,6 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                     className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
                   />
                 </div>
-
-                {modalType === 'ga' && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <LayoutGrid size={16} className="text-indigo-600" />
-                        <h4 className="text-sm font-black text-gray-900 uppercase tracking-widest">Performance Indicators</h4>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddPI}
-                        className="flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all"
-                      >
-                        <Plus size={14} />
-                        Add PI
-                      </button>
-                    </div>
-                    <div className="space-y-3">
-                      {formData.performance_indicators.map((pi, index) => (
-                        <div key={index} className="grid grid-cols-12 gap-3 items-center">
-                          <div className="col-span-2">
-                            <input
-                              type="text"
-                              required
-                              placeholder="Code"
-                              value={pi.code}
-                              onChange={(e) => {
-                                const newPIs = [...formData.performance_indicators];
-                                newPIs[index].code = e.target.value;
-                                setFormData({...formData, performance_indicators: newPIs});
-                              }}
-                              className="w-full bg-gray-100 border-none rounded-xl px-3 py-2.5 text-xs font-black text-gray-700 text-center focus:ring-2 focus:ring-indigo-500"
-                            />
-                          </div>
-                          <div className="col-span-6">
-                            <input
-                              type="text"
-                              required
-                              placeholder="PI Description"
-                              value={pi.description}
-                              onChange={(e) => {
-                                const newPIs = [...formData.performance_indicators];
-                                newPIs[index].description = e.target.value;
-                                setFormData({...formData, performance_indicators: newPIs});
-                              }}
-                              className="w-full bg-gray-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                            />
-                          </div>
-                          <div className="col-span-3">
-                            <input
-                              type="number"
-                              required
-                              placeholder="KPI %"
-                              value={pi.kpi}
-                              onChange={(e) => {
-                                const newPIs = [...formData.performance_indicators];
-                                newPIs[index].kpi = parseFloat(e.target.value);
-                                setFormData({...formData, performance_indicators: newPIs});
-                              }}
-                              className="w-full bg-gray-50 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                            />
-                          </div>
-                          <div className="col-span-1 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => handleRemovePI(index)}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {formData.performance_indicators.length === 0 && (
-                        <div className="text-center py-6 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-100">
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No Performance Indicators added yet</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
                 <div className="flex gap-4 pt-4">
                   <button
                     type="button"

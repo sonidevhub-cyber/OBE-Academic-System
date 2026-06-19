@@ -10,9 +10,24 @@ from .views import (
     CourseSessionUpdateView, 
     CurriculumVersionListView, 
     CurriculumVersionDeleteView, 
-    EffectiveCurriculumView 
+    EffectiveCurriculumView,
+    # New views
+    GAAllView,
+    GACLOMappingCreateView,
+    CourseCLOGAMatrixView,
+    CourseFinalSubmitView,
+    CourseGAScoresView,
+    BatchSemesterGASummaryView,
+    BatchProgramGASummaryView,
+    GACQICreateView,
+    GACQIApproveView,
+    GACQIRejectView,
+    GACQIHistoryView,
+    CourseUnlockView,
+    BatchGAReportView,
+    CourseCLOReportView
 ) 
- 
+
 urlpatterns = [ 
     # PEO 
     path( 
@@ -23,7 +38,7 @@ urlpatterns = [
         'peos/<uuid:pk>/', 
         PEODetailView.as_view() 
     ), 
- 
+
     # GA 
     path( 
         'programs/<uuid:program_id>/gas/', 
@@ -33,13 +48,13 @@ urlpatterns = [
         'gas/<uuid:pk>/', 
         GADetailView.as_view() 
     ), 
- 
+
     # GA-PEO Matrix 
     path( 
         'programs/<uuid:program_id>/ga-peo-matrix/', 
         GAPEOMatrixView.as_view() 
     ), 
- 
+
     # CLO 
     path( 
         'courses/<uuid:course_id>/versions/<int:version_id>/clos/', 
@@ -53,7 +68,7 @@ urlpatterns = [
         'courses/<uuid:course_id>/versions/<int:version_id>/clos/copy/', 
         CLOCopyView.as_view() 
     ), 
- 
+
     # CLO-GA Matrix 
     path( 
         'courses/<uuid:course_id>/versions/<int:version_id>/clo-ga-matrix/', 
@@ -63,7 +78,7 @@ urlpatterns = [
         'courses/<uuid:course_id>/versions/<int:version_id>/clo-pi-matrix/', 
         CLOPIMatrixView.as_view() 
     ), 
- 
+
     # Course Sessions 
     path( 
         'batches/<uuid:batch_id>/sessions/', 
@@ -77,7 +92,7 @@ urlpatterns = [
         'sessions/<uuid:pk>/', 
         CourseSessionUpdateView.as_view() 
     ), 
- 
+
     # Curriculum Version 
     path( 
         'batches/<uuid:batch_id>/curriculum/', 
@@ -87,10 +102,52 @@ urlpatterns = [
         'curriculum/<uuid:pk>/delete/', 
         CurriculumVersionDeleteView.as_view() 
     ), 
- 
+
     # Effective Curriculum 
     path( 
         'batches/<uuid:batch_id>/effective-curriculum/', 
         EffectiveCurriculumView.as_view() 
     ), 
+
+    # ========== NEW GA MODULE ENDPOINTS ==========
+    # 1. Get all GAs
+    path('ga/', GAAllView.as_view()),
+    
+    # 2. Create CLO-GA mapping
+    path('ga/<uuid:ga_id>/clo-mapping/', GACLOMappingCreateView.as_view()),
+    
+    # 3. Get CLO-GA matrix for a course
+    path('courses/<uuid:course_id>/clo-ga-matrix/', CourseCLOGAMatrixView.as_view()),
+    
+    # 4. Final submit course (Assessment Done)
+    path('courses/<uuid:session_id>/final-submit/', CourseFinalSubmitView.as_view()),
+    
+    # 5. Get course GA scores
+    path('courses/<uuid:session_id>/ga-scores/', CourseGAScoresView.as_view()),
+    
+    # 6. Semester GA summary (early warning)
+    path('batches/<uuid:batch_id>/semester-ga-summary/', BatchSemesterGASummaryView.as_view()),
+    
+    # 7. Program GA summary
+    path('batches/<uuid:batch_id>/program-ga-summary/', BatchProgramGASummaryView.as_view()),
+    
+    # 8. Create GA CQI
+    path('ga-cqi/', GACQICreateView.as_view()),
+    
+    # 9. Approve GA CQI
+    path('ga-cqi/<uuid:cqi_id>/approve/', GACQIApproveView.as_view()),
+    
+    # 10. Reject GA CQI
+    path('ga-cqi/<uuid:cqi_id>/reject/', GACQIRejectView.as_view()),
+    
+    # 11. Get GA CQI history
+    path('ga-cqi/<uuid:cqi_id>/history/', GACQIHistoryView.as_view()),
+    
+    # 12. Unlock course assessment
+    path('courses/<uuid:session_id>/unlock/', CourseUnlockView.as_view()),
+    
+    # 13. Generate batch GA report
+    path('batches/<uuid:batch_id>/ga-report/', BatchGAReportView.as_view()),
+    # 14. Course CLO Report
+    path('courses/<uuid:session_id>/clo-report/', CourseCLOReportView.as_view())
 ] 
