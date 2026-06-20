@@ -31,8 +31,9 @@ class BatchListCreateView(generics.ListCreateAPIView):
         serializer.save(program_id=self.kwargs['program_id'])
 
 
-class BatchDetailView(generics.RetrieveAPIView):
-    serializer_class = BatchListSerializer
+class BatchDetailView(generics.RetrieveUpdateAPIView):
+    def get_serializer_class(self):
+        return BatchCreateSerializer if self.request.method in ['PUT', 'PATCH'] else BatchListSerializer
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -41,6 +42,29 @@ class BatchDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return Batch.objects.filter(program_id=self.kwargs['program_id'], is_active=True)
+    
+    def update(self, request, *args, **kwargs):
+        from curriculum.models import CurriculumVersion
+        from curriculum.services import clone_curriculum_for_batch, create_offerings_from_version
+        
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        
+        curriculum_version_id = request.data.get('curriculum_version_id')
+        if curriculum_version_id:
+            try:
+                master_version = CurriculumVersion.objects.get(id=curriculum_version_id, program=instance.program, status='finalized')
+                user = request.user if request.user else instance.program.created_by
+                clone_curriculum_for_batch(master_version, instance, user)
+                # Also ensure CourseSessions are created!
+                create_offerings_from_version(master_version)
+            except CurriculumVersion.DoesNotExist:
+                pass
+        
+        self.perform_update(serializer)
+        return Response(BatchListSerializer(instance).data, status=status.HTTP_200_OK)
 
 
 class BatchStudentListView(generics.ListAPIView):

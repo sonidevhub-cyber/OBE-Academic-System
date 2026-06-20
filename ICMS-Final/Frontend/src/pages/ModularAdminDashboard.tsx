@@ -7,7 +7,7 @@ import TopbarProfileMenu from '../components/TopbarProfileMenu';
 
 // Import Modular Components
 import DashboardStats from '../views/modules/DashboardStats';
-import HODManagementModule from '../views/modules/HODManagementModule';
+// import HODManagementModule from '../views/modules/HODManagementModule';
 import AnnouncementModule from '../views/modules/AnnouncementModule';
 import SacProgramSetup from '../views/pages/SacProgramSetup';
 import PendingTransfers from '../views/pages/PendingTransfers';

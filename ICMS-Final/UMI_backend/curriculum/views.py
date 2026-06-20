@@ -20,8 +20,12 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = super().get_queryset()
         
+        # Get effective role
+        effective_role = user.active_role or user.role
+        effective_role = effective_role.lower() if effective_role else ''
+        
         # Global Rule: Coordinator aur HOD sirf apne programs ka data access kar sakte hain
-        if user.role.lower() in ['coordinator', 'hod']:
+        if effective_role in ['coordinator', 'hod']:
             queryset = queryset.filter(program__in=user.programs.all())
         
         # Filters
@@ -112,8 +116,10 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         version = self.get_object()
         
         # Role check: Coordinators and HODs can finalize
-        user_role = request.user.role.lower()
-        if user_role not in ['coordinator', 'hod']:
+        user = request.user
+        effective_role = user.active_role or user.role
+        effective_role = effective_role.lower() if effective_role else ''
+        if effective_role not in ['coordinator', 'hod']:
             return api_response(message="Only Coordinators and HODs can finalize curriculum versions", status_code=status.HTTP_403_FORBIDDEN)
             
         try:
@@ -132,7 +138,7 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def master(self, request):
         program_id = request.query_params.get('program_id')
-        queryset = self.get_queryset().filter(batch__isnull=True)
+        queryset = self.get_queryset().filter(status='finalized')
         if program_id:
             queryset = queryset.filter(program_id=program_id)
             

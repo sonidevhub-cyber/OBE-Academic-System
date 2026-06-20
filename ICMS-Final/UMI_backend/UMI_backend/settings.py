@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -14,6 +14,7 @@ ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
+      'core',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -27,20 +28,20 @@ INSTALLED_APPS = [
 
     'corsheaders',
     'django_extensions',
-
+  
     # Local apps
     'register',
     'students',
     'instructors',
     'academics',
     'monitoring',
-
+    'assessments',
     'announcement',
     'admin_management',
     'feedback',
     'academic_structure',
     'obe',
-    'core',
+    'noticeboard',
     'coordinators',
     'curriculum',
 

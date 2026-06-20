@@ -78,6 +78,8 @@ const EnhancedStudentProfile: React.FC<EnhancedStudentProfileProps> = ({ student
       
       try {
         const response = await studentService.getStudentById(studentId);
+        console.log('Student API response:', response);
+        console.log('Student data:', response.data);
         setStudent(response.data);
       } catch (error: any) {
         setError(error.response?.data?.message || 'Failed to fetch student profile');

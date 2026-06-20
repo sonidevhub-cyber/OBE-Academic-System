@@ -9,11 +9,14 @@ def clone_curriculum_for_batch(source_version, target_batch, created_by):
     Lazy Versioning:
     Cloning initially just links the target_batch to the source_version.
     No new CurriculumVersion record is created immediately.
+    Also creates CourseSessions for all courses in the version!
     """
     with transaction.atomic():
         if target_batch:
             target_batch.curriculum_version = source_version
             target_batch.save()
+        # Create CourseSessions (offerings) for the batch!
+        create_offerings_from_version(source_version)
         return source_version
 
 def branch_version_if_needed(version, batch, user):
@@ -52,7 +55,7 @@ def branch_version_if_needed(version, batch, user):
             )
         
         # Copy OBE data
-        from obe.models import CLO, CLOGAMapping, CLOPIMapping
+        from obe.models import CLO, CLOGAMapping
         source_clos = CLO.objects.filter(curriculum_version=version, is_active=True)
         for s_clo in source_clos:
             new_clo = CLO.objects.create(
@@ -71,14 +74,6 @@ def branch_version_if_needed(version, batch, user):
                     clo=new_clo,
                     ga=gm.ga,
                     weight=gm.weight,
-                    is_active=True
-                )
-            # Copy PI mappings
-            for pm in CLOPIMapping.objects.filter(clo=s_clo, is_active=True):
-                CLOPIMapping.objects.create(
-                    clo=new_clo,
-                    pi=pm.pi,
-                    weight=pm.weight,
                     is_active=True
                 )
 
@@ -102,6 +97,8 @@ def suggest_curriculum_for_new_batch(batch):
         # Link batch to existing finalized version instead of cloning immediately
         batch.curriculum_version = latest_finalized
         batch.save()
+        # Create CourseSessions (offerings)
+        create_offerings_from_version(latest_finalized)
         return latest_finalized
     else:
         # Create empty draft if no finalized version exists
@@ -118,6 +115,8 @@ def suggest_curriculum_for_new_batch(batch):
         batch.save()
         
         sync_courses_from_program(version)
+        # Create CourseSessions (offerings)
+        create_offerings_from_version(version)
         return version
 
 def activate_curriculum_version(version, activated_by):
@@ -179,9 +178,8 @@ def create_offerings_from_version(version):
     """
     transaction.atomic()
     Har CurriculumVersionCourse ke liye:
-    - CourseOffering banao (Using CourseSession model from obe app)
+    - CourseSession banao (Using CourseSession model from obe app)
     - teacher = TeacherAllocation se copy
-    - curriculum_version = version
     Return list of offerings
     """
     from obe.models import CourseSession
@@ -193,12 +191,8 @@ def create_offerings_from_version(version):
     
     # If no batches linked via assigned_batches, try the single 'batch' FK on version
     if not batches.exists() and version.batch:
-        import django.db.models.query
-        if isinstance(batches, django.db.models.query.QuerySet):
-             from core.models.batch import Batch
-             batches = Batch.objects.filter(id=version.batch.id)
-        else:
-             batches = [version.batch]
+        from core.models.batch import Batch
+        batches = [version.batch]
 
     if not batches:
         return []
@@ -228,7 +222,8 @@ def create_offerings_from_version(version):
                     semester=semester_obj,
                     defaults={
                         'instructor': allocation.teacher if allocation else None,
-                        'is_active': True
+                        'is_active': True,
+                        'assessment_status': 'IN_PROGRESS'
                     }
                 )
                 offerings.append(session)

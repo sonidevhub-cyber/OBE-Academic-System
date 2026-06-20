@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-// import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
+import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -41,121 +41,83 @@ const ModularCoordinatorDashboard: React.FC = () => {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [coordinatorProfile, setCoordinatorProfile] = useState<any>(null);
   const [selectedCourse, setSelectedCourse] = useState<any>(null);
- const [selectedBatch, setSelectedBatch] = useState<any>(null);
-const [batches, setBatches] = useState<any[]>([]);
-const [semesters, setSemesters] = useState<any[]>([]);
-const [selectedSemester, setSelectedSemester] = useState<any>(null);
+  const [selectedBatch, setSelectedBatch] = useState<any>(null);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [semesters, setSemesters] = useState<any[]>([]);
+  const [selectedSemester, setSelectedSemester] = useState<any>(null);
   const [allCourses, setAllCourses] = useState<any[]>([]);
   const [filteredCourses, setFilteredCourses] = useState<any[]>([]);
   const [allocations, setAllocations] = useState<any[]>([]);
+
   useEffect(() => {
-  const fetchData = async () => {
-    try {
-      const [courseRes, batchRes, allocRes] = await Promise.all([
-        api.get("courses/"),
-        api.get("batches/all/"),
-        api.get("coordinators/"),
-      ]);
+    const fetchData = async () => {
+      try {
+        const [courseRes, batchRes, allocRes] = await Promise.all([
+          api.get("courses/"),
+          api.get("batches/all/"),
+          api.get("coordinators/"),
+        ]);
 
-      // ✅ EXTRACT DATA WITH ALL POSSIBLE FALLBACKS
-      const extractArrayData = (res: any) => {
-        if (Array.isArray(res.data)) return res.data;
-        if (Array.isArray(res.data?.data)) return res.data.data;
-        if (Array.isArray(res.data?.results)) return res.data.results;
-        return [];
-      };
+        const extractArrayData = (res: any) => {
+          if (Array.isArray(res.data)) return res.data;
+          if (Array.isArray(res.data?.data)) return res.data.data;
+          if (Array.isArray(res.data?.results)) return res.data.results;
+          return [];
+        };
 
-      const courses = extractArrayData(courseRes);
-      const batches = extractArrayData(batchRes);
-      const allocs = extractArrayData(allocRes);
+        const courses = extractArrayData(courseRes);
+        const batches = extractArrayData(batchRes);
+        const allocs = extractArrayData(allocRes);
 
-      console.log("🔍 Debug:");
-      console.log("- Course Response:", courseRes.data);
-      console.log("- Extracted Courses:", courses);
-      console.log("- Batch Response:", batchRes.data);
-      console.log("- Extracted Batches:", batches);
-      console.log("- Alloc Response:", allocRes.data);
-      console.log("- Extracted Allocs:", allocs);
+        setAllCourses(courses);
+        setBatches(batches);
+        setAllocations(allocs);
+        setFilteredCourses(courses);
+      } catch (err) {
+        console.error("❌ Dropdown error:", err);
+        setAllCourses([]);
+        setBatches([]);
+        setAllocations([]);
+        setFilteredCourses([]);
+      }
+    };
 
-      setAllCourses(courses);
-      setBatches(batches);
-      setAllocations(allocs);
+    fetchData();
+  }, []);
 
-      // Initially show all courses
-      setFilteredCourses(courses);
-
-    } catch (err) {
-      console.error("❌ Dropdown error:", err);
-      // Set defaults to empty arrays if something fails
-      setAllCourses([]);
-      setBatches([]);
-      setAllocations([]);
-      setFilteredCourses([]);
+  useEffect(() => {
+    if (!selectedBatch) {
+      setFilteredCourses(allCourses);
+      setSelectedCourse(null);
+      return;
     }
-  };
 
-  fetchData();
-}, []);
-
-// Filter courses when selectedBatch changes
-useEffect(() => {
-  if (!selectedBatch) {
-    // If no batch selected, show all courses
-    setFilteredCourses(allCourses);
-    setSelectedCourse(null);
-    return;
-  }
-
-  // Get course IDs from allocations for selected batch
-  const allocatedCourseIds = new Set(
-    allocations
-      .filter((alloc: any) => {
-        // Check all possible batch ID locations
-        const allocBatchId = alloc.batch?.id || alloc.batch_id;
-        return allocBatchId === selectedBatch.id;
-      })
-      .map((alloc: any) => {
-        // Check all possible course ID locations
-        return alloc.course?.id || alloc.course_id;
-      })
-  );
-
-  console.log("🔍 Allocated course IDs for batch", selectedBatch.id, ":", Array.from(allocatedCourseIds));
-
-  // Filter allCourses to only those in allocatedCourseIds
-  let filtered = allCourses;
-  if (allocatedCourseIds.size > 0) {
-    filtered = allCourses.filter((course: any) =>
-      allocatedCourseIds.has(course.id)
+    const allocatedCourseIds = new Set(
+      allocations
+        .filter((alloc: any) => {
+          const allocBatchId = alloc.batch?.id || alloc.batch_id;
+          return allocBatchId === selectedBatch.id;
+        })
+        .map((alloc: any) => {
+          return alloc.course?.id || alloc.course_id;
+        })
     );
-  }
 
-  console.log("🔍 Filtered courses:", filtered);
+    let filtered = allCourses;
+    if (allocatedCourseIds.size > 0) {
+      filtered = allCourses.filter((course: any) =>
+        allocatedCourseIds.has(course.id)
+      );
+    }
 
-  setFilteredCourses(filtered);
-  
-  // Clear selected course if it's not in the new filtered list
-  if (selectedCourse && !filtered.find((c: any) => c.id === selectedCourse.id)) {
-    setSelectedCourse(null);
-  }
-}, [selectedBatch, allCourses, allocations]);
-//   useEffect(() => {
-//   const fetchData = async () => {
-//     try {
-//       const courseRes = await api.get("courses/");
+    setFilteredCourses(filtered);
+    
+    if (selectedCourse && !filtered.find((c: any) => c.id === selectedCourse.id)) {
+      setSelectedCourse(null);
+    }
+  }, [selectedBatch, allCourses, allocations]);
 
-//       setCourses(courseRes.data.results || courseRes.data || []);
-
-//       console.log("Courses:", courseRes.data);
-
-//     } catch (err: any) {
-//       console.error("Dropdown error:", err.response?.data || err);
-//     }
-//   };
-
-//   fetchData();
-// }, []);
- useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'coordinator');
 
@@ -261,7 +223,7 @@ useEffect(() => {
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
         return <SacProgramSetup onManagePromotion={() => {}} />;
-        default:
+      default:
         return null;
     }
   };
@@ -380,4 +342,3 @@ useEffect(() => {
 };
 
 export default ModularCoordinatorDashboard;
-

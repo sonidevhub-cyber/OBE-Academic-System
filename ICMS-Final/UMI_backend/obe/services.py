@@ -4,9 +4,12 @@ from .models import (
     CourseSession,
     CourseGAScore,
     GACQIRecord,
-    GA
+    GA,
+    CLO
 )
 from django.db import transaction
+from assessments.models import Assessment, Question, StudentQuestionMark
+from students.models import Student
 
 
 def calculate_course_ga_score(course_session: CourseSession, ga: GA):
@@ -25,21 +28,50 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
         return None
 
     total_score = Decimal('0.00')
-    # Placeholder: In a real implementation, we'd get actual CLO attainment scores
-    # For now, let's assume we have average CLO attainment
-    for mapping in mappings:
-        # Placeholder CLO attainment (replace with real data later)
-        clo_attainment = Decimal('75.00')
-        total_score += clo_attainment * mapping.weight
+    total_weight = Decimal('0.00')
 
-    total_score = round(total_score, 2)
+    for mapping in mappings:
+        # Calculate real CLO attainment
+        clo = mapping.clo
+        
+        # Get Assessments and Questions for this course, batch, semester
+        assessments = Assessment.objects.filter(
+            course=course_session.course,
+            batch=course_session.batch,
+            semester=course_session.semester,
+            is_finalized=True
+        )
+        questions = Question.objects.filter(clo=clo, assessment__in=assessments)
+        
+        total_marks = sum(q.marks for q in questions)
+        if total_marks == 0:
+            continue
+            
+        students = Student.objects.filter(user__batch=course_session.batch)
+        total_obtained = Decimal('0')
+        student_marks = StudentQuestionMark.objects.filter(question__in=questions)
+        total_obtained = sum(sm.marks_obtained for sm in student_marks)
+        total_possible = total_marks * students.count()
+        
+        if total_possible > 0:
+            clo_attainment = (total_obtained / total_possible) * 100
+        else:
+            clo_attainment = Decimal('0')
+            
+        total_score += Decimal(clo_attainment) * mapping.weight
+        total_weight += mapping.weight
+
+    if total_weight > 0:
+        final_score = round(total_score / total_weight, 2)
+    else:
+        final_score = Decimal('0')
 
     # Create or update CourseGAScore
     course_ga_score, created = CourseGAScore.objects.update_or_create(
         course_session=course_session,
         ga=ga,
         defaults={
-            'score': total_score,
+            'score': final_score,
             'is_stale': False
         }
     )
@@ -95,8 +127,21 @@ def calculate_semester_ga_score(batch, semester, ga: GA):
 
 def calculate_program_ga_attainment(batch, ga: GA):
     """
-    Calculate Program-End Final GA Attainment (D_GA weighted by enrollment, then combined with I_GA).
+    Calculate Program-End Final GA Attainment.
     """
-    # Placeholder: In real implementation, calculate D_GA and I_GA
-    # For now, let's return a placeholder
-    return Decimal('80.00')
+    # Get all course sessions for this batch
+    course_sessions = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE')
+    
+    total_score = Decimal('0')
+    count = 0
+    
+    for cs in course_sessions:
+        score_obj = CourseGAScore.objects.filter(course_session=cs, ga=ga, is_stale=False).first()
+        if score_obj:
+            total_score += score_obj.score
+            count += 1
+    
+    if count > 0:
+        return round(total_score / count, 2)
+    else:
+        return Decimal('0')

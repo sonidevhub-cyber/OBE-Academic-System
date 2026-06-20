@@ -41,10 +41,8 @@ class StudentSerializer(serializers.ModelSerializer):
             return []
         
         version = obj.user.batch.curriculum_version
-        current_semester = obj.user.batch.current_semester or 1
-        
-        # Filter courses by the batch's current semester
-        courses = version.version_courses.filter(semester_no=current_semester)
+        # Get ALL courses from the curriculum version, not just current semester
+        courses = version.version_courses.all()
         
         return [{
             'course_id': vc.course.id,

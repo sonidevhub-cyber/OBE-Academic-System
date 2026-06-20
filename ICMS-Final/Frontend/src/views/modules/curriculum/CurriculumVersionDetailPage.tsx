@@ -61,6 +61,10 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     batch: '',
     cloned_from: '',
   });
+  
+  // Clone modal state
+  const [showCloneModal, setShowCloneModal] = useState(false);
+  const [targetBatchId, setTargetBatchId] = useState('');
 
   // OBE state
   const [selectedCourseForObe, setSelectedCourseForObe] = useState<any | null>(null);
@@ -254,20 +258,20 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     if (!version) return;
     try {
       setLoadingMatrix(true);
-      // Use PI Mapping Matrix instead of GA
-      const data = await obeService.getPIMappingMatrix(courseId, version.id);
+      // Use GA Mapping Matrix instead of PI
+      const data = await obeService.getMappingMatrix(courseId, version.id);
       setMappingMatrix(data);
       
-      // Initialize temp mappings for PIs
+      // Initialize temp mappings for GAs
       const initial: Record<string, number> = {};
       data.mappings?.forEach((m: any) => {
-        // PI mapping key: cloId_piId
-        initial[`${m.clo}_${m.pi}`] = m.weight || 3;
+        // GA mapping key: cloId_gaId
+        initial[`${m.clo_id || m.clo}_${m.ga_id || m.ga}`] = m.weight || 3;
       });
       setTempMappings(initial);
     } catch (error) {
-      console.error('Error fetching PI mapping matrix:', error);
-      toast.error('Failed to load PI mapping matrix');
+      console.error('Error fetching GA mapping matrix:', error);
+      toast.error('Failed to load GA mapping matrix');
     } finally {
       setLoadingMatrix(false);
     }
@@ -280,12 +284,12 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       try {
         setSubmitting(true);
         const mappingsList = Object.entries(tempMappings).map(([key, weight]) => {
-          const [cloId, piId] = key.split('_');
-          return { clo_id: cloId, pi_id: piId, weight };
+          const [cloId, gaId] = key.split('_');
+          return { clo_id: cloId, ga_id: gaId, weight };
         });
         
-        await obeService.saveCLOPIMappings(selectedCourseForObe.course, version.id, mappingsList);
-        toast.success('PI Mappings saved successfully');
+        await obeService.saveCLOGAMappings(selectedCourseForObe.course, version.id, mappingsList);
+        toast.success('GA Mappings saved successfully');
         setIsEditingObe(false);
         fetchMappingMatrix(selectedCourseForObe.course);
       } catch (error: any) {
@@ -454,9 +458,6 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
 
     await ensureEditable(action);
   };
-
-  const [showCloneModal, setShowCloneModal] = useState(false);
-  const [targetBatchId, setTargetBatchId] = useState('');
 
   // Loading state
   if (loading && !version && !isNew) {
@@ -997,7 +998,16 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                 <span className="text-xs font-bold text-green-600 uppercase tracking-tighter">{vc.course_code}</span>
                                 <span className="text-xs text-gray-500 font-medium">{vc.credit_hours} Cr. Hr.</span>
                               </div>
-                              <h4 className="font-bold text-gray-900 mb-3 group-hover:text-green-700 transition-colors">{vc.course_name}</h4>
+                              <h4 className="font-bold text-gray-900 mb-2 group-hover:text-green-700 transition-colors">{vc.course_name}</h4>
+                              {version.assigned_batches && version.assigned_batches.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {version.assigned_batches.map((batch: any) => (
+                                    <span key={batch.id} className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                      {batch.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               <div className="flex items-center text-sm text-gray-600 bg-white/50 p-2 rounded-md border border-gray-100">
                                 <Users className="w-3.5 h-3.5 mr-2 text-gray-400" />
                                 <span className="truncate">
@@ -1127,46 +1137,23 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                 ) : mappingMatrix ? (
                   <div className="space-y-6">
                     <div>
-                      <h4 className="font-bold text-gray-900 mb-4">CLO to PI Mapping Matrix</h4>
+                      <h4 className="font-bold text-gray-900 mb-4">CLO to GA Mapping Matrix</h4>
                       <div className="overflow-x-auto">
                         <table className="min-w-full bg-white border border-gray-200 rounded-lg overflow-hidden table-fixed">
                           <thead>
                             <tr className="bg-gray-50">
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase border-b border-r w-32 sticky left-0 bg-gray-50 z-10">CLOs \ PIs</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase border-b border-r w-32 sticky left-0 bg-gray-50 z-10">CLOs \ GAs</th>
                               {mappingMatrix.gas?.map((ga: any) => (
                                 <th 
                                   key={ga.id} 
-                                  colSpan={Math.max(1, ga.performance_indicators?.length || 0)}
-                                  className="px-4 py-3 text-center text-xs font-black text-indigo-700 uppercase border-b border-r bg-indigo-50/50"
+                                  className="px-4 py-3 text-center text-xs font-black text-indigo-700 uppercase border-b border-r bg-indigo-50/50 min-w-[80px]"
                                 >
-                                  GA-{ga.order_number}
+                                  <div className="flex flex-col items-center">
+                                    <span>GA-{ga.order_number}</span>
+                                    <span className="text-[8px] text-gray-400 font-normal normal-case truncate max-w-[70px]">{ga.title || ga.description}</span>
+                                  </div>
                                 </th>
                               ))}
-                            </tr>
-                            <tr className="bg-white">
-                              <th className="border-b border-r sticky left-0 bg-white z-10"></th>
-                              {mappingMatrix.gas?.map((ga: any) => {
-                                const pis = ga.performance_indicators || [];
-                                if (pis.length === 0) {
-                                  return (
-                                    <th key={`${ga.id}-none`} className="px-2 py-2 text-center text-[10px] font-black text-gray-300 uppercase border-b border-r min-w-[60px]">
-                                      No PIs
-                                    </th>
-                                  );
-                                }
-                                return pis.map((pi: any) => (
-                                  <th 
-                                    key={pi.id} 
-                                    className="px-2 py-2 text-center text-[10px] font-black text-gray-500 uppercase border-b border-r min-w-[80px]"
-                                    title={pi.description}
-                                  >
-                                    <div className="flex flex-col items-center">
-                                      <span>{pi.code}</span>
-                                      <span className="text-[8px] text-gray-400 font-normal normal-case truncate max-w-[70px]">{pi.description}</span>
-                                    </div>
-                                  </th>
-                                ));
-                              })}
                             </tr>
                           </thead>
                           <tbody>
@@ -1175,37 +1162,35 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                 <td className="px-4 py-3 text-sm font-semibold text-gray-900 border-r border-b sticky left-0 bg-white z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                                   CLO-{clo.order_number}
                                 </td>
-                                {mappingMatrix.gas?.map((ga: any) => 
-                                  (ga.performance_indicators || []).map((pi: any) => {
-                                    const weight = tempMappings[`${clo.id}_${pi.id}`];
-                                    return (
-                                      <td key={`${clo.id}-${pi.id}`} className="px-2 py-3 text-center border-b border-r">
-                                        {isEditingObe ? (
-                                          <input
-                                            type="checkbox"
-                                            checked={!!weight}
-                                            onChange={(e) => {
-                                              const checked = e.target.checked;
-                                              const newTemp = { ...tempMappings };
-                                              if (!checked) delete newTemp[`${clo.id}_${pi.id}`];
-                                              else newTemp[`${clo.id}_${pi.id}`] = 3; // Default weight 3
-                                              setTempMappings(newTemp);
-                                            }}
-                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                          />
+                                {mappingMatrix.gas?.map((ga: any) => {
+                                  const weight = tempMappings[`${clo.id}_${ga.id}`];
+                                  return (
+                                    <td key={`${clo.id}-${ga.id}`} className="px-2 py-3 text-center border-b border-r">
+                                      {isEditingObe ? (
+                                        <input
+                                          type="checkbox"
+                                          checked={!!weight}
+                                          onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            const newTemp = { ...tempMappings };
+                                            if (!checked) delete newTemp[`${clo.id}_${ga.id}`];
+                                            else newTemp[`${clo.id}_${ga.id}`] = 3; // Default weight 3
+                                            setTempMappings(newTemp);
+                                          }}
+                                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                        />
+                                      ) : (
+                                        weight ? (
+                                          <div className="flex justify-center">
+                                            <CheckCircle className="w-4 h-4 text-indigo-600" />
+                                          </div>
                                         ) : (
-                                          weight ? (
-                                            <div className="flex justify-center">
-                                              <CheckCircle className="w-4 h-4 text-indigo-600" />
-                                            </div>
-                                          ) : (
-                                            <span className="text-gray-200">-</span>
-                                          )
-                                        )}
-                                      </td>
-                                    );
-                                  })
-                                )}
+                                          <span className="text-gray-200">-</span>
+                                        )
+                                      )}
+                                    </td>
+                                  );
+                                })}
                               </tr>
                             ))}
                           </tbody>

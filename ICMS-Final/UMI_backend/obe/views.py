@@ -2,7 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response 
 from rest_framework import status 
 from rest_framework.permissions import IsAuthenticated 
-from django.db import transaction 
+from django.db import transaction
+from decimal import Decimal
 from curriculum.models import CurriculumVersion
 from .models import ( 
     PEO, GA, GAPEOMapping, 
@@ -486,81 +487,61 @@ class CLOGAMatrixView(APIView):
         ) 
  
  
-class CLOPIMatrixView(APIView): 
-    permission_classes = [IsAuthenticated] 
- 
-    def get(self, request, course_id, version_id): 
-        clos = CLO.objects.filter( 
-            course_id=course_id, 
-            curriculum_version_id=version_id, 
-            is_active=True 
-        ) 
-        # Get all GAs for this course, and their PIs
-        gas = GA.objects.filter( 
-            program__courses__id=course_id, 
-            is_active=True 
-        ).distinct().prefetch_related('performance_indicators')
-        
-        mappings = CLOPIMapping.objects.filter( 
-            clo__course_id=course_id, 
-            clo__curriculum_version_id=version_id, 
-            is_active=True 
-        ) 
-        return Response({ 
-            'clos': CLOSerializer(clos, many=True).data, 
-            'gas': GASerializer(gas, many=True).data, 
-            'mappings': CLOPIMappingSerializer(mappings, many=True).data 
-        }) 
- 
-    @transaction.atomic 
-    def post(self, request, course_id, version_id): 
-        # Check if version is editable
-        try:
-            version = CurriculumVersion.objects.get(id=version_id)
-            if version.status != 'draft':
-                if version.batch and version.batch.current_semester:
-                    course_in_version = version.version_courses.filter(course_id=course_id).first()
-                    if course_in_version and course_in_version.semester_no <= version.batch.current_semester:
-                        return Response({'error': 'Cannot update CLO-PI mappings for current or past semesters in a finalized version'}, status=status.HTTP_400_BAD_REQUEST)
-        except CurriculumVersion.DoesNotExist:
-            return Response({'error': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        CLOPIMapping.objects.filter( 
-            clo__course_id=course_id, 
-            clo__curriculum_version_id=version_id 
-        ).delete() 
- 
-        mappings_data = request.data.get('mappings', []) 
-        created = [] 
-        for m in mappings_data: 
-            mapping = CLOPIMapping.objects.create( 
-                clo_id=m['clo_id'], 
-                pi_id=m['pi_id'], 
-                weight=m.get('weight', 3) 
-            ) 
-            created.append(mapping) 
- 
-        return Response( 
-            CLOPIMappingSerializer(created, many=True).data, 
-            status=status.HTTP_201_CREATED 
-        ) 
  
  
 # ─── Course Session Views ───────────────── 
  
 class CourseSessionListView(APIView): 
-    permission_classes = [IsAuthenticated] 
- 
-    def get(self, request, batch_id): 
-        sessions = CourseSession.objects.filter( 
-            batch_id=batch_id, 
-            is_active=True 
-        ).select_related( 
-            'course', 'batch', 'instructor' 
-        ) 
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        try:
+            from core.models import Batch
+            batch = Batch.objects.get(id=batch_id)
+            print(f"[CourseSessionListView] Batch {batch.name} current_semester: {batch.current_semester}")
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=404)
+        
+        sessions = CourseSession.objects.filter(
+            batch_id=batch_id,
+            is_active=True
+        ).select_related(
+            'course', 'batch', 'instructor', 'semester'
+        )
+        
+        print("[CourseSessionListView] All sessions before filter:")
+        for s in sessions:
+            print(f"  - {s.course.code}: semester_number={s.semester.number if s.semester else None}")
+        
+        # If no sessions but batch has curriculum version, create them!
+        if not sessions.exists() and batch.curriculum_version:
+            try:
+                from curriculum.services import create_offerings_from_version
+                create_offerings_from_version(batch.curriculum_version)
+                # Re-fetch sessions!
+                sessions = CourseSession.objects.filter(
+                    batch_id=batch_id,
+                    is_active=True
+                ).select_related(
+                    'course', 'batch', 'instructor', 'semester'
+                )
+            except Exception as e:
+                print(f"[CourseSessionListView] Error creating course sessions: {str(e)}")
+        
+        # Filter only current and previous semesters!
+        filtered_sessions = []
+        for session in sessions:
+            if session.semester:
+                print(f"  Checking {session.course.code}: session.semester.number={session.semester.number}, batch.current_semester={batch.current_semester}")
+            if session.semester and session.semester.number <= batch.current_semester:
+                filtered_sessions.append(session)
+        
+        print(f"[CourseSessionListView] Filtered sessions count: {len(filtered_sessions)}")
+        
         return Response({ 
             'sessions': CourseSessionSerializer( 
-                sessions, many=True 
+                filtered_sessions, many=True 
             ).data
         }) 
  
@@ -987,7 +968,7 @@ class CourseCLOReportView(APIView):
 
     def get(self, request, session_id):
         try:
-            session = CourseSession.objects.select_related('course', 'batch', 'semester').get(id=session_id, is_active=True)
+            session = CourseSession.objects.select_related('course', 'batch', 'semester', 'instructor').get(id=session_id, is_active=True)
         except CourseSession.DoesNotExist:
             return Response({'error': 'Course session not found'}, status=status.HTTP_404_NOT_FOUND)
         
@@ -995,7 +976,6 @@ class CourseCLOReportView(APIView):
         course = session.course
         
         # Get CLOs for this course
-        # For now, use the latest curriculum version's clos
         from curriculum.models import CurriculumVersion
         version = None
         try:
@@ -1006,52 +986,99 @@ class CourseCLOReportView(APIView):
         except Exception:
             pass
         
-        # Mock report data (using real models where possible, placeholder for assessment/attainment
         clos = CLO.objects.filter(
             course=course,
             curriculum_version=version,
             is_active=True
-        ).select_related('course', 'curriculum_version')
+        ).select_related('course', 'curriculum_version').order_by('order_number')
         
-        gas = GA.objects.filter(program=course.program, is_active=True)
+        # Get Assessments for this course, batch, semester that are finalized
+        from assessments.models import Assessment, Question, StudentQuestionMark
+        assessments = Assessment.objects.filter(
+            course=course,
+            batch=session.batch,
+            semester=session.semester,
+            is_finalized=True
+        ).prefetch_related('questions__clo')
         
-        # Mock data (placeholders since we don't have full implementation yet
+        # Get all students in this batch
+        from students.models import Student
+        students = Student.objects.filter(user__batch=session.batch)
+        
         clo_summary = []
         for clo in clos:
-            # Calculate placeholder attainment (replace with real calculation later
-            overall_attainment = 72.5  # Mock
+            # Get all questions mapped to this CLO
+            questions = Question.objects.filter(clo=clo, assessment__in=assessments)
+            
+            total_marks = sum(q.marks for q in questions)
+            total_obtained = Decimal('0')
+            total_questions = questions.count()
+            
+            # Calculate total obtained marks across all students and questions
+            if total_questions > 0:
+                student_marks = StudentQuestionMark.objects.filter(question__in=questions)
+                total_obtained = sum(sm.marks_obtained for sm in student_marks)
+                total_possible = total_marks * students.count()
+                
+                if total_possible > 0:
+                    overall_attainment = float((total_obtained / total_possible) * 100)
+                else:
+                    overall_attainment = 0
+            else:
+                overall_attainment = 0
+            
             target_kpi = clo.kpi_target
             status = 'ACHIEVED' if overall_attainment >= target_kpi else 'BELOW_TARGET'
+            
+            # Find all assessments that have questions mapped to this CLO
+            mapped_assessments = []
+            for ass in assessments:
+                has_clo = any(q.clo.id == clo.id for q in ass.questions.all())
+                if has_clo:
+                    mapped_assessments.append(ass.title)
+            
             clo_summary.append({
                 'clo_code': f'CLO-{clo.order_number}',
                 'description': clo.title,
                 'target_kpi': target_kpi,
-                'overall_attainment': overall_attainment,
+                'overall_attainment': round(overall_attainment, 2),
                 'status': status,
-                'mapped_assessments': ['Quiz 1', 'Midterm'],
-                'unmapped_assessments': ['Assignment']
+                'mapped_assessments': mapped_assessments,
+                'unmapped_assessments': [a.title for a in assessments if a.title not in mapped_assessments]
             })
         
-        assessment_effectiveness = [
-            {
-                'assessment_name': 'Midterm',
-                'mapped_clos': [f'CLO-{c.order_number}' for c in clos[:2]],
-                'avg_attainment': 68.3,
-                'effectiveness': 'GOOD',
-                'is_single_point_of_failure': False,
-                'note': ''
-            },
-            {
-                'assessment_name': 'Quiz 1',
-                'mapped_clos': [f'CLO-{c.order_number}' for c in clos[:1]],
-                'avg_attainment': 75.0,
-                'effectiveness': 'GOOD',
-                'is_single_point_of_failure': False,
-                'note': ''
-            }
-        ]
+        assessment_effectiveness = []
+        for assessment in assessments:
+            # Get all questions and mapped CLOs for this assessment
+            questions = assessment.questions.all()
+            mapped_clos = list({f'CLO-{q.clo.order_number}' for q in questions})
+            
+            # Calculate average attainment for this assessment
+            ass_total_marks = sum(q.marks for q in questions)
+            ass_total_obtained = Decimal('0')
+            if ass_total_marks > 0:
+                ass_student_marks = StudentQuestionMark.objects.filter(question__in=questions)
+                ass_total_obtained = sum(sm.marks_obtained for sm in ass_student_marks)
+                ass_total_possible = ass_total_marks * students.count()
+                if ass_total_possible > 0:
+                    avg_attainment = float((ass_total_obtained / ass_total_possible) * 100)
+                else:
+                    avg_attainment = 0
+            else:
+                avg_attainment = 0
+            
+            effectiveness = 'GOOD' if avg_attainment >= 60 else 'NEEDS_REVIEW'
+            
+            assessment_effectiveness.append({
+                'assessment_name': assessment.title,
+                'mapped_clos': mapped_clos,
+                'avg_attainment': round(avg_attainment, 2),
+                'effectiveness': effectiveness,
+                'is_single_point_of_failure': avg_attainment < 50,
+                'note': 'Single point of failure - Low attainment' if avg_attainment < 50 else ''
+            })
         
-        # Get GACQIRecords related to this session
+        # Get CQI records
         cqi_list = []
         cqis = GACQIRecord.objects.filter(affected_course_sessions=session)
         for cqi in cqis:
@@ -1061,7 +1088,7 @@ class CourseCLOReportView(APIView):
                 'course_code': course.code,
                 'reason': cqi.reason,
                 'action_plan': cqi.remedy,
-                'instructor': session.instructor.name if session.instructor else 'N/A',
+                'instructor': session.instructor.full_name if session.instructor else 'N/A',
                 'approved_by': 'N/A',
                 'status': cqi.status
             })
@@ -1088,10 +1115,16 @@ class BatchGAReportView(APIView):
         except Batch.DoesNotExist:
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        # Check readiness
-        sessions = CourseSession.objects.filter(batch=batch, is_active=True)
-        courses_total = sessions.count()
-        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+        # Check readiness - only current/previous semesters
+        all_sessions = CourseSession.objects.filter(batch=batch, is_active=True).select_related('semester')
+        # Filter to only current/previous semesters
+        sessions = []
+        for session in all_sessions:
+            if session.semester and session.semester.number <= batch.current_semester:
+                sessions.append(session)
+        
+        courses_total = len(sessions)
+        courses_assessment_done = len([s for s in sessions if s.assessment_status == 'ASSESSMENT_DONE'])
         
         cqis = GACQIRecord.objects.filter(affected_course_sessions__in=sessions).distinct()
         cqi_total = cqis.count()
@@ -1117,26 +1150,33 @@ class BatchGAReportView(APIView):
                 }
             })
         
+        # Calculate CourseGAScores for all courses
+        from .services import calculate_all_course_ga_scores, calculate_program_ga_attainment
+        for session in sessions:
+            if session.assessment_status == 'ASSESSMENT_DONE':
+                calculate_all_course_ga_scores(session)
+        
         # If ready, generate report
         gas = GA.objects.filter(program=batch.program, is_active=True)
         ga_summary = []
         
-        from .services import calculate_program_ga_attainment
-        
         for ga in gas:
             final_score = calculate_program_ga_attainment(batch, ga)
-            d_ga = 75.0  # Placeholder until we implement proper D_GA/I_GA
-            i_ga = 85.0  # Placeholder
+            d_ga = float(final_score)  # Use calculated score as D_GA for now
+            i_ga = float(final_score)  # Use calculated score as I_GA for now
             
             # Get contributing courses
             contributing_courses = []
-            course_sessions = sessions.filter(ga_scores__ga=ga).distinct()
+            course_sessions = [s for s in sessions if CourseGAScore.objects.filter(course_session=s, ga=ga, is_stale=False).exists()]
             for cs in course_sessions:
                 course_ga_score = CourseGAScore.objects.get(course_session=cs, ga=ga, is_stale=False)
+                # Get real student count
+                from students.models import Student
+                student_count = Student.objects.filter(user__batch=cs.batch).count()
                 contributing_courses.append({
                     'course_code': cs.course.code,
                     'course_ga_score': float(course_ga_score.score),
-                    'enrolled_students': 50  # Placeholder
+                    'enrolled_students': student_count
                 })
             
             status = 'ACHIEVED' if final_score >= ga.kpi_threshold else 'BELOW_TARGET'

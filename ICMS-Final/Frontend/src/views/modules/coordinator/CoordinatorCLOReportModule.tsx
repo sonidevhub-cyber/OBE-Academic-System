@@ -146,6 +146,9 @@ const CoordinatorCLOReportModule: React.FC = () => {
   }
 
   if (!selectedSessionId) {
+    const finalizedCount = courseSessions.filter(s => s.assessment_status === 'ASSESSMENT_DONE').length;
+    const totalCount = courseSessions.length;
+    
     return (
       <div className="space-y-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -161,6 +164,21 @@ const CoordinatorCLOReportModule: React.FC = () => {
               <ArrowLeft className="w-4 h-4" />
               Change Batch
             </button>
+          </div>
+          {/* Summary Stats */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+              <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">Finalized Courses</p>
+              <p className="text-3xl font-black text-emerald-700">{finalizedCount} / {totalCount}</p>
+            </div>
+            <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
+              <p className="text-xs font-black text-amber-600 uppercase tracking-widest mb-1">In Progress</p>
+              <p className="text-3xl font-black text-amber-700">{totalCount - finalizedCount} / {totalCount}</p>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+              <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1">Completion</p>
+              <p className="text-3xl font-black text-blue-700">{totalCount > 0 ? Math.round((finalizedCount / totalCount) * 100) : 0}%</p>
+            </div>
           </div>
         </div>
         

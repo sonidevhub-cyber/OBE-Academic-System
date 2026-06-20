@@ -151,7 +151,32 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     sync_courses_from_program(version)
                 
                 created_allocations = []
+                new_course_ids = []
+                
                 with transaction.atomic():
+                    # First, collect all course IDs from new allocations
+                    for data in allocations_data:
+                        course_id = data.get('course')
+                        teacher_id = data.get('teacher')
+                        if course_id and teacher_id:
+                            new_course_ids.append(str(course_id))
+                    
+                    # Now, mark existing active allocations for courses NOT in new list as inactive
+                    existing_active = TeacherAllocation.objects.filter(
+                        curriculum_version=version,
+                        batch=batch,
+                        is_active=True,
+                        status='active'
+                    )
+                    
+                    for alloc in existing_active:
+                        if str(alloc.course.id) not in new_course_ids:
+                            print("Marking old allocation as inactive:", alloc.course.name, alloc.id)
+                            alloc.status = 'changed'
+                            alloc.is_active = False
+                            alloc.save()
+                    
+                    # Now process new allocations
                     for data in allocations_data:
                         from core.models.course import Course
                         from django.contrib.auth import get_user_model

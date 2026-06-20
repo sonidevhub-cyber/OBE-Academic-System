@@ -28,7 +28,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     fetchData();
   }, []);
 
-  // Fetch GA Report for selected batch and poll every 5 seconds
+  // Fetch GA Report for selected batch
   useEffect(() => {
     const fetchReport = async () => {
       if (!selectedBatchId) {
@@ -49,10 +49,6 @@ const CoordinatorGAReportModule: React.FC = () => {
     };
 
     fetchReport();
-
-    // Poll every 5 seconds
-    const intervalId = setInterval(fetchReport, 5000);
-    return () => clearInterval(intervalId);
   }, [selectedBatchId]);
 
   const [expandedGAs, setExpandedGAs] = useState<string[]>([]);

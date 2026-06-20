@@ -33,13 +33,17 @@ const CurriculumVersionListPage: React.FC<CurriculumVersionListPageProps> = ({ o
   const fetchVersions = async () => {
     try {
       setLoading(true);
-      const params: any = { program: programId };
+      const params: any = {};
+      if (programId) params.program = programId;
       if (statusFilter) params.status = statusFilter;
       
+      console.log('📚 Fetching curriculum versions with params:', params);
       const response = await curriculumService.getVersions(params);
+      console.log('📚 Curriculum versions response:', response);
+      
       setVersions(response.data?.data || response.data || []);
     } catch (error) {
-      console.error('Error fetching curriculum versions:', error);
+      console.error('❌ Error fetching curriculum versions:', error);
     } finally {
       setLoading(false);
     }
@@ -48,6 +52,7 @@ const CurriculumVersionListPage: React.FC<CurriculumVersionListPageProps> = ({ o
   const fetchBatches = async () => {
      try {
        const response = await batchService.getAllBatches();
+       console.log('getAllBatches response:', response);
        const data = response.data || [];
        setBatches(data);
      } catch (err) {

@@ -3,13 +3,16 @@ import { AuthProvider } from './context/AuthContext';
 import { AllocationProvider } from './context/AllocationContext';
 import AppRoutes from './routes';
 
-// ⭐ Add this
 import SmoothScroll from "./components/SmoothScroll";
+
+// ✅ ADD THIS
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 const App = () => {
   return (
     <>
-      {/* ⭐ Smooth scrolling enable hoga */}
+      {/* Smooth scrolling */}
       <SmoothScroll />
 
       <AuthProvider>
@@ -17,6 +20,9 @@ const App = () => {
           <AppRoutes />
         </AllocationProvider>
       </AuthProvider>
+
+      {/* ✅ Toast globally enable */}
+      <ToastContainer position="top-right" autoClose={2000} />
     </>
   );
 };

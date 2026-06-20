@@ -2,19 +2,24 @@ import { api } from './api';
 
 export interface InstructorCourse {
   allocation_id: number;
-  course_id: number;
+  course_id: number | string;
   course_name: string;
   course_code: string;
-  course_description: string;
-  credits: number;
-  semester_id: number;
-  semester_name: string;
-  semester_code: string;
-  department: string;
-  coordinator_name: string;
-  approved_at: string;
-  hod_comments: string;
-  status: string;
+  course_description?: string;
+  credits?: number;
+  semester_id?: number | string;
+  semester_no?: number;
+  semester_name?: string;
+  semester_code?: string;
+  program_name?: string;
+  program_code?: string;
+  coordinator_name?: string;
+  approved_at?: string;
+  hod_comments?: string;
+  status?: string;
+  batch_id?: number | string;
+  batch_name?: string;
+  [key: string]: any; // For extra properties we might not know about
 }
 
 export interface CoursesSummary {

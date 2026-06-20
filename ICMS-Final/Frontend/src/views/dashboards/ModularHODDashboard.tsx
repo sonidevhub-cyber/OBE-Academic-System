@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
-import HODCoordinatorManagementModule from '../modules/HODCoordinatorManagementModule';
+
 import GAReport from '../../pages/GAReport';
 import PEOReport from '../../pages/PEOReport';
 import StudentOBEList from '../../pages/StudentOBEList';
@@ -306,7 +306,35 @@ const ModularHODDashboard: React.FC = () => {
         );
 
       case 'instructors':
-        return <HODCoordinatorManagementModule />;
+        return (
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold mb-4">Instructors</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Name</th>
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Employee ID</th>
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Specialization</th>
+                      <th className="px-6 py-3 text-sm font-semibold text-gray-600">Designation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {instructors.map(instructor => (
+                      <tr key={instructor.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">{instructor.name}</td>
+                        <td className="px-6 py-4">{instructor.employee_id}</td>
+                        <td className="px-6 py-4">{instructor.specialization}</td>
+                        <td className="px-6 py-4">{instructor.designation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
       case 'timetable':
         return (
           <div className="space-y-6">

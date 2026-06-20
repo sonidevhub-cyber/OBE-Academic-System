@@ -19,7 +19,7 @@ export interface BatchCreateData {
     start_year: number; 
     end_year: number; 
     session_type: 'fall' | 'spring';
-    curriculum_version_id?: string; // New field for cloning
+    curriculum_version_id?: number; // New field for cloning
 }
 
 export interface BatchFlat {
@@ -39,6 +39,9 @@ const batchService = {
     
     createBatch: (programId: string, data: BatchCreateData) => 
         api.post<Batch>(`programs/${programId}/batches/`, data),
+    
+    updateBatch: (programId: string, batchId: string, data: Partial<BatchCreateData>) => 
+        api.patch<Batch>(`programs/${programId}/batches/${batchId}/`, data),
     
     advanceSemester: (programId: string, batchId: string) => 
         api.patch<Batch>(`programs/${programId}/batches/${batchId}/advance/`),

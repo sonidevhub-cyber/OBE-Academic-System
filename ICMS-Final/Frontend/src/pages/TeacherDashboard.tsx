@@ -483,7 +483,7 @@ const TeacherDashboard = () => {
                             <div className="flex justify-between items-start">
                               <div>
                                 <p className="text-sm font-bold text-gray-900">{course.course_name}</p>
-                                <p className="text-xs text-gray-500">{course.course_code} • {course.credit_hours} Credits</p>
+                                <p className="text-xs text-gray-500">{course.course_code} • {course.credit_hours} Credits • {course.program_code || course.program_name || "N/A"}</p>
                               </div>
                               <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-bold uppercase">
                                 {course.batch_name}

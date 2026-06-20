@@ -28,7 +28,14 @@ const MyCoursesModule: React.FC = () => {
         instructorCourseService.getCoursesSummary()
       ]);
 
-      setCourses(coursesRes.data.courses || []);
+      const coursesData =
+  coursesRes.data?.data ||
+  coursesRes.data?.courses ||
+  coursesRes.data;
+
+console.log("FINAL COURSES:", coursesData);
+
+setCourses(Array.isArray(coursesData) ? coursesData : []);
       setSummary(summaryRes.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -127,20 +134,24 @@ const MyCoursesModule: React.FC = () => {
                     </div>
 
                     {/* 👁️ ONLY CLICK */}
-                    <Eye
+                    {/* <Eye
                       className="h-5 w-5 text-blue-600 cursor-pointer"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleViewCourse(course.allocation_id);
                       }}
-                    />
+                    /> */}
 
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-blue-200 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Department</span>
-                      <span>{course.department}</span>
+                      <span className="text-gray-500">Batch</span>
+                      <span>{course.batch_name || "N/A"}</span>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span className="text-gray-500">Program</span>
+                      <span>{course.program_code || course.program_name || "N/A"}</span>
                     </div>
                     <div className="flex justify-between mt-1">
                       <span className="text-gray-500">Coordinator</span>
@@ -149,21 +160,25 @@ const MyCoursesModule: React.FC = () => {
                   </div>
                 </motion.div>
 
-                {/* 🔥 EXPAND */}
+                {/* 🔥 EXPAND
                 {expandedCourseId === course.allocation_id && selectedCourse && (
                   <CourseData
-                    course={{
-                      id: course.allocation_id,
-                      course: selectedCourse.course.name,
-                      course_code: selectedCourse.course.code,
-                      semester: selectedCourse.semester.name,
-                      instructor: "You",
-                      coordinator: selectedCourse.coordinator.name,
-                      hod_comments: selectedCourse.hod_comments,
-                  
-                    }}
+  course={{
+    id: course.allocation_id,
+
+    course: selectedCourse?.course?.name || "N/A",
+    course_code: selectedCourse?.course?.code || "N/A",
+    semester: selectedCourse?.semester?.name || "N/A",
+
+    instructor: "You",
+
+    coordinator: selectedCourse?.coordinator?.name || "N/A",
+
+    hod_comments: selectedCourse?.hod_comments || "No comments",
+  }}
+
                   />
-                )}
+                )} */}
 
               </div>
             ))}

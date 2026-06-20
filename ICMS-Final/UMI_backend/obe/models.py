@@ -203,6 +203,14 @@ class CourseSession(models.Model):
         related_name='teaching_sessions',
         null=True, blank=True
     ) 
+    assessment_done = models.BooleanField(default=False)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    unlocked_by = models.ForeignKey(
+        'core.CustomUser', 
+        on_delete=models.SET_NULL, 
+        related_name='unlocked_sessions',
+        null=True, blank=True
+    )
     assessment_status = models.CharField(max_length=20, choices=ASSESSMENT_STATUS_CHOICES, default='IN_PROGRESS')
     is_active = models.BooleanField(default=True) 
     created_at = models.DateTimeField( 
@@ -293,4 +301,4 @@ class GACQIResubmissionHistory(models.Model):
     submitted_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.cqi_record} - {self.submitted_at}" 
+        return f"{self.cqi_record} - {self.submitted_at}"

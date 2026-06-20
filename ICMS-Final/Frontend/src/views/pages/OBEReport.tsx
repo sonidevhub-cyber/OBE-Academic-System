@@ -1,212 +1,354 @@
-import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { FaFileExcel } from "react-icons/fa";
-import { api } from "../../api/api";
-import logo from "assets/logo2.png";
+import React, { useState, useEffect } from 'react';
+import { api } from '../../api/api';
 
-const ExcelIcon = FaFileExcel as unknown as React.FC;
-
-interface Props {
-  courseId: number;
+interface OBEReportProps {
+  courseId: string;
+  batchId: string;
+  semesterId: string;
 }
 
-const OBEReport: React.FC<Props> = ({ courseId }) => {
-
-  const [data, setData] = useState<any[]>([]);
-  const [clos, setClos] = useState<string[]>([]);
+const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) => {
+  const [reportData, setReportData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get(`obe/student-assessments/obe-report/?course=${courseId}`)
-      .then((res) => {
-        setData(res.data);
+    fetchReport();
+  }, [courseId, batchId, semesterId]);
 
-        if (res.data.length > 0) {
-          setClos(Object.keys(res.data[0].clo_total || {}));
-        }
-      })
-      .catch((err) => console.error(err));
-  }, [courseId]);
-
-  const handleDownloadExcel = async () => {
-    const response = await api.get(
-      `obe/student-assessments/export-excel/?course=${courseId}`,
-      { responseType: "blob" }
-    );
-
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "OBE_Report.xlsx");
-    document.body.appendChild(link);
-    link.click();
+  const fetchReport = async () => {
+    try {
+      console.log("Fetching report with:", { courseId, batchId, semesterId });
+      const res = await api.get(
+        `/assessments/clo-report/${courseId}/${batchId}/${semesterId}/`
+      );
+      console.log("Report API response:", res);
+      
+      // Handle both possible response formats
+      let data;
+      if (res.data?.data) {
+        data = res.data.data;
+      } else if (res.data?.students) {
+        data = res.data;
+      } else {
+        data = res.data;
+      }
+      
+      console.log("Processed report data:", data);
+      setReportData(data);
+    } catch (err) {
+      console.error("Error fetching report:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  if (loading) return <div className="text-center py-8">Loading Report...</div>;
+  if (!reportData) return <div className="text-center py-8">No report data available</div>;
+
+  const getTypeTitle = (type: string) => {
+    switch (type) {
+      case 'quiz': return 'Quiz';
+      case 'assignment': return 'Assignment';
+      case 'midterm': return 'Midterm';
+      case 'presentation': return 'Presentation';
+      case 'final': return 'Final';
+      default: return type;
+    }
+  };
+
+  const shouldShowTypeTotal = (type: string) => {
+    return !['midterm', 'final'].includes(type);
+  };
+
+  // Calculate total columns for summary rows
+  let totalCols = 2; // count + name
+  reportData.type_groups?.forEach((group: any) => {
+    group.assessments?.forEach((ass: any) => {
+      ass.clos?.forEach(() => {
+        totalCols++;
+      });
+    });
+    if (shouldShowTypeTotal(group.type)) {
+      totalCols++;
+    }
+  });
+  totalCols += 3; // Total %, GPA, Status
+
   return (
-    <div className="p-6 bg-gray-100 min-h-screen">
-
-      {/* HEADER */}
-      <div className="bg-white p-6 rounded-xl shadow mb-6">
-        <div className="flex items-center gap-4 mb-4">
-          <img src={logo} className="w-16 h-16" />
-          <div>
-            <h1 className="text-xl font-bold">
-              FG Postgraduate College for Women Wah Cantt
-            </h1>
-            <p className="text-sm text-gray-600">
-              Applications of Information & Communication Technologies
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <p><b>Program:</b> BSE</p>
-          <p><b>Semester:</b> Fall 2024</p>
-          <p><b>Section:</b> A</p>
-          <p><b>Teacher:</b> XYZ</p>
-        </div>
+    <div className="overflow-x-auto">
+      {/* Course Info Header */}
+      <div className="bg-white p-4 mb-4 rounded-lg shadow">
+        <h3 className="text-xl font-bold text-gray-800">
+          {reportData.course?.code && reportData.course?.name ? (
+            `${reportData.course.code} - ${reportData.course.name}`
+          ) : "OBE Report"}
+        </h3>
+        {reportData.semester?.number && (
+          <p className="text-gray-600 mt-1">Semester: {reportData.semester.number}</p>
+        )}
       </div>
 
-      {/* BUTTON */}
       <div className="flex justify-end mb-4">
-        <button
-          onClick={handleDownloadExcel}
-          className="flex items-center gap-2 bg-green-600 text-white px-5 py-2 rounded-lg"
-        >
-          <ExcelIcon />
+        <button className="bg-green-600 text-white px-4 py-2 rounded-lg">
           Export Excel
         </button>
       </div>
 
-      {/* TABLE */}
-      <div className="bg-white p-4 rounded-xl shadow">
-        <table className="w-full text-xs text-center">
-
-          <thead>
-
-            <tr className="bg-blue-900 text-white">
-              <th rowSpan={3} className="border p-2">Name</th>
-
-              <th colSpan={clos.length * 2 + 1} className="bg-yellow-400 text-black">Quizzes</th>
-              <th colSpan={clos.length * 2 + 1} className="bg-blue-400">Assignments</th>
-              <th colSpan={clos.length + 1} className="bg-green-400 text-black">Midterm</th>
-              <th colSpan={clos.length + 1} className="bg-pink-400">Presentation</th>
-              <th colSpan={clos.length + 1} className="bg-purple-400">Final</th>
-              
-              
-
-              <th rowSpan={3} className="bg-gray-800 text-white">Total %</th>
-              <th rowSpan={3} className="bg-black text-white">GPA</th>
-              <th rowSpan={3} className="bg-red-500 text-white">Status</th>
-            </tr>
-
-            <tr>
-              {[1,2].map((q,i)=>clos.map((clo,j)=>
-                <th key={`q-${i}-${j}`}>Q{q} {clo}</th>
-              ))}
-              <th>%</th>
-
-              {[1,2].map((q,i)=>clos.map((clo,j)=>
-                <th key={`a-${i}-${j}`}>A{q} {clo}</th>
-              ))}
-              <th>%</th>
-
-              {clos.map((clo,i)=><th key={`m-${i}`}>{clo}</th>)}
-              <th>%</th>
-
-              {clos.map((clo,i)=><th key={`f-${i}`}>{clo}</th>)}
-              <th>%</th>
-
-              {clos.map((clo,i)=><th key={`p-${i}`}>{clo}</th>)}
-              <th>%</th>
-
-              {clos.map((clo,i)=><th key={`l-${i}`}>{clo}</th>)}
-              <th>%</th>
-            </tr>
-
-          </thead>
-
-          <tbody>
-            {data.map((row, i) => {
-
-              const totalClos = clos.length || 1;
-
-              const sum = (obj:any)=>
-                Object.values(obj||{}).reduce((a:number,b:any)=>a+Number(b||0),0);
-
-              // ✅ fallback fix
-              const quizData = row.quiz || row.clo_total || {};
-              const assignData = row.assignment || row.clo_total || {};
-              const midData = row.midterm || row.clo_total || {};
-              const finalData = row.final || row.clo_total || {};
-              const presData = row.presentation || row.clo_total || {};
-              const labData = row.lab || row.clo_total || {};
-
-              const quizP = sum(quizData);
-              const assignP = sum(assignData);
-              const midP = sum(midData);
-              const finalP = sum(finalData);
-              const presP = sum(presData);
-              
-
-              const total = row.percentage;
-
-              const gpa = row.gpa;
-              const fail = row.status === "Fail";
+      <table className="w-full border-collapse border border-gray-300">
+        {/* Header Row 1 - Assessment Type Groups */}
+        <thead>
+          <tr>
+            <th rowSpan={2} className="border p-3 bg-blue-900 text-white font-bold w-16">
+              #
+            </th>
+            <th rowSpan={2} className="border p-3 bg-blue-900 text-white font-bold w-40">
+              Name
+            </th>
+            {reportData.type_groups?.map((group: any, idx: number) => {
+              let groupColSpan = 0;
+              group.assessments?.forEach((ass: any) => {
+                groupColSpan += ass.clos?.length || 0;
+              });
+              if (shouldShowTypeTotal(group.type)) {
+                groupColSpan++;
+              }
               return (
-                <tr key={i}>
-
-                  <td className="border p-2 font-semibold text-left">{row.name}</td>
-
-                  {[1,2].map((_,qi)=>
-                    clos.map((clo,ci)=>
-                      <td key={`q-${qi}-${ci}`}>{quizData?.[clo] || 0}</td>
-                  ))}
-                  <td className="bg-yellow-200 font-bold">{quizP.toFixed(1)}</td>
-
-                  {[1,2].map((_,ai)=>
-                    clos.map((clo,ci)=>
-                      <td key={`a-${ai}-${ci}`}>{assignData?.[clo] || 0}</td>
-                  ))}
-                  <td className="bg-blue-200 font-bold">{assignP.toFixed(1)}</td>
-
-                  {clos.map((clo,i)=>
-                    <td key={`m-${i}`}>{midData?.[clo] || 0}</td>
-                  )}
-                  <td className="bg-green-200 font-bold">{midP.toFixed(1)}</td>
-
-                  {clos.map((clo,i)=>
-                    <td key={`f-${i}`}>{finalData?.[clo] || 0}</td>
-                  )}
-                  <td className="bg-purple-200 font-bold">{finalP.toFixed(1)}</td>
-
-                  {clos.map((clo,i)=>
-                    <td key={`p-${i}`}>{presData?.[clo] || 0}</td>
-                  )}
-                  <td className="bg-pink-200 font-bold">{presP.toFixed(1)}</td>
-
-                  {clos.map((clo,i)=>
-                    <td key={`l-${i}`}>{labData?.[clo] || 0}</td>
-                  )}
-                  
-
-                  <td className={`font-bold ${fail?"bg-red-500 text-white":"bg-green-500 text-white"}`}>
-                    {total.toFixed(1)}%
-                  </td>
-
-                  <td className="font-bold">{gpa.toFixed(2)}</td>
-
-                  <td className={`font-bold ${fail?"text-red-600":"text-green-600"}`}>
-                    {fail?"FAIL":"PASS"}
-                  </td>
-
-                </tr>
+                <th
+                  key={idx}
+                  colSpan={groupColSpan}
+                  className="border p-3 bg-blue-900 text-white font-bold text-center"
+                >
+                  {getTypeTitle(group.type)}
+                </th>
               );
             })}
-          </tbody>
+            <th rowSpan={2} className="border p-3 bg-blue-900 text-white font-bold">
+              Total %
+            </th>
+            <th rowSpan={2} className="border p-3 bg-blue-900 text-white font-bold">
+              GPA
+            </th>
+            <th rowSpan={2} className="border p-3 bg-blue-900 text-white font-bold">
+              Status
+            </th>
+          </tr>
 
-        </table>
-      </div>
+          {/* Header Row 2 - Individual Assessments */}
+          <tr>
+            {reportData.type_groups?.map((group: any) => (
+              <>
+                {group.assessments?.map((ass: any, assIdx: number) => (
+                  <>
+                    {ass.clos?.map((clo: any, cloIdx: number) => (
+                      <th
+                        key={`${assIdx}-${cloIdx}`}
+                        className="border p-2 bg-blue-800 text-white text-center"
+                      >
+                        <div className="font-semibold">{ass.title}</div>
+                        <div className="text-xs text-gray-200">
+                          {clo.clo} ({clo.total} marks)
+                        </div>
+                      </th>
+                    ))}
+                  </>
+                ))}
+                {shouldShowTypeTotal(group.type) && (
+                  <th className="border p-2 bg-blue-700 text-white text-center font-semibold">
+                    {getTypeTitle(group.type)} Total
+                  </th>
+                )}
+              </>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {/* Student Rows */}
+          {reportData.students?.map((student: any, idx: number) => (
+            <tr key={idx} className="hover:bg-gray-50">
+              <td className="border p-2 font-semibold text-center">{student.count}</td>
+              <td className="border p-2 font-semibold text-center">{student.name}</td>
+
+              {reportData.type_groups?.map((group: any, groupIdx: number) => (
+                <>
+                  {group.assessments?.map((ass: any, assIdx: number) => {
+                    const studentAssData = student.assessments[ass.id];
+                    return (
+                      <>
+                        {ass.clos?.map((clo: any, cloIdx: number) => (
+                          <td
+                            key={`${groupIdx}-${assIdx}-${cloIdx}`}
+                            className="border p-2 text-center"
+                          >
+                            {studentAssData?.clo_data?.[clo.clo]?.obtained ?? 0}
+                          </td>
+                        ))}
+                      </>
+                    );
+                  })}
+                  {shouldShowTypeTotal(group.type) && (
+                    <td className="border p-2 text-center font-semibold">
+                      {student.type_totals?.[group.type]?.obtained ?? 0}
+                    </td>
+                  )}
+                </>
+              ))}
+
+              <td
+                className={`border p-2 text-center font-bold ${
+                  student.percentage >= 50 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                }`}
+              >
+                {student.percentage}%
+              </td>
+              <td className="border p-2 text-center">{student.gpa}</td>
+              <td
+                className={`border p-2 text-center font-bold ${
+                  student.status === 'PASS' ? 'text-green-700' : 'text-red-700'
+                }`}
+              >
+                {student.status}
+              </td>
+            </tr>
+          ))}
+
+          {/* Class CLO Summary Row */}
+          <tr className="bg-gray-200">
+            <td className="border p-3 font-bold text-center"></td>
+            <td className="border p-3 font-bold text-center">Class CLO</td>
+            {(() => {
+              const shownClos = new Set<string>();
+              const cells: React.ReactNode[] = [];
+              
+              reportData.type_groups?.forEach((group: any) => {
+                group.assessments?.forEach((ass: any) => {
+                  ass.clos?.forEach((clo: any) => {
+                    if (!shownClos.has(clo.clo)) {
+                      shownClos.add(clo.clo);
+                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      cells.push(
+                        <td
+                          key={`class-clo-${clo.clo}`}
+                          className="border p-2 text-center font-semibold"
+                        >
+                          <div>{clo.clo}</div>
+                          <div className="text-sm">
+                            {cloData?.percentage}%
+                          </div>
+                          {cloData?.level && (
+                            <div className="text-xs text-gray-600">
+                              L{cloData.level}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    } else {
+                      cells.push(
+                        <td key={`class-clo-empty-${clo.clo}-${ass.id}`} className="border p-2"></td>
+                      );
+                    }
+                  });
+                });
+                if (shouldShowTypeTotal(group.type)) {
+                  cells.push(<td key={`class-total-${group.type}`} className="border p-2"></td>);
+                }
+              });
+              
+              return cells;
+            })()}
+            <td colSpan={3} className="border p-2"></td>
+          </tr>
+
+          {/* KPI Summary Row */}
+          <tr className="bg-yellow-200">
+            <td className="border p-3 font-bold text-center"></td>
+            <td className="border p-3 font-bold text-center">KPI</td>
+            {(() => {
+              const shownClos = new Set<string>();
+              const cells: React.ReactNode[] = [];
+              
+              reportData.type_groups?.forEach((group: any) => {
+                group.assessments?.forEach((ass: any) => {
+                  ass.clos?.forEach((clo: any) => {
+                    if (!shownClos.has(clo.clo)) {
+                      shownClos.add(clo.clo);
+                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      cells.push(
+                        <td
+                          key={`kpi-${clo.clo}`}
+                          className="border p-2 text-center font-semibold"
+                        >
+                          {clo.clo}
+                          <div className="text-sm">
+                            {cloData?.kpi}%
+                          </div>
+                        </td>
+                      );
+                    } else {
+                      cells.push(
+                        <td key={`kpi-empty-${clo.clo}-${ass.id}`} className="border p-2"></td>
+                      );
+                    }
+                  });
+                });
+                if (shouldShowTypeTotal(group.type)) {
+                  cells.push(<td key={`kpi-total-${group.type}`} className="border p-2"></td>);
+                }
+              });
+              
+              return cells;
+            })()}
+            <td colSpan={3} className="border p-2"></td>
+          </tr>
+
+          {/* Achievement Summary Row */}
+          <tr className="bg-gray-100">
+            <td className="border p-3 font-bold text-center"></td>
+            <td className="border p-3 font-bold text-center">Achievement</td>
+            {(() => {
+              const shownClos = new Set<string>();
+              const cells: React.ReactNode[] = [];
+              
+              reportData.type_groups?.forEach((group: any) => {
+                group.assessments?.forEach((ass: any) => {
+                  ass.clos?.forEach((clo: any) => {
+                    if (!shownClos.has(clo.clo)) {
+                      shownClos.add(clo.clo);
+                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      const isAchieved = cloData?.status === 'Achieved';
+                      cells.push(
+                        <td
+                          key={`achievement-${clo.clo}`}
+                          className={`border p-2 text-center font-bold ${
+                            isAchieved
+                              ? 'bg-green-400 text-green-900'
+                              : 'bg-red-400 text-red-900'
+                          }`}
+                        >
+                          {clo.clo}
+                          <div className="text-xs">
+                            {isAchieved ? 'Achieved' : 'Not Achieved'}
+                          </div>
+                        </td>
+                      );
+                    } else {
+                      cells.push(
+                        <td key={`achievement-empty-${clo.clo}-${ass.id}`} className="border p-2"></td>
+                      );
+                    }
+                  });
+                });
+                if (shouldShowTypeTotal(group.type)) {
+                  cells.push(<td key={`achievement-total-${group.type}`} className="border p-2"></td>);
+                }
+              });
+              
+              return cells;
+            })()}
+            <td colSpan={3} className="border p-2"></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 };

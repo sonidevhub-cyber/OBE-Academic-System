@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import batchService, { Batch, BatchCreateData } from '../../api/batchService';
 import academicStructureService, { Program } from '../../api/academicStructureService';
+import { curriculumService, CurriculumVersion } from '../../api/curriculumService';
 import { toast } from 'react-toastify';
 
 interface BatchesProps {
@@ -29,7 +30,9 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
   
   const [program, setProgram] = useState<Program | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [masterCurricula, setMasterCurricula] = useState<CurriculumVersion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingCurricula, setLoadingCurricula] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -42,7 +45,8 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
     name: '',
     start_year: new Date().getFullYear(),
     end_year: new Date().getFullYear() + 4,
-    session_type: 'fall'
+    session_type: 'fall',
+    curriculum_version_id: undefined
   });
 
   const fetchData = useCallback(async () => {
@@ -62,9 +66,30 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
     }
   }, [programId]);
 
+  const fetchMasterCurricula = useCallback(async () => {
+    if (!programId) return;
+    setLoadingCurricula(true);
+    try {
+      const res = await curriculumService.getMasterCurricula(programId);
+      console.log('Master curricula API response:', res);
+      // The backend api_response returns { data: [...], ... } inside Axios' res.data
+      setMasterCurricula(res.data.data);
+    } catch (err: any) {
+      console.error('Failed to fetch master curricula:', err);
+    } finally {
+      setLoadingCurricula(false);
+    }
+  }, [programId]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (showAddModal) {
+      fetchMasterCurricula();
+    }
+  }, [showAddModal, fetchMasterCurricula]);
 
   const handleAddBatch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +107,8 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
         name: '',
         start_year: new Date().getFullYear(),
         end_year: new Date().getFullYear() + 4,
-        session_type: 'fall'
+        session_type: 'fall',
+        curriculum_version_id: undefined
       });
       fetchData();
     } catch (err: any) {
@@ -207,6 +233,7 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
               <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">End Year</th>
               <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Semester</th>
               <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Students</th>
+              <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Curriculum Version</th>
               <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Status</th>
               <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
             </tr>
@@ -214,7 +241,7 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
           <tbody className="divide-y divide-gray-50">
             {batches.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-20 text-center text-gray-400 italic">
+                <td colSpan={8} className="px-6 py-20 text-center text-gray-400 italic">
                   No batches created for this program yet.
                 </td>
               </tr>
@@ -251,6 +278,15 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
                       <span className="font-bold text-gray-900">{b.student_count}</span>
                       <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Enrolled</span>
                     </div>
+                  </td>
+                  <td className="px-6 py-5 text-center">
+                    {b.curriculum_version_no ? (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-100">
+                        {b.curriculum_version_no}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Not Assigned</span>
+                    )}
                   </td>
                   <td className="px-6 py-5 text-center">
                     {b.status === 'graduated' ? (
@@ -387,6 +423,32 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
                 </select>
                 <p className="mt-1 text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
                   {newBatch.session_type === 'fall' ? 'Starts at Semester 1 (Odd)' : 'Starts at Semester 2 (Even)'}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Curriculum Version (Optional)</label>
+                <select
+                  value={newBatch.curriculum_version_id || ''}
+                  onChange={e => setNewBatch({...newBatch, curriculum_version_id: e.target.value ? parseInt(e.target.value) : undefined})}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  disabled={loadingCurricula}
+                >
+                  <option value="">None - Create Without Curriculum</option>
+                  {masterCurricula
+                    .filter(v => v.status === 'finalized')
+                    .map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.version_no}
+                      </option>
+                    ))}
+                </select>
+                {loadingCurricula && (
+                  <p className="mt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    Loading versions...
+                  </p>
+                )}
+                <p className="mt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  Select a master curriculum to clone for this batch
                 </p>
               </div>
               <div className="pt-4 flex gap-3">

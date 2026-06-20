@@ -6,11 +6,11 @@ import { useAuth } from './context/AuthContext';
 
 // Import Role-Based Dashboards from organized structure
 import AdminDashboard from './roles/admin/AdminDashboard';
-import StudentDashboard from './roles/student/StudentDashboard';
+import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
+import StudentDashboard from './views/dashboards/ModularStudentDashboard';
 import StudentProfile from './components/ui/EnhancedStudentProfile';
 import ModularInstructorDashboard from './roles/instructor/InstructorDashboard';
 import ModularCoordinatorDashboard from './roles/coordinator/CoordinatorDashboard';
-import ModularHODDashboard from './views/dashboards/ModularHODDashboard';
 import SacProgramSetup from './views/pages/SacProgramSetup';
 import MasterCurriculumManagement from './views/pages/MasterCurriculumManagement';
 import MasterCurriculumDetailPage from './views/pages/MasterCurriculumDetailPage';
@@ -26,49 +26,40 @@ import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
 import AlumniDashboard from './pages/alumni/AlumniDashboard';
 import AlumniSurvey from './pages/alumni/AlumniSurvey';
-// import CourseDetails from 'views/pages/CourseDetails';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
 
-
-
-//import TransportManagement from './components/pages/TransportManagement';
-
-
-// Use the full AdminDashboard component from pages/AdminDashboard.tsx
-
-// Use AdminDashboard as the default dashboard for now
 const Dashboard = () => <AdminDashboard />;
 
-//
 const AppRoutes: React.FC = () => {
   const { currentUser } = useAuth();
 
   // Determine redirect path based on user role
-const getRedirectPath = () => {
-  if (!currentUser) return '/login';
+  const getRedirectPath = () => {
+    if (!currentUser) return '/login';
 
-  const userRole = currentUser.effective_role || currentUser.active_role || currentUser.role;
-  
-  switch (userRole) {
-    case 'student':
-      return '/student';
-    case 'instructor':
-      return '/teacher';
-    case 'coordinator':
-      return '/coordinator';
-    case 'hod':
-      return '/hod';
-    case 'admin':
-      return '/admin';
-    case 'alumni':
-      return '/alumni';
-    default:
-      return '/dashboard';
-  }
-};
+    const userRole = currentUser.effective_role || currentUser.active_role || currentUser.role;
+    
+    switch (userRole) {
+      case 'student':
+        return '/student';
+      case 'instructor':
+        return '/teacher';
+      case 'coordinator':
+        return '/coordinator';
+      case 'hod':
+        return '/hod';
+      case 'admin':
+        return '/admin';
+      case 'alumni':
+        return '/alumni';
+      default:
+        return '/dashboard';
+    }
+  };
+
   return (
     <Routes>
       {/* Public routes */}
@@ -77,21 +68,15 @@ const getRedirectPath = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/access-denied" element={<AccessDenied />} />
       
-
-
-
-      {/* Redirect root to login if not authenticated */}
+      {/* Redirect root to main page */}
       <Route path="/" element={<MainPage />} />
-       <Route path="/rolebased-login" element={<CUIPortalPage />} />
-       {/* <Route path="/login"  element={
-    currentUser ? <Navigate to={getRedirectPath()} /> : <AuthPage />
-  } */}
+      <Route path="/rolebased-login" element={<CUIPortalPage />} />
 
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<Dashboard />} />
       </Route>
-      
+
       {/* Role-specific routes */}
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />
@@ -112,9 +97,7 @@ const getRedirectPath = () => {
       
       <Route element={<ProtectedRoute allowedRoles={['instructor']} />}>
         <Route path="/teacher" element={<ModularInstructorDashboard />} />
-        <Route path="/instructor-dashboard" element={<ModularInstructorDashboard />}  
-        
-/>
+        <Route path="/instructor-dashboard" element={<ModularInstructorDashboard />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['coordinator']} />}>
@@ -143,30 +126,9 @@ const getRedirectPath = () => {
         <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
       </Route>
 
-       <Route element={<ProtectedRoute allowedRoles={['admin']} />}> 
-</Route>
-      
       {/* Fallback route */}
       <Route path="*" element={<Navigate to="/login" />} />
-    
-        {/* <Route path="/admin" element={<AdminDashboard />} /> */}
-      {/* <Route path="/student-login" element={<StudentLogin />} /> */}
-
-<Route
-  path="/student/dashboard"
-  element={
-    currentUser?.role === "student"
-      ? <StudentDashboard />
-      : <Navigate to="/student-login" replace />
-      
-  }
-  
-/>
-        
-
-     
-      </Routes>
-
+    </Routes>
   );
 };
 

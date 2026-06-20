@@ -82,6 +82,9 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     curriculum_version_id: undefined,
   });
   
+  const [showEditBatchForm, setShowEditBatchForm] = useState(false);
+  const [editBatchForm, setEditBatchForm] = useState<{ curriculum_version_id?: number }>({});
+  
 
   // Fetch Programs
   const fetchData = useCallback(async () => {
@@ -145,7 +148,9 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     if (!selectedProgram) return;
     try {
       const res = await curriculumService.getMasterCurricula(selectedProgram.id);
+      console.log("Master curricula API response:", res);
       const data = res.data?.data || res.data || [];
+      console.log("Master curricula data:", data);
       setMasterCurricula(data);
     } catch (error) {
       console.error("Error fetching master curricula:", error);
@@ -228,6 +233,30 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
       fetchContent();
     } catch (err: any) {
       setError(err.response?.data?.name?.[0] || 'Failed to create batch');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  const handleEditBatch = (batch: Batch) => {
+    setEditingBatch(batch);
+    setEditBatchForm({ curriculum_version_id: undefined });
+    setShowEditBatchForm(true);
+  };
+  
+  const handleUpdateBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProgram || !editingBatch) return;
+    setSubmitting(true);
+    try {
+      await batchService.updateBatch(selectedProgram.id, editingBatch.id, editBatchForm);
+      setSuccess('Batch updated successfully');
+      setShowEditBatchForm(false);
+      setEditingBatch(null);
+      setEditBatchForm({});
+      fetchContent();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update batch');
     } finally {
       setSubmitting(false);
     }
@@ -480,7 +509,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                           <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Master Curriculum</label>
                           <select
                             value={batchForm.curriculum_version_id || ''}
-                            onChange={e => setBatchForm({...batchForm, curriculum_version_id: e.target.value || undefined})}
+                            onChange={e => setBatchForm({...batchForm, curriculum_version_id: e.target.value ? parseInt(e.target.value) : undefined})}
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
                           >
                             <option value="">Do Not Use Master Curriculum</option>
@@ -498,6 +527,42 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                           <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2">
                             {submitting && <Loader2 className="w-3 h-3 animate-spin" />}
                             Create Batch
+                          </button>
+                        </div>
+                      </form>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                <AnimatePresence>
+                  {showEditBatchForm && activeTab === 'batches' && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                      className="p-6 bg-purple-50 border-b border-purple-100"
+                    >
+                      <h3 className="text-lg font-bold text-gray-800 mb-4">Edit Batch: {editingBatch?.name}</h3>
+                      <form onSubmit={handleUpdateBatch} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1 md:col-span-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Update Master Curriculum</label>
+                          <select
+                            value={editBatchForm.curriculum_version_id || ''}
+                            onChange={e => setEditBatchForm({...editBatchForm, curriculum_version_id: e.target.value ? parseInt(e.target.value) : undefined})}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
+                          >
+                            <option value="">Do Not Use Master Curriculum</option>
+                            {masterCurricula
+                              .filter(cv => cv.status === 'finalized')
+                              .map(cv => (
+                                <option key={cv.id} value={cv.id}>
+                                  {cv.version_no}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+                          <button type="button" onClick={() => {setShowEditBatchForm(false); setEditingBatch(null);}} className="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                          <button type="submit" disabled={submitting} className="px-6 py-2 bg-purple-600 text-white rounded-lg text-sm font-bold flex items-center gap-2">
+                            {submitting && <Loader2 className="w-3 h-3 animate-spin" />}
+                            Update Batch
                           </button>
                         </div>
                       </form>
@@ -568,6 +633,9 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                                 <div className="flex justify-end gap-2 transition-opacity">
                                   <button onClick={() => fetchBatchStudents(b)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="View Students">
                                     <Search className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => handleEditBatch(b)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Edit Batch">
+                                    <Edit3 className="w-4 h-4" />
                                   </button>
                                   {b.status === 'active' && b.is_active && (
                                     <>

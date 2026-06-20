@@ -34,7 +34,7 @@ class BatchCreateSerializer(serializers.ModelSerializer):
 
         if curriculum_version_id:
             try:
-                master_version = CurriculumVersion.objects.get(id=curriculum_version_id, program=program, batch__isnull=True)
+                master_version = CurriculumVersion.objects.get(id=curriculum_version_id, program=program, status='finalized')
                 
                 # Use request user from context
                 request = self.context.get('request')

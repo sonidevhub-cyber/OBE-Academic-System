@@ -4,7 +4,7 @@ from .views import (
     GAListCreateView, GADetailView, 
     GAPEOMatrixView, 
     CLOListCreateView, CLODetailView, 
-    CLOCopyView, CLOGAMatrixView, CLOPIMatrixView,
+    CLOCopyView, CLOGAMatrixView,
     CourseSessionListView, 
     CourseSessionCreateView, 
     CourseSessionUpdateView, 
@@ -73,10 +73,6 @@ urlpatterns = [
     path( 
         'courses/<uuid:course_id>/versions/<int:version_id>/clo-ga-matrix/', 
         CLOGAMatrixView.as_view() 
-    ), 
-    path( 
-        'courses/<uuid:course_id>/versions/<int:version_id>/clo-pi-matrix/', 
-        CLOPIMatrixView.as_view() 
     ), 
 
     # Course Sessions 
