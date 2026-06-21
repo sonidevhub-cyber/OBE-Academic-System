@@ -99,7 +99,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ profileData, userType, da
   const imageUrl = getProfileImageUrl(profile);
   const initials = getProfileInitials(profile);
   const statusLabel = getStatusLabel(profile);
-  const departmentLabel = getDepartmentLabel(profile.department || profile.department_name);
+  const departmentLabel = getDepartmentLabel(profile.department || profile.department_name, profile);
   const semesterLabel = getSemesterLabel(profile.semester);
   const accent = ROLE_ACCENTS[userType] || ROLE_ACCENTS.student;
 

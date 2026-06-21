@@ -27,7 +27,8 @@ from .views import (
     CourseUnlockView,
     BatchGAReportView,
     CourseCLOReportView,
-    TeacherGAContextView
+    TeacherGAContextView,
+    BatchStudentsListView
 )
 
 urlpatterns = [
@@ -142,9 +143,12 @@ urlpatterns = [
     # 10. GA Report endpoint
     path('ga-reports/<uuid:batch_id>/', BatchGAReportView.as_view()),
     
-    # 11. Course CLO Report
+    # 11. Batch Students List
+    path('ga-reports/<uuid:batch_id>/students/', BatchStudentsListView.as_view()),
+    
+    # 12. Course CLO Report
     path('courses/<uuid:session_id>/clo-report/', CourseCLOReportView.as_view()),
     
-    # 12. Teacher GA Context endpoint
+    # 13. Teacher GA Context endpoint
     path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view())
 ] 

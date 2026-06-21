@@ -1097,7 +1097,48 @@ class CourseUnlockView(APIView):
         return Response(CourseSessionSerializer(session).data)
 
 
-# 10. GA Report View
+# 10. Get Batch Students List
+class BatchStudentsListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Use User model (core app) which is what has the batch foreign key
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        users = User.objects.filter(
+            batch=batch,
+            role='student',
+            is_active=True
+        )
+        
+        student_list = []
+        for user in users:
+            # Try to get associated student profile if exists
+            student_profile = None
+            try:
+                from students.models import Student
+                student_profile = Student.objects.get(user=user)
+            except (ImportError, Student.DoesNotExist):
+                pass
+            
+            student_list.append({
+                'id': str(user.id),  # Use user's id (uuid)
+                'student_id': user.custom_id or str(user.id),
+                'name': user.full_name,
+                'roll_number': student_profile.registration_number if student_profile else '',
+                'is_active': user.is_active
+            })
+        
+        return Response(student_list)
+
+
+# 11. GA Report View
 class BatchGAReportView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1133,22 +1174,36 @@ class BatchGAReportView(APIView):
         }
 
     def get(self, request, batch_id):
+        print("=== BatchGAReportView ===")
+        print("batch_id:", batch_id)
+        print("request.query_params:", request.query_params)
         try:
             batch = Batch.objects.get(id=batch_id, is_active=True)
         except Batch.DoesNotExist:
+            print("ERROR: Batch not found")
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
 
         scope = request.query_params.get('scope', 'cohort')    # cohort|student
         student_id = request.query_params.get('student_id', None)
+        print("scope:", scope)
+        print("student_id:", student_id)
 
         # For scope=student
         student_obj = None
         if scope == 'student':
             if not student_id:
+                print("ERROR: student_id missing")
                 return Response({'error': 'student_id is required when scope=student'}, status=status.HTTP_400_BAD_REQUEST)
-            student_obj = Student.objects.filter(id=student_id).first()
-            if not student_obj:
+            # Get User first
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            try:
+                user = User.objects.get(id=student_id)
+                student_obj = Student.objects.get(user=user)
+            except (User.DoesNotExist, Student.DoesNotExist):
+                print("ERROR: Student not found")
                 return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+            print("student_obj found:", student_obj)
 
         # Readiness gate (only when scope=cohort)
         if scope == 'cohort':
@@ -1161,11 +1216,13 @@ class BatchGAReportView(APIView):
         # Determine ga rows
         gas = GA.objects.filter(program=batch.program, is_active=True)
         response_items = []
+        print("=== GA count:", gas.count())
 
         for ga in gas:
             ga_attainment = None
             contributing_courses = []
             ga_cqi_records = []
+            ga_code = f'GA-{ga.order_number}'
 
             if scope == 'cohort':
                 ga_attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
@@ -1186,6 +1243,7 @@ class BatchGAReportView(APIView):
                             'course_ga_score': float(score.score),
                             'enrolled_students': score.enrolled_students,
                             'semester': session.semester.number if session.semester else None,
+                            'credits': session.course.credit_hours,
                         })
 
                 # GA CQI records: cohort only, and only if program end is ready
@@ -1196,31 +1254,43 @@ class BatchGAReportView(APIView):
 
             else:
                 # scope=student
+                print("=== Processing student scope for", ga_code)
                 ga_attainment = calculate_ga_attainment_cumulative_student(student_obj, ga)
 
                 # Contributing courses: show student's course_ga_score derived from StudentCLOScore (only <= current semester)
                 cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
+                print("cs_qs count for student scope:", cs_qs.count())
 
                 # For each course, compute one course_ga_score per student's course by using StudentCLOScore weighted sum.
                 for session in cs_qs.select_related('course', 'semester'):
                     mappings = CLOGAMapping.objects.filter(clo__course=session.course, ga=ga, is_active=True, clo__is_active=True)
+                    print(f"session:", session.course.code, "mappings count:", mappings.count())
                     if not mappings.exists():
                         continue
                     total_att = Decimal('0')
                     total_w = Decimal('0')
                     for m in mappings:
+                        # Check if m.clo has a code field first
+                        clo_code = None
+                        if hasattr(m.clo, 'code'):
+                            clo_code = m.clo.code
+                        elif hasattr(m.clo, 'order_number'):
+                            clo_code = f"CLO-{m.clo.order_number}"
                         clo_score = StudentCLOScore.objects.filter(student=student_obj, clo=m.clo, course_session=session).first()
+                        print(f"clo:", clo_code, "clo_score:", clo_score)
                         if clo_score:
                             total_att += clo_score.attainment * m.weight
                             total_w += m.weight
                     if total_w > 0:
                         course_ga_score = round(total_att / total_w, 2)
+                        print("course_ga_score for", session.course.code, "=", course_ga_score)
                         contributing_courses.append({
                             'course_code': session.course.code,
                             'course_name': session.course.name,
                             'course_ga_score': float(course_ga_score),
                             'enrolled_students': 1,
                             'semester': session.semester.number if session.semester else None,
+                            'credits': session.course.credit_hours,
                         })
 
             if ga_attainment is None:
@@ -1231,15 +1301,16 @@ class BatchGAReportView(APIView):
 
             response_items.append({
                 'ga_id': str(ga.id),
-                'ga_code': f'GA-{ga.order_number}',
+                'ga_code': ga_code,
                 'ga_title': ga.title,
                 'ga_attainment': float(ga_attainment) if ga_attainment is not None else None,
-                'kpi_threshold': float(ga.kpi_threshold),
+                'ga_kpi_threshold': float(ga.kpi_threshold),
                 'status': status_str,
                 'contributing_courses': contributing_courses,
                 'ga_cqi_records': ga_cqi_records if (scope == 'cohort' and is_program_end_ready) else [],
             })
 
+        print("=== returning response with response_items count:", len(response_items))
         # Return top-level object with is_program_end_ready and data
         return Response({
             'is_program_end_ready': is_program_end_ready,

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import obeService, { GAReportItem, Batch, BatchGAReportResponse } from '../api/obeService';
+import obeService, { GAReportItem, Batch, BatchGAReportResponse, GAReportContributingCourse, GACQIRecord } from '../api/obeService';
 import { toast } from 'react-hot-toast';
 import authService from '../api/authService';
+import * as XLSX from 'xlsx-js-style';
 
 const GAReport: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -17,6 +18,9 @@ const GAReport: React.FC = () => {
   const [localCqiData, setLocalCqiData] = useState<{ [key: string]: { root_cause: string; remedial_plan: string; hod_comment: string } }>({});
   const [submitting, setSubmitting] = useState<{ [key: string]: boolean }>({});
   const [isProgramEndReady, setIsProgramEndReady] = useState<boolean>(false);
+  const [sortBy, setSortBy] = useState<'course_code' | 'course_ga_score' | 'semester' | 'credits'>('course_code');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Get actual user role
   const authData = authService.getCurrentUser();
@@ -102,6 +106,43 @@ const GAReport: React.FC = () => {
     return gaItems.filter((ga: GAReportItem) => ga.status === 'BELOW_TARGET');
   }, [gaItems]);
 
+  const getSortedFilteredCourses = (courses: GAReportContributingCourse[], kpiThreshold: number) => {
+    let filteredCourses = [...courses];
+
+    // Apply search filter
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      filteredCourses = filteredCourses.filter(course => 
+        course.course_code.toLowerCase().includes(lowerQuery) ||
+        (course.course_name?.toLowerCase().includes(lowerQuery) || '')
+      );
+    }
+
+    // Apply sorting
+    filteredCourses.sort((a, b) => {
+      let aVal = a[sortBy];
+      let bVal = b[sortBy];
+
+      // Handle null/undefined values
+      if (aVal === null || aVal === undefined) aVal = 0;
+      if (bVal === null || bVal === undefined) bVal = 0;
+
+      // Handle string vs number comparisons
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = bVal.toLowerCase();
+      }
+
+      if (sortOrder === 'asc') {
+        return aVal > bVal ? 1 : -1;
+      } else {
+        return aVal < bVal ? 1 : -1;
+      }
+    });
+
+    return filteredCourses;
+  };
+
   const refreshReport = async () => {
     const params: any = { mode: 'cumulative', scope };
     if (scope === 'student' && selectedStudentId) {
@@ -181,6 +222,304 @@ const GAReport: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    if (!report || !isReady) {
+      toast.error('No report data to export');
+      return;
+    }
+
+    const selectedBatchObj = batches.find(b => b.id === selectedBatch);
+    const wb = XLSX.utils.book_new();
+    
+    // --- Summary Sheet ---
+    const summaryHeaderRows: any[][] = [
+      [selectedBatchObj?.program?.name || 'Program Name'],
+      ['Department: ' + (selectedBatchObj?.program?.department || 'Computer Science')],
+      ['Batch: ' + (selectedBatchObj?.name || 'Selected Batch')],
+      ['GA Attainment Summary Report'],
+      ['Date: ' + new Date().toLocaleDateString()],
+      [],
+      []
+    ];
+    
+    const summaryData: any[] = [...summaryHeaderRows];
+    summaryData.push([
+      'Type',
+      'GA Code',
+      'GA Title',
+      'GA Attainment',
+      'KPI Threshold',
+      'Status',
+      'Course Code',
+      'Course Name',
+      'Semester',
+      'Credits',
+      'Course GA Score',
+      'Enrolled Students'
+    ]);
+    
+    const summaryStatusIndices: number[] = [];
+    gaItems.forEach((ga: GAReportItem) => {
+      // Add GA Summary row
+      summaryStatusIndices.push(summaryData.length);
+      summaryData.push([
+        'GA Summary',
+        ga.ga_code,
+        ga.ga_title,
+        ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
+        (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
+        ga.status,
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
+      ]);
+      
+      // Add contributing courses
+      (ga.contributing_courses || []).forEach((course) => {
+        summaryData.push([
+          'Contributing Course',
+          ga.ga_code,
+          ga.ga_title,
+          '',
+          '',
+          '',
+          course.course_code,
+          course.course_name || '',
+          course.semester || '',
+          course.credits || '',
+          course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
+          course.enrolled_students || ''
+        ]);
+      });
+      
+      // Add empty row between GAs
+      summaryData.push([]);
+    });
+    
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
+    
+    // Style Summary Sheet
+    const summaryMerges = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, // Program name
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } }, // Department
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } }, // Batch
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 11 } }, // Report title
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 11 } }  // Date
+    ];
+    
+    summaryWs['!merges'] = summaryMerges;
+    
+    const summaryRange = XLSX.utils.decode_range(summaryWs['!ref'] || 'A1');
+    
+    for (let R = 0; R <= summaryRange.e.r; ++R) {
+      for (let C = 0; C <= 11; ++C) {
+        const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
+        if (!summaryWs[cell_address]) continue;
+        
+        if (R < 5) {
+          // Header rows (blue)
+          summaryWs[cell_address].s = {
+            fill: { fgColor: { rgb: '4472C4' } },
+            font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 14 },
+            alignment: { horizontal: 'center', vertical: 'center' }
+          };
+        } else if (R === 6) { // Column headers
+          summaryWs[cell_address].s = {
+            fill: { fgColor: { rgb: 'D9E1F2' } },
+            font: { bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        } else if (summaryStatusIndices.includes(R)) {
+          // GA summary rows - apply background to entire row
+          const statusIndex = summaryStatusIndices.indexOf(R);
+          const status = gaItems[statusIndex].status;
+          
+          summaryWs[cell_address].s = {
+            fill: { fgColor: { rgb: status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
+            font: { color: { rgb: status === 'ACHIEVED' ? '006100' : '9C0006' }, bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        } else if (summaryWs[cell_address].v === 'Contributing Course') {
+          // Contributing Course Type column - light gray
+          summaryWs[cell_address].s = {
+            fill: { fgColor: { rgb: 'E7E6E6' } },
+            font: { bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        }
+      }
+    }
+    
+    // Set Summary column widths
+    summaryWs['!cols'] = [
+      { wch: 20 },
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 30 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 18 },
+      { wch: 18 }
+    ];
+    
+    // --- GA Report Sheet ---
+    // Prepare header data
+    const headerRows: any[][] = [
+      [selectedBatchObj?.program?.name || 'Program Name'],
+      ['Department: ' + (selectedBatchObj?.program?.department || 'Computer Science')],
+      ['Batch: ' + (selectedBatchObj?.name || 'Selected Batch')],
+      ['GA Attainment Report'],
+      ['Date: ' + new Date().toLocaleDateString()],
+      [],
+      []
+    ];
+    
+    // Convert header to sheet with merged cells
+    const wsData: any[] = [...headerRows];
+    const gaSummaryRowIndices: number[] = [];
+    const gaStatuses: string[] = [];
+    
+    // Add each GA
+    gaItems.forEach((ga: GAReportItem) => {
+      // Track GA summary row index
+      gaSummaryRowIndices.push(wsData.length);
+      gaStatuses.push(ga.status);
+      
+      // Add GA summary row
+      const gaRow = [
+        'GA Summary',
+        ga.ga_code,
+        ga.ga_title,
+        ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
+        (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
+        ga.status
+      ];
+      wsData.push(gaRow);
+      
+      // Add contributing courses header
+      wsData.push([
+        'Contributing Courses',
+        '',
+        '',
+        '',
+        '',
+        ''
+      ]);
+      wsData.push([
+        'Course Code',
+        'Course Name',
+        'Semester',
+        'Credits',
+        'Course GA Score',
+        'Enrolled Students'
+      ]);
+      
+      // Add contributing courses
+      (ga.contributing_courses || []).forEach((course: GAReportContributingCourse) => {
+        wsData.push([
+          course.course_code,
+          course.course_name || '',
+          course.semester || '',
+          course.credits || '',
+          course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
+          course.enrolled_students || ''
+        ]);
+      });
+      
+      // Add empty row between GAs
+      wsData.push([]);
+    });
+    
+    // Create worksheet
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    
+    // Style header (blue, bold, merged)
+    const merges = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Program name
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }, // Department
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }, // Batch
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } }, // Report title
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 5 } }  // Date
+    ];
+    
+    ws['!merges'] = merges;
+    
+    // Style cells
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    
+    // Apply styles
+    for (let R = 0; R <= range.e.r; ++R) {
+      for (let C = 0; C <= 5; ++C) {
+        const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
+        if (!ws[cell_address]) continue;
+        
+        if (R < 5) {
+          // Header rows (blue)
+          ws[cell_address].s = {
+            fill: { fgColor: { rgb: '4472C4' } },
+            font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 14 },
+            alignment: { horizontal: 'center', vertical: 'center' }
+          };
+        } else if (gaSummaryRowIndices.includes(R)) {
+          // GA summary row - apply background to entire row
+          const statusIndex = gaSummaryRowIndices.indexOf(R);
+          const status = gaStatuses[statusIndex];
+          
+          ws[cell_address].s = {
+            fill: { fgColor: { rgb: status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
+            font: { color: { rgb: status === 'ACHIEVED' ? '006100' : '9C0006' }, bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        } else if (ws[cell_address].v === 'Contributing Courses') {
+          // Contributing courses header - gray background
+          ws[cell_address].s = {
+            fill: { fgColor: { rgb: 'E7E6E6' } },
+            font: { bold: true }
+          };
+        } else if (R === gaSummaryRowIndices[0] + 2) { // Course headers
+          ws[cell_address].s = {
+            fill: { fgColor: { rgb: 'D9E1F2' } },
+            font: { bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        } else if (C === 4) { // Course GA Score column
+          ws[cell_address].s = {
+            font: { bold: true },
+            alignment: { horizontal: 'center' }
+          };
+        }
+      }
+    }
+    
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 40 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 20 },
+      { wch: 20 }
+    ];
+    
+    // Add sheets to workbook
+    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+    XLSX.utils.book_append_sheet(wb, ws, 'GA Report');
+    
+    // Generate filename
+    const filename = `GA_Report_${selectedBatchObj?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    
+    // Download
+    XLSX.writeFile(wb, filename);
+    toast.success('Report exported successfully');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
       {/* Header */}
@@ -191,17 +530,29 @@ const GAReport: React.FC = () => {
             {batches.find(b => b.id === selectedBatch)?.name || 'Select a batch'}
           </p>
         </div>
-        <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Batch:</span>
-          <select
-            value={selectedBatch}
-            onChange={(e) => setSelectedBatch(e.target.value)}
-            className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            disabled={!report || !isReady}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md"
           >
-            {batches.map(batch => (
-              <option key={batch.id} value={batch.id}>{batch.name}</option>
-            ))}
-          </select>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2z" />
+            </svg>
+            Export Report
+          </button>
+          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
+            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Batch:</span>
+            <select
+              value={selectedBatch}
+              onChange={(e) => setSelectedBatch(e.target.value)}
+              className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+            >
+              {batches.map(batch => (
+                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -274,6 +625,17 @@ const GAReport: React.FC = () => {
             />
           </div>
         )}
+
+        <div className="flex items-center gap-2 flex-1">
+          <span className="text-xs font-bold text-slate-500 uppercase">Search:</span>
+          <input
+            type="text"
+            placeholder="Search by course code or name"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-slate-100 px-4 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none flex-1"
+          />
+        </div>
       </div>
 
       {loading && (
@@ -355,15 +717,42 @@ const GAReport: React.FC = () => {
 
                   {isExpanded && (
                     <div className="border-t border-slate-100 p-6 bg-slate-50/50 rounded-b-[24px] animate-in fade-in slide-in-from-top-2 duration-300">
-                      <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4">
-                        Contributing Courses
-                      </h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest">
+                          Contributing Courses
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-bold text-slate-500">Sort by:</label>
+                          <select
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-slate-700"
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as any)}
+                          >
+                            <option value="course_code">Course Code</option>
+                            <option value="course_ga_score">GA Score</option>
+                            <option value="semester">Semester</option>
+                            <option value="credits">Credits</option>
+                          </select>
+                          <button
+                            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                            className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-slate-700 hover:bg-slate-100 transition-all"
+                          >
+                            {sortOrder === 'asc' ? 'Asc' : 'Desc'}
+                          </button>
+                        </div>
+                      </div>
                       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                         <table className="w-full text-left border-collapse">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-200">
                               <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">
                                 Course Code
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                Semester
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                Credits
                               </th>
                               <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
                                 GA Score
@@ -376,27 +765,41 @@ const GAReport: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {ga.contributing_courses.map((course: GAReportContributingCourse, idx: number) => (
-                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                <td className="px-4 py-3 font-bold text-slate-700">
-                                  {course.course_code}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <span
-                                    className={`text-sm font-black ${course.course_ga_score >= ga.kpi_threshold
-                                      ? 'text-emerald-600'
-                                      : 'text-rose-600'}`}
-                                  >
-                                    {course.course_ga_score.toFixed(1)}%
-                                  </span>
-                                </td>
-                                {scope === 'cohort' && (
-                                  <td className="px-4 py-3 text-center text-sm text-slate-600">
-                                    {course.enrolled_students}
+                            {getSortedFilteredCourses(ga.contributing_courses, ga.ga_kpi_threshold ?? 0).map((course: GAReportContributingCourse, idx: number) => {
+                              const isBelowTarget = course.course_ga_score < (ga.ga_kpi_threshold ?? 0);
+                              return (
+                                <tr key={idx} className={`border-b border-slate-100 hover:bg-slate-50 ${isBelowTarget ? 'bg-red-50' : ''}`}>
+                                  <td className="px-4 py-3 font-bold text-slate-700">
+                                    {course.course_code}
+                                    {course.course_name && (
+                                      <div className="text-sm text-slate-600">
+                                        {course.course_name}
+                                      </div>
+                                    )}
                                   </td>
-                                )}
-                              </tr>
-                            ))}
+                                  <td className="px-4 py-3 text-center font-bold text-slate-700">
+                                    {course.semester ?? 'N/A'}
+                                  </td>
+                                  <td className="px-4 py-3 text-center font-bold text-slate-700">
+                                    {course.credits ?? 'N/A'}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <span
+                                      className={`text-sm font-black ${isBelowTarget
+                                        ? 'text-rose-600'
+                                        : 'text-emerald-600'}`}
+                                    >
+                                      {course.course_ga_score.toFixed(1)}%
+                                    </span>
+                                  </td>
+                                  {scope === 'cohort' && (
+                                    <td className="px-4 py-3 text-center text-sm text-slate-600">
+                                      {course.enrolled_students}
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

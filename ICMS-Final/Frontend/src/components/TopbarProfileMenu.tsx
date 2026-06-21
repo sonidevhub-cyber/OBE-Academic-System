@@ -49,7 +49,7 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
   const imageUrl = getProfileImageUrl(profile);
   const initials = getProfileInitials(profile);
   const statusLabel = getStatusLabel(profile);
-  const departmentLabel = getDepartmentLabel(profile.department || profile.department_name);
+  const departmentLabel = getDepartmentLabel(profile.department || profile.department_name, profile);
   const semesterLabel = getSemesterLabel(profile.semester || profile.semester_name);
   const primaryId =
     profile.custom_id ||

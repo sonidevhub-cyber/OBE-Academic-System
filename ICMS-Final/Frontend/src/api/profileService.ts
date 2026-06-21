@@ -32,7 +32,13 @@ export const fetchCurrentProfile = async (role?: string | null) => {
     throw new Error(`No profile endpoint available for role "${role || 'unknown'}"`);
   }
 
-  return api.get(endpoint);
+  const response = await api.get(endpoint);
+  // The backend uses api_response() which returns { data: ..., message: ... }
+  if (response.data?.data) {
+    // Create a new response-like object with the actual profile as response.data
+    return { data: response.data.data };
+  }
+  return response;
 };
 
 export const updateProfile = async (data: any, isFormData: boolean = false) => {

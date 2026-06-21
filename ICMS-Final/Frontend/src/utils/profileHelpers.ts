@@ -110,16 +110,107 @@ export const getProfileImageUrl = (profile: ProfileLike): string | null => {
   return raw;
 };
 
-export const getDepartmentLabel = (department: any): string | null => {
+export const getDepartmentLabel = (department: any, profile?: any): string | null => {
+  if (!department && !profile) return null;
+  
+  // First check if we have an instructor profile with department
+  if (profile?.instructor_profile) {
+    const instructorDept = firstText(
+      profile.instructor_profile.department_name,
+      profile.instructor_profile.department
+    );
+    if (instructorDept) {
+      return formatProgramName(instructorDept);
+    }
+  }
+  
+  // Check programs_list from user serializer
+  if (profile?.programs_list && Array.isArray(profile.programs_list) && profile.programs_list.length > 0) {
+    return formatProgramName(profile.programs_list[0]);
+  }
+  
+  // Check profile.programs directly
+  if (profile?.programs && Array.isArray(profile.programs) && profile.programs.length > 0) {
+    const programName = firstText(
+      profile.programs[0].name,
+      profile.programs[0].code
+    );
+    return formatProgramName(programName);
+  }
+  
+  // Try to get department from profile fields directly
+  if (profile) {
+    const profileDept = firstText(
+      profile.department,
+      profile.department_name,
+      profile.dept,
+      profile.dept_name
+    );
+    if (profileDept) {
+      if (typeof profileDept === 'string') {
+        return formatProgramName(profileDept.trim() || null);
+      } else {
+        // Try to extract from object
+        const deptName = firstText(
+          (profileDept as any).name,
+          (profileDept as any).department_name,
+          (profileDept as any).code,
+          (profileDept as any).title,
+          (profileDept as any).dept,
+          (profileDept as any).dept_name
+        );
+        return formatProgramName(deptName);
+      }
+    }
+  }
+  
   if (!department) return null;
-  if (typeof department === 'string') return department.trim() || null;
+  
+  if (typeof department === 'string') {
+    return formatProgramName(department.trim() || null);
+  }
 
-  return firstText(
+  const deptName = firstText(
     department.name,
     department.department_name,
     department.code,
-    department.title
+    department.title,
+    department.dept,
+    department.dept_name
   );
+  return formatProgramName(deptName);
+};
+
+// Helper function to format program names
+const formatProgramName = (name: any): string | null => {
+  if (!name) return null;
+  const nameStr = String(name);
+  
+  // Special cases for common program codes
+  if (nameStr.toLowerCase().includes('bscs') || nameStr.toLowerCase() === 'bscs') {
+    return 'CS (Computer Science)';
+  }
+  if (nameStr.toLowerCase().includes('cs') && nameStr.length <= 4) {
+    return 'CS (Computer Science)';
+  }
+  
+  // If it's just a short code, try to expand it
+  if (nameStr.length <= 4) {
+    const mappings: Record<string, string> = {
+      'cs': 'CS (Computer Science)',
+      'se': 'SE (Software Engineering)',
+      'it': 'IT (Information Technology)',
+      'ai': 'AI (Artificial Intelligence)',
+      'ds': 'DS (Data Science)',
+      'bba': 'BBA (Business Administration)',
+    };
+    const lowerName = nameStr.toLowerCase();
+    if (mappings[lowerName]) {
+      return mappings[lowerName];
+    }
+  }
+  
+  return nameStr;
 };
 
 export const getSemesterLabel = (semester: any): string | null => {

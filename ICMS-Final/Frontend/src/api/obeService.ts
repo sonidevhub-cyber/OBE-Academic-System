@@ -89,6 +89,7 @@ export interface GAReportContributingCourse {
   course_ga_score: number;
   enrolled_students?: number;
   semester?: number | null;
+  credits?: number;
 }
 
 export interface GAReportItem {
@@ -96,7 +97,8 @@ export interface GAReportItem {
   ga_code: string;
   ga_title: string;
   ga_attainment: number | null;
-  kpi_threshold: number;
+  ga_kpi_threshold: number;
+  kpi_threshold?: number;
   status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
   contributing_courses: GAReportContributingCourse[];
   ga_cqi_records: GACQIRecord[];
@@ -155,6 +157,7 @@ export interface CourseSession {
   course_name: string;
   batch_name: string;
   semester_name: string;
+  semester_number?: number;
   instructor_name: string;
   is_active: boolean;
   assessment_status: 'IN_PROGRESS' | 'ASSESSMENT_DONE';
@@ -319,6 +322,12 @@ class OBEService {
   // Get All Batches
   async getAllBatches(): Promise<Batch[]> {
     const response = await api.get('/batches/all/');
+    return response.data;
+  }
+
+  // Get Students for a Batch
+  async getBatchStudents(batchId: string): Promise<Array<{id: string, student_id: string, name: string, roll_number: string, is_active: boolean}>> {
+    const response = await api.get(`/obe/ga-reports/${batchId}/students/`);
     return response.data;
   }
 
