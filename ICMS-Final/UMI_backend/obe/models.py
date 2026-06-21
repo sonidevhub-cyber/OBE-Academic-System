@@ -241,8 +241,10 @@ class CourseGAScore(models.Model):
         related_name='course_scores'
     )
     score = models.DecimalField(max_digits=5, decimal_places=2)
+    enrolled_students = models.IntegerField(default=0)
     calculated_at = models.DateTimeField(auto_now_add=True)
     is_stale = models.BooleanField(default=False)
+    locked = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('course_session', 'ga')
@@ -253,13 +255,13 @@ class CourseGAScore(models.Model):
 
 class GACQIRecord(models.Model):
     STATUS_CHOICES = [
-        ('PENDING_HOD_APPROVAL', 'Pending HOD Approval'),
+        ('PENDING', 'Pending'),
         ('SENT_BACK', 'Sent Back'),
         ('FULLY_APPROVED', 'Fully Approved'),
     ]
-    TRIGGER_TYPE_CHOICES = [
-        ('SEMESTER_EARLY_WARNING', 'Semester-End Early Warning'),
-        ('PROGRAM_MASTER_CQI', 'Program-Level Master CQI'),
+    CQI_LEVEL_CHOICES = [
+        ('SEMESTER', 'Semester End CQI'),
+        ('CUMULATIVE', 'Program End CQI'),
     ]
     id = models.UUIDField(
         primary_key=True,
@@ -271,17 +273,75 @@ class GACQIRecord(models.Model):
         on_delete=models.PROTECT,
         related_name='cqi_records'
     )
-    trigger_type = models.CharField(max_length=30, choices=TRIGGER_TYPE_CHOICES)
-    affected_course_sessions = models.ManyToManyField(CourseSession, related_name='ga_cqi_records')
-    reason = models.TextField(blank=True)
-    remedy = models.TextField(blank=True)
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING_HOD_APPROVAL')
-    hod_rejection_comment = models.TextField(blank=True, null=True)
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='ga_cqi_records'
+    )
+    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES)
+    semester = models.IntegerField(null=True, blank=True)
+    attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    root_cause = models.TextField(blank=True, null=True)
+    remedial_plan = models.TextField(blank=True, null=True)
+    hod_comment = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING')
+    submitted_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='submitted_ga_cqis',
+        null=True,
+        blank=True
+    )
+    approved_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='approved_ga_cqis',
+        null=True,
+        blank=True
+    )
+    is_audit_visible = models.BooleanField(default=True)
+    is_locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        # Ensure only one CQI record per (ga, batch, cqi_level)
+        unique_together = ('ga', 'batch', 'cqi_level')
+
     def __str__(self):
-        return f"{self.ga} - {self.trigger_type} ({self.status})"
+        return f"{self.ga} - {self.cqi_level} ({self.status})"
+
+
+class StudentCLOScore(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    student = models.ForeignKey(
+        'students.Student',
+        on_delete=models.CASCADE,
+        related_name='clo_scores'
+    )
+    clo = models.ForeignKey(
+        CLO,
+        on_delete=models.CASCADE,
+        related_name='student_scores'
+    )
+    course_session = models.ForeignKey(
+        CourseSession,
+        on_delete=models.CASCADE,
+        related_name='student_clo_scores'
+    )
+    attainment = models.DecimalField(max_digits=5, decimal_places=2)
+    calculated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('student', 'clo', 'course_session')
+
+    def __str__(self):
+        return f"{self.student.user.full_name} - {self.clo}: {self.attainment}"
 
 
 class GACQIResubmissionHistory(models.Model):
@@ -295,8 +355,9 @@ class GACQIResubmissionHistory(models.Model):
         on_delete=models.CASCADE,
         related_name='history'
     )
-    reason_snapshot = models.TextField()
-    remedy_snapshot = models.TextField()
+    root_cause_snapshot = models.TextField(blank=True, null=True)
+    remedial_plan_snapshot = models.TextField(blank=True, null=True)
+    hod_comment_snapshot = models.TextField(blank=True, null=True)
     status_at_time = models.CharField(max_length=30)
     submitted_at = models.DateTimeField(auto_now_add=True)
 

@@ -3,13 +3,15 @@ from rest_framework.response import Response
 from rest_framework import status 
 from rest_framework.permissions import IsAuthenticated 
 from django.db import transaction
+from django.core import exceptions
 from decimal import Decimal
 from curriculum.models import CurriculumVersion
 from .models import ( 
     PEO, GA, GAPEOMapping, 
     CLO, CLOGAMapping, 
     CourseSession, CourseGAScore,
-    GACQIRecord, GACQIResubmissionHistory
+    GACQIRecord, GACQIResubmissionHistory,
+    StudentCLOScore
 ) 
 from .serializers import ( 
     PEOSerializer, GASerializer, 
@@ -19,22 +21,28 @@ from .serializers import (
     CurriculumVersionSerializer,
     CourseGAScoreSerializer,
     GACQIRecordSerializer,
-    GACQIResubmissionHistorySerializer
+    GACQIResubmissionHistorySerializer,
+    StudentCLOScoreSerializer
 ) 
 from .services import (
     calculate_course_ga_score,
     calculate_all_course_ga_scores,
-    calculate_semester_ga_score,
-    calculate_program_ga_attainment
+    calculate_ga_attainment_semester_cohort,
+    calculate_ga_attainment_cumulative_cohort,
+    calculate_ga_attainment_semester_student,
+    calculate_ga_attainment_cumulative_student,
+    check_and_trigger_ga_cqi,
+    get_teacher_ga_context
 )
 from core.models import Batch, Semester
+from students.models import Student
  
- 
+
 # ─── PEO Views ─────────────────────────── 
- 
+
 class PEOListCreateView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, program_id): 
         peos = PEO.objects.filter( 
             program_id=program_id, 
@@ -42,7 +50,7 @@ class PEOListCreateView(APIView):
         ) 
         serializer = PEOSerializer(peos, many=True) 
         return Response(serializer.data) 
- 
+
     def post(self, request, program_id): 
         print(f"DEBUG: PEO POST request for program_id: {program_id}")
         print(f"DEBUG: Request data: {request.data}")
@@ -60,11 +68,11 @@ class PEOListCreateView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 class PEODetailView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get_object(self, pk): 
         try: 
             return PEO.objects.get( 
@@ -72,7 +80,7 @@ class PEODetailView(APIView):
             ) 
         except PEO.DoesNotExist: 
             return None 
- 
+
     def get(self, request, pk): 
         peo = self.get_object(pk) 
         if not peo: 
@@ -81,7 +89,7 @@ class PEODetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND 
             ) 
         return Response(PEOSerializer(peo).data) 
- 
+
     def patch(self, request, pk): 
         peo = self.get_object(pk) 
         if not peo: 
@@ -99,7 +107,7 @@ class PEODetailView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
+
     def delete(self, request, pk): 
         peo = self.get_object(pk) 
         if not peo: 
@@ -113,13 +121,13 @@ class PEODetailView(APIView):
             {'success': True}, 
             status=status.HTTP_200_OK 
         ) 
- 
- 
-# ─── GA Views ──────────────────────────── 
- 
+
+
+# ─── GA Views ───────────────────────────── 
+
 class GAListCreateView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, program_id): 
         gas = GA.objects.filter( 
             program_id=program_id, 
@@ -127,7 +135,7 @@ class GAListCreateView(APIView):
         ) 
         serializer = GASerializer(gas, many=True) 
         return Response(serializer.data) 
- 
+
     @transaction.atomic
     def post(self, request, program_id): 
         print(f"DEBUG: GA POST request for program_id: {program_id}")
@@ -148,11 +156,11 @@ class GAListCreateView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 class GADetailView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get_object(self, pk): 
         try: 
             return GA.objects.get( 
@@ -160,7 +168,7 @@ class GADetailView(APIView):
             ) 
         except GA.DoesNotExist: 
             return None 
- 
+
     def get(self, request, pk): 
         ga = self.get_object(pk) 
         if not ga: 
@@ -169,7 +177,7 @@ class GADetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND 
             ) 
         return Response(GASerializer(ga).data) 
- 
+
     @transaction.atomic
     def patch(self, request, pk): 
         ga = self.get_object(pk) 
@@ -189,7 +197,7 @@ class GADetailView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
+
     def delete(self, request, pk): 
         ga = self.get_object(pk) 
         if not ga: 
@@ -200,13 +208,13 @@ class GADetailView(APIView):
         ga.is_active = False 
         ga.save() 
         return Response({'success': True}) 
- 
- 
+
+
 # ─── GA-PEO Matrix View ────────────────── 
- 
+
 class GAPEOMatrixView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, program_id): 
         gas = GA.objects.filter( 
             program_id=program_id, 
@@ -229,7 +237,7 @@ class GAPEOMatrixView(APIView):
                 mappings, many=True 
             ).data 
         }) 
- 
+
     @transaction.atomic 
     def post(self, request, program_id): 
         # Bulk save matrix 
@@ -237,7 +245,7 @@ class GAPEOMatrixView(APIView):
         GAPEOMapping.objects.filter( 
             ga__program_id=program_id 
         ).delete() 
- 
+
         mappings_data = request.data.get( 
             'mappings', [] 
         ) 
@@ -248,20 +256,20 @@ class GAPEOMatrixView(APIView):
                 peo_id=m['peo_id'] 
             ) 
             created.append(mapping) 
- 
+
         return Response( 
             GAPEOMappingSerializer( 
                 created, many=True 
             ).data, 
             status=status.HTTP_201_CREATED 
         ) 
- 
- 
+
+
 # ─── CLO Views ─────────────────────────── 
- 
+
 class CLOListCreateView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, course_id, version_id): 
         clos = CLO.objects.filter( 
             course_id=course_id, 
@@ -270,7 +278,7 @@ class CLOListCreateView(APIView):
         ) 
         serializer = CLOSerializer(clos, many=True) 
         return Response(serializer.data) 
- 
+
     def post(self, request, course_id, version_id): 
         # Check if version is editable
         try:
@@ -298,11 +306,11 @@ class CLOListCreateView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 class CLODetailView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get_object(self, pk): 
         try: 
             return CLO.objects.get( 
@@ -310,7 +318,7 @@ class CLODetailView(APIView):
             ) 
         except CLO.DoesNotExist: 
             return None 
- 
+
     def patch(self, request, pk): 
         clo = self.get_object(pk) 
         if not clo: 
@@ -337,7 +345,7 @@ class CLODetailView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
+
     def delete(self, request, pk): 
         clo = self.get_object(pk) 
         if not clo: 
@@ -357,11 +365,11 @@ class CLODetailView(APIView):
         clo.is_active = False 
         clo.save() 
         return Response({'success': True}) 
- 
- 
+
+
 class CLOCopyView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     @transaction.atomic 
     def post( 
         self, request, course_id, version_id 
@@ -382,19 +390,19 @@ class CLOCopyView(APIView):
                 {'error': 'source_version_id required'}, 
                 status=status.HTTP_400_BAD_REQUEST 
             ) 
- 
+
         source_clos = CLO.objects.filter( 
             course_id=course_id, 
             curriculum_version_id=source_version_id, 
             is_active=True 
         ) 
- 
+
         if not source_clos.exists(): 
             return Response( 
                 {'error': 'No CLOs found in source version'}, 
                 status=status.HTTP_400_BAD_REQUEST 
             ) 
- 
+
         new_clos = [] 
         for s_clo in source_clos:
             new_clo = CLO.objects.create(
@@ -409,13 +417,13 @@ class CLOCopyView(APIView):
             new_clos.append(new_clo)
         
         return Response(CLOSerializer(new_clos, many=True).data, status=status.HTTP_201_CREATED)
- 
- 
+
+
 # ─── CLO-GA Matrix View ────────────────── 
- 
+
 class CLOGAMatrixView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, course_id, version_id): 
         clos = CLO.objects.filter( 
             course_id=course_id, 
@@ -442,7 +450,7 @@ class CLOGAMatrixView(APIView):
                 mappings, many=True 
             ).data 
         }) 
- 
+
     @transaction.atomic 
     def post( 
         self, request, course_id, version_id 
@@ -466,7 +474,7 @@ class CLOGAMatrixView(APIView):
             clo__course_id=course_id, 
             clo__curriculum_version_id=version_id 
         ).delete() 
- 
+
         mappings_data = request.data.get( 
             'mappings', [] 
         ) 
@@ -478,20 +486,17 @@ class CLOGAMatrixView(APIView):
                 weight=m['weight'] 
             ) 
             created.append(mapping) 
- 
+
         return Response( 
             CLOGAMappingSerializer( 
                 created, many=True 
             ).data, 
             status=status.HTTP_201_CREATED 
         ) 
- 
- 
 
- 
- 
+
 # ─── Course Session Views ───────────────── 
- 
+
 class CourseSessionListView(APIView): 
     permission_classes = [IsAuthenticated]
 
@@ -544,11 +549,11 @@ class CourseSessionListView(APIView):
                 filtered_sessions, many=True 
             ).data
         }) 
- 
- 
+
+
 class CourseSessionCreateView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def post(self, request): 
         serializer = CourseSessionSerializer( 
             data=request.data 
@@ -563,11 +568,11 @@ class CourseSessionCreateView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 class CourseSessionUpdateView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def patch(self, request, pk): 
         try: 
             session = CourseSession.objects.get( 
@@ -590,13 +595,13 @@ class CourseSessionUpdateView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 # ─── Curriculum Version Views ───────────── 
- 
+
 class CurriculumVersionListView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, batch_id): 
         versions = CurriculumVersion.objects.filter( 
             batch_id=batch_id, 
@@ -607,7 +612,7 @@ class CurriculumVersionListView(APIView):
                 versions, many=True 
             ).data 
         ) 
- 
+
     def post(self, request, batch_id): 
         data = request.data.copy() 
         data['batch'] = batch_id 
@@ -624,11 +629,11 @@ class CurriculumVersionListView(APIView):
             serializer.errors, 
             status=status.HTTP_400_BAD_REQUEST 
         ) 
- 
- 
+
+
 class CurriculumVersionDeleteView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def delete(self, request, pk): 
         try: 
             version = CurriculumVersion.objects.get( 
@@ -642,13 +647,13 @@ class CurriculumVersionDeleteView(APIView):
         version.is_active = False 
         version.save() 
         return Response({'success': True}) 
- 
- 
+
+
 # ─── Effective Curriculum View ──────────── 
- 
+
 class EffectiveCurriculumView(APIView): 
     permission_classes = [IsAuthenticated] 
- 
+
     def get(self, request, batch_id): 
         from academic_structure.models import ( 
             Batch, Course 
@@ -660,27 +665,27 @@ class EffectiveCurriculumView(APIView):
                 {'error': 'Batch not found'}, 
                 status=status.HTTP_404_NOT_FOUND 
             ) 
- 
+
         # Base courses from program 
         base_courses = Course.objects.filter( 
             program=batch.program, 
             is_active=True 
         ) 
- 
+
         # Get overrides for this batch 
         overrides = CurriculumVersion.objects.filter( 
             batch_id=batch_id, 
             is_active=True 
         ) 
- 
+
         added_ids = overrides.filter( 
             action='add' 
         ).values_list('course_id', flat=True) 
- 
+
         removed_ids = overrides.filter( 
             action='remove' 
         ).values_list('course_id', flat=True) 
- 
+
         # Final curriculum 
         from academic_structure.serializers import ( 
             CourseSerializer 
@@ -688,12 +693,12 @@ class EffectiveCurriculumView(APIView):
         final_courses = base_courses.exclude( 
             id__in=removed_ids 
         ) 
- 
+
         extra_courses = Course.objects.filter( 
             id__in=added_ids, 
             is_active=True 
         ) 
- 
+
         return Response({ 
             'batch': batch.name, 
             'base_courses': CourseSerializer( 
@@ -825,7 +830,7 @@ class BatchSemesterGASummaryView(APIView):
             if semester_id:
                 try:
                     semester = Semester.objects.get(id=semester_id)
-                    ga_score = calculate_semester_ga_score(batch, semester, ga)
+                    ga_score = calculate_ga_attainment_semester_cohort(batch, semester, ga)
                 except Semester.DoesNotExist:
                     ga_score = None
             else:
@@ -854,7 +859,7 @@ class BatchProgramGASummaryView(APIView):
         gas = GA.objects.filter(program=batch.program, is_active=True)
         summaries = []
         for ga in gas:
-            final_score = calculate_program_ga_attainment(batch, ga)
+            final_score = calculate_ga_attainment_cumulative_cohort(batch, ga)
             summaries.append({
                 'ga': GASerializer(ga).data,
                 'final_score': float(final_score),
@@ -865,19 +870,117 @@ class BatchProgramGASummaryView(APIView):
         return Response(summaries)
 
 
-# 8. Post GA CQI Record
+# 8. GA CQI Views
+class GACQIRecordDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cqi_id):
+        try:
+            cqi = GACQIRecord.objects.get(id=cqi_id)
+        except GACQIRecord.DoesNotExist:
+            return Response({'error': 'CQI not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(GACQIRecordSerializer(cqi).data)
+
+    @transaction.atomic
+    def patch(self, request, cqi_id):
+        try:
+            cqi = GACQIRecord.objects.get(id=cqi_id)
+        except GACQIRecord.DoesNotExist:
+            return Response({'error': 'CQI not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if program is end ready
+        if not cqi.batch.is_program_end_ready:
+            return Response({'error': 'Program not yet complete — GA-CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if cqi.is_locked:
+            return Response({'error': 'This CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Check if user is coordinator (role or secondary role) for submission
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can update root cause/remedial plan'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Save history if there are changes to root_cause or remedial_plan
+        if 'root_cause' in request.data or 'remedial_plan' in request.data:
+            GACQIResubmissionHistory.objects.create(
+                cqi_record=cqi,
+                root_cause_snapshot=cqi.root_cause,
+                remedial_plan_snapshot=cqi.remedial_plan,
+                hod_comment_snapshot=cqi.hod_comment,
+                status_at_time=cqi.status
+            )
+
+        serializer = GACQIRecordSerializer(cqi, data=request.data, partial=True)
+        if serializer.is_valid():
+            # If status is being set to PENDING, or if root/plan are provided and it was SENT_BACK
+            if request.data.get('status') == 'PENDING' or ((request.data.get('root_cause') or cqi.root_cause) and (request.data.get('remedial_plan') or cqi.remedial_plan) and cqi.status == 'SENT_BACK'):
+                serializer.validated_data['status'] = 'PENDING'
+                serializer.validated_data['submitted_by'] = request.user
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class GACQICreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = GACQIRecordSerializer(data=request.data)
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can create/update GA CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            
+        # Get required fields from request data
+        ga_id = request.data.get('ga')
+        batch_id = request.data.get('batch')
+        cqi_level = request.data.get('cqi_level', 'CUMULATIVE')
+        
+        if not ga_id or not batch_id:
+            return Response({'error': 'ga and batch are required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            ga = GA.objects.get(id=ga_id)
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except (GA.DoesNotExist, Batch.DoesNotExist) as e:
+            return Response({'error': 'GA or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if program is end ready
+        if not batch.is_program_end_ready:
+            return Response({'error': 'Program not yet complete — GA-CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Try to get existing record
+        cqi = GACQIRecord.objects.filter(ga=ga, batch=batch, cqi_level=cqi_level).first()
+        
+        if cqi:
+            if cqi.is_locked:
+                return Response({'error': 'This CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+            
+            # Save history
+            GACQIResubmissionHistory.objects.create(
+                cqi_record=cqi,
+                root_cause_snapshot=cqi.root_cause,
+                remedial_plan_snapshot=cqi.remedial_plan,
+                hod_comment_snapshot=cqi.hod_comment,
+                status_at_time=cqi.status
+            )
+            
+            # Update existing record
+            serializer = GACQIRecordSerializer(cqi, data=request.data, partial=True)
+        else:
+            # Create new record
+            serializer = GACQIRecordSerializer(data=request.data)
+            
         if serializer.is_valid():
-            serializer.save(status='PENDING_HOD_APPROVAL')
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            cqi = serializer.save(status='PENDING', submitted_by=request.user)
+            return Response(GACQIRecordSerializer(cqi).data, status=status.HTTP_200_OK if cqi else status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# 9. Approve GA CQI
 class GACQIApproveView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -888,20 +991,37 @@ class GACQIApproveView(APIView):
         except GACQIRecord.DoesNotExist:
             return Response({'error': 'CQI not found'}, status=status.HTTP_404_NOT_FOUND)
         
+        # Check if program is end ready
+        if not cqi.batch.is_program_end_ready:
+            return Response({'error': 'Program not yet complete — GA-CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if cqi.is_locked:
+            return Response({'error': 'This CQI record is already locked'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Check if user is HOD (role or secondary role)
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can approve GA CQI records'}, status=status.HTTP_403_FORBIDDEN)
+
         # Save history
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
-            reason_snapshot=cqi.reason,
-            remedy_snapshot=cqi.remedy,
+            root_cause_snapshot=cqi.root_cause,
+            remedial_plan_snapshot=cqi.remedial_plan,
+            hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )
 
         cqi.status = 'FULLY_APPROVED'
+        cqi.approved_by = request.user
+        cqi.is_locked = True
         cqi.save()
         return Response(GACQIRecordSerializer(cqi).data)
 
 
-# 10. Reject GA CQI
 class GACQIRejectView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -912,22 +1032,37 @@ class GACQIRejectView(APIView):
         except GACQIRecord.DoesNotExist:
             return Response({'error': 'CQI not found'}, status=status.HTTP_404_NOT_FOUND)
         
+        # Check if program is end ready
+        if not cqi.batch.is_program_end_ready:
+            return Response({'error': 'Program not yet complete — GA-CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if cqi.is_locked:
+            return Response({'error': 'This CQI record is locked and cannot be rejected'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Check if user is HOD (role or secondary role)
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can reject GA CQI records'}, status=status.HTTP_403_FORBIDDEN)
+
         # Save history
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
-            reason_snapshot=cqi.reason,
-            remedy_snapshot=cqi.remedy,
+            root_cause_snapshot=cqi.root_cause,
+            remedial_plan_snapshot=cqi.remedial_plan,
+            hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )
 
-        hod_comment = request.data.get('hod_rejection_comment', '')
         cqi.status = 'SENT_BACK'
-        cqi.hod_rejection_comment = hod_comment
+        if 'hod_comment' in request.data:
+            cqi.hod_comment = request.data.get('hod_comment')
         cqi.save()
         return Response(GACQIRecordSerializer(cqi).data)
 
 
-# 11. Get GA CQI History
 class GACQIHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -941,7 +1076,7 @@ class GACQIHistoryView(APIView):
         return Response(GACQIResubmissionHistorySerializer(history, many=True).data)
 
 
-# 12. Unlock Course Assessment
+# 9. Unlock Course Assessment
 class CourseUnlockView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -960,6 +1095,168 @@ class CourseUnlockView(APIView):
         session.save()
         
         return Response(CourseSessionSerializer(session).data)
+
+
+# 10. GA Report View
+class BatchGAReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_readiness_for_cumulative_cohort(self, batch: Batch):
+        # Only consider courses where semester number <= batch's current semester
+        sessions = CourseSession.objects.filter(
+            batch=batch,
+            is_active=True,
+            semester__number__lte=batch.current_semester,
+        )
+        courses_total = sessions.count()
+        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+
+        if courses_total == 0:
+            return {
+                'ready': False,
+                'finalized_courses': 0,
+                'total_courses': 0,
+                'missing_courses': [],
+            }
+
+        missing = []
+        if courses_assessment_done < courses_total:
+            # Identify missing courses by code for readability
+            missing_qs = sessions.exclude(assessment_status='ASSESSMENT_DONE')
+            missing = list(missing_qs.values_list('course__code', flat=True).distinct())
+
+        return {
+            'ready': courses_assessment_done >= courses_total,
+            'finalized_courses': courses_assessment_done,
+            'total_courses': courses_total,
+            'missing_courses': missing,
+        }
+
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        scope = request.query_params.get('scope', 'cohort')    # cohort|student
+        student_id = request.query_params.get('student_id', None)
+
+        # For scope=student
+        student_obj = None
+        if scope == 'student':
+            if not student_id:
+                return Response({'error': 'student_id is required when scope=student'}, status=status.HTTP_400_BAD_REQUEST)
+            student_obj = Student.objects.filter(id=student_id).first()
+            if not student_obj:
+                return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Readiness gate (only when scope=cohort)
+        if scope == 'cohort':
+            readiness = self._get_readiness_for_cumulative_cohort(batch)
+            if not readiness['ready']:
+                return Response(readiness)
+
+        is_program_end_ready = batch.is_program_end_ready
+        
+        # Determine ga rows
+        gas = GA.objects.filter(program=batch.program, is_active=True)
+        response_items = []
+
+        for ga in gas:
+            ga_attainment = None
+            contributing_courses = []
+            ga_cqi_records = []
+
+            if scope == 'cohort':
+                ga_attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
+                
+                # Trigger cumulative CQI only if program end is ready
+                if is_program_end_ready:
+                    check_and_trigger_ga_cqi(batch, ga, 'CUMULATIVE')
+
+                # Contributing courses: show course_ga_score per course session (only <= current semester)
+                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
+
+                for session in cs_qs.select_related('course', 'semester'):
+                    score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
+                    if score:
+                        contributing_courses.append({
+                            'course_code': session.course.code,
+                            'course_name': session.course.name,
+                            'course_ga_score': float(score.score),
+                            'enrolled_students': score.enrolled_students,
+                            'semester': session.semester.number if session.semester else None,
+                        })
+
+                # GA CQI records: cohort only, and only if program end is ready
+                if is_program_end_ready:
+                    cqis = GACQIRecord.objects.filter(batch=batch, ga=ga, cqi_level='CUMULATIVE')
+                    for cqi in cqis:
+                        ga_cqi_records.append(GACQIRecordSerializer(cqi).data)
+
+            else:
+                # scope=student
+                ga_attainment = calculate_ga_attainment_cumulative_student(student_obj, ga)
+
+                # Contributing courses: show student's course_ga_score derived from StudentCLOScore (only <= current semester)
+                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
+
+                # For each course, compute one course_ga_score per student's course by using StudentCLOScore weighted sum.
+                for session in cs_qs.select_related('course', 'semester'):
+                    mappings = CLOGAMapping.objects.filter(clo__course=session.course, ga=ga, is_active=True, clo__is_active=True)
+                    if not mappings.exists():
+                        continue
+                    total_att = Decimal('0')
+                    total_w = Decimal('0')
+                    for m in mappings:
+                        clo_score = StudentCLOScore.objects.filter(student=student_obj, clo=m.clo, course_session=session).first()
+                        if clo_score:
+                            total_att += clo_score.attainment * m.weight
+                            total_w += m.weight
+                    if total_w > 0:
+                        course_ga_score = round(total_att / total_w, 2)
+                        contributing_courses.append({
+                            'course_code': session.course.code,
+                            'course_name': session.course.name,
+                            'course_ga_score': float(course_ga_score),
+                            'enrolled_students': 1,
+                            'semester': session.semester.number if session.semester else None,
+                        })
+
+            if ga_attainment is None:
+                # Not assessed if missing data
+                status_str = 'NOT_ASSESSED'
+            else:
+                status_str = 'ACHIEVED' if float(ga_attainment) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
+
+            response_items.append({
+                'ga_id': str(ga.id),
+                'ga_code': f'GA-{ga.order_number}',
+                'ga_title': ga.title,
+                'ga_attainment': float(ga_attainment) if ga_attainment is not None else None,
+                'kpi_threshold': float(ga.kpi_threshold),
+                'status': status_str,
+                'contributing_courses': contributing_courses,
+                'ga_cqi_records': ga_cqi_records if (scope == 'cohort' and is_program_end_ready) else [],
+            })
+
+        # Return top-level object with is_program_end_ready and data
+        return Response({
+            'is_program_end_ready': is_program_end_ready,
+            'ga_reports': response_items
+        })
+
+
+
+# 11. Teacher GA Context View
+class TeacherGAContextView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id):
+        context = get_teacher_ga_context(course_id)
+        if 'error' in context:
+            return Response(context, status=status.HTTP_404_NOT_FOUND)
+        return Response(context)
 
 
 # 14. Get Course CLO Report
@@ -990,224 +1287,31 @@ class CourseCLOReportView(APIView):
             course=course,
             curriculum_version=version,
             is_active=True
-        ).select_related('course', 'curriculum_version').order_by('order_number')
-        
-        # Get Assessments for this course, batch, semester that are finalized
-        from assessments.models import Assessment, Question, StudentQuestionMark
-        assessments = Assessment.objects.filter(
-            course=course,
-            batch=session.batch,
-            semester=session.semester,
-            is_finalized=True
-        ).prefetch_related('questions__clo')
-        
-        # Get all students in this batch
-        from students.models import Student
-        students = Student.objects.filter(user__batch=session.batch)
+        )
         
         clo_summary = []
         for clo in clos:
-            # Get all questions mapped to this CLO
-            questions = Question.objects.filter(clo=clo, assessment__in=assessments)
-            
-            total_marks = sum(q.marks for q in questions)
-            total_obtained = Decimal('0')
-            total_questions = questions.count()
-            
-            # Calculate total obtained marks across all students and questions
-            if total_questions > 0:
-                student_marks = StudentQuestionMark.objects.filter(question__in=questions)
-                total_obtained = sum(sm.marks_obtained for sm in student_marks)
-                total_possible = total_marks * students.count()
-                
-                if total_possible > 0:
-                    overall_attainment = float((total_obtained / total_possible) * 100)
-                else:
-                    overall_attainment = 0
-            else:
-                overall_attainment = 0
-            
-            target_kpi = clo.kpi_target
-            status = 'ACHIEVED' if overall_attainment >= target_kpi else 'BELOW_TARGET'
-            
-            # Find all assessments that have questions mapped to this CLO
-            mapped_assessments = []
-            for ass in assessments:
-                has_clo = any(q.clo.id == clo.id for q in ass.questions.all())
-                if has_clo:
-                    mapped_assessments.append(ass.title)
-            
+            # Calculate CLO attainment
+            # Assuming there's a calculate_clo_attainment function
+            # For now, we'll return a placeholder
             clo_summary.append({
-                'clo_code': f'CLO-{clo.order_number}',
-                'description': clo.title,
-                'target_kpi': target_kpi,
-                'overall_attainment': round(overall_attainment, 2),
-                'status': status,
-                'mapped_assessments': mapped_assessments,
-                'unmapped_assessments': [a.title for a in assessments if a.title not in mapped_assessments]
-            })
-        
-        assessment_effectiveness = []
-        for assessment in assessments:
-            # Get all questions and mapped CLOs for this assessment
-            questions = assessment.questions.all()
-            mapped_clos = list({f'CLO-{q.clo.order_number}' for q in questions})
-            
-            # Calculate average attainment for this assessment
-            ass_total_marks = sum(q.marks for q in questions)
-            ass_total_obtained = Decimal('0')
-            if ass_total_marks > 0:
-                ass_student_marks = StudentQuestionMark.objects.filter(question__in=questions)
-                ass_total_obtained = sum(sm.marks_obtained for sm in ass_student_marks)
-                ass_total_possible = ass_total_marks * students.count()
-                if ass_total_possible > 0:
-                    avg_attainment = float((ass_total_obtained / ass_total_possible) * 100)
-                else:
-                    avg_attainment = 0
-            else:
-                avg_attainment = 0
-            
-            effectiveness = 'GOOD' if avg_attainment >= 60 else 'NEEDS_REVIEW'
-            
-            assessment_effectiveness.append({
-                'assessment_name': assessment.title,
-                'mapped_clos': mapped_clos,
-                'avg_attainment': round(avg_attainment, 2),
-                'effectiveness': effectiveness,
-                'is_single_point_of_failure': avg_attainment < 50,
-                'note': 'Single point of failure - Low attainment' if avg_attainment < 50 else ''
-            })
-        
-        # Get CQI records
-        cqi_list = []
-        cqis = GACQIRecord.objects.filter(affected_course_sessions=session)
-        for cqi in cqis:
-            cqi_list.append({
-                'clo_code': f'GA-{cqi.ga.order_number}',
-                'clo_description': cqi.ga.title,
-                'course_code': course.code,
-                'reason': cqi.reason,
-                'action_plan': cqi.remedy,
-                'instructor': session.instructor.full_name if session.instructor else 'N/A',
-                'approved_by': 'N/A',
-                'status': cqi.status
+                'clo_code': clo.code if hasattr(clo, 'code') else f'CLO-{clo.order_number}',
+                'description': clo.description,
+                'target_kpi': float(clo.kpi_threshold),
+                'overall_attainment': None,
+                'status': 'NOT_ASSESSED',
+                'mapped_assessments': [],
+                'unmapped_assessments': []
             })
         
         return Response({
             'course': {
                 'code': course.code,
                 'title': course.name,
-                'semester': session.semester.name if session.semester else 'N/A',
-                'session': session.id
+                'semester': session.semester.number if session.semester else None,
+                'session': str(session.id)
             },
             'clo_summary': clo_summary,
-            'assessment_effectiveness': assessment_effectiveness,
-            'cqi_list': cqi_list
-        })
-
-# 13. Get GA Report (Readiness + Auto-generated)
-class BatchGAReportView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, batch_id):
-        try:
-            batch = Batch.objects.get(id=batch_id, is_active=True)
-        except Batch.DoesNotExist:
-            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check readiness - only current/previous semesters
-        all_sessions = CourseSession.objects.filter(batch=batch, is_active=True).select_related('semester')
-        # Filter to only current/previous semesters
-        sessions = []
-        for session in all_sessions:
-            if session.semester and session.semester.number <= batch.current_semester:
-                sessions.append(session)
-        
-        courses_total = len(sessions)
-        courses_assessment_done = len([s for s in sessions if s.assessment_status == 'ASSESSMENT_DONE'])
-        
-        cqis = GACQIRecord.objects.filter(affected_course_sessions__in=sessions).distinct()
-        cqi_total = cqis.count()
-        cqi_fully_approved = cqis.filter(status='FULLY_APPROVED').count()
-        
-        blocking_reasons = []
-        if courses_assessment_done < courses_total:
-            blocking_reasons.append(f'{courses_total - courses_assessment_done} of {courses_total} courses not yet Assessment Done')
-        if cqi_fully_approved < cqi_total:
-            blocking_reasons.append(f'{cqi_total - cqi_fully_approved} of {cqi_total} GA-level CQIs still pending approval')
-        
-        is_ready = (courses_assessment_done == courses_total and cqi_fully_approved == cqi_total)
-        
-        if not is_ready:
-            return Response({
-                'status': 'NOT_READY',
-                'readiness': {
-                    'courses_total': courses_total,
-                    'courses_assessment_done': courses_assessment_done,
-                    'cqi_total': cqi_total,
-                    'cqi_fully_approved': cqi_fully_approved,
-                    'blocking_reasons': blocking_reasons
-                }
-            })
-        
-        # Calculate CourseGAScores for all courses
-        from .services import calculate_all_course_ga_scores, calculate_program_ga_attainment
-        for session in sessions:
-            if session.assessment_status == 'ASSESSMENT_DONE':
-                calculate_all_course_ga_scores(session)
-        
-        # If ready, generate report
-        gas = GA.objects.filter(program=batch.program, is_active=True)
-        ga_summary = []
-        
-        for ga in gas:
-            final_score = calculate_program_ga_attainment(batch, ga)
-            d_ga = float(final_score)  # Use calculated score as D_GA for now
-            i_ga = float(final_score)  # Use calculated score as I_GA for now
-            
-            # Get contributing courses
-            contributing_courses = []
-            course_sessions = [s for s in sessions if CourseGAScore.objects.filter(course_session=s, ga=ga, is_stale=False).exists()]
-            for cs in course_sessions:
-                course_ga_score = CourseGAScore.objects.get(course_session=cs, ga=ga, is_stale=False)
-                # Get real student count
-                from students.models import Student
-                student_count = Student.objects.filter(user__batch=cs.batch).count()
-                contributing_courses.append({
-                    'course_code': cs.course.code,
-                    'course_ga_score': float(course_ga_score.score),
-                    'enrolled_students': student_count
-                })
-            
-            status = 'ACHIEVED' if final_score >= ga.kpi_threshold else 'BELOW_TARGET'
-            ga_summary.append({
-                'ga_code': f'GA-{ga.order_number}',
-                'title': ga.title,
-                'kpi_threshold': float(ga.kpi_threshold),
-                'd_ga': d_ga,
-                'i_ga': i_ga,
-                'f_ga': float(final_score),
-                'status': status,
-                'contributing_courses': contributing_courses
-            })
-        
-        # Get CQI list
-        cqi_list = []
-        for cqi in cqis:
-            cqi_list.append({
-                'ga_code': f'GA-{cqi.ga.order_number}',
-                'trigger_type': cqi.trigger_type,
-                'reason': cqi.reason,
-                'remedy': cqi.remedy,
-                'status': cqi.status
-            })
-        
-        return Response({
-            'status': 'READY',
-            'batch': {
-                'code': batch.name,
-                'graduating_semester': 8
-            },
-            'ga_summary': ga_summary,
-            'cqi_list': cqi_list
+            'assessment_effectiveness': [],
+            'cqi_list': []
         })

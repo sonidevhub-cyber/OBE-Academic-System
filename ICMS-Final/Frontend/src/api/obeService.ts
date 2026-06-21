@@ -52,24 +52,84 @@ export interface GACQIRecord {
   id: string;
   ga: string;
   ga_title: string;
-  trigger_type: 'SEMESTER_EARLY_WARNING' | 'PROGRAM_MASTER_CQI';
-  affected_course_sessions: string[];
-  reason: string;
-  remedy: string;
-  status: 'PENDING_HOD_APPROVAL' | 'SENT_BACK' | 'FULLY_APPROVED';
-  hod_rejection_comment: string | null;
+  ga_code: string;
+  batch: string;
+  batch_name: string;
+  cqi_level: 'SEMESTER' | 'CUMULATIVE';
+  semester: number | null;
+  attainment_value: number | null;
+  kpi_threshold_at_trigger: number | null;
+  root_cause: string | null;
+  remedial_plan: string | null;
+  hod_comment: string | null;
+  status: 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED';
+  submitted_by: any | null;
+  approved_by: any | null;
+  is_audit_visible: boolean;
+  is_locked: boolean;
   created_at: string;
   updated_at: string;
   history?: GACQIResubmissionHistory[];
+  contributing_courses?: GAReportContributingCourse[];
 }
 
 export interface GACQIResubmissionHistory {
   id: string;
   cqi_record: string;
-  reason_snapshot: string;
-  remedy_snapshot: string;
+  root_cause_snapshot: string | null;
+  remedial_plan_snapshot: string | null;
+  hod_comment_snapshot: string | null;
   status_at_time: string;
   submitted_at: string;
+}
+
+export interface GAReportContributingCourse {
+  course_code: string;
+  course_name?: string;
+  course_ga_score: number;
+  enrolled_students?: number;
+  semester?: number | null;
+}
+
+export interface GAReportItem {
+  ga_id: string;
+  ga_code: string;
+  ga_title: string;
+  ga_attainment: number | null;
+  kpi_threshold: number;
+  status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
+  contributing_courses: GAReportContributingCourse[];
+  ga_cqi_records: GACQIRecord[];
+}
+
+export interface InterimAlertCourse {
+  course_code: string;
+  semester: number | null;
+  ga_score: number;
+  status: string;
+}
+
+export interface InterimAlert {
+  ga_code: string;
+  ga_title: string;
+  previous_courses: InterimAlertCourse[];
+}
+
+export interface ReadinessResponse {
+  ready: boolean;
+  finalized_courses: number;
+  total_courses: number;
+  missing_courses: string[];
+}
+
+export interface BatchGAReportResponse {
+  is_program_end_ready: boolean;
+  ga_reports: GAReportItem[];
+}
+
+export interface TeacherGAContext {
+  course_gas: string[];
+  interim_alerts: InterimAlert[];
 }
 
 export interface GAPEOMapping {
@@ -203,6 +263,18 @@ class OBEService {
     return response.data;
   }
 
+  // Get GA CQI record
+  async getGACQIRecord(cqiId: string): Promise<GACQIRecord> {
+    const response = await api.get(`/obe/ga-cqi/${cqiId}/`);
+    return response.data;
+  }
+
+  // Update GA CQI record
+  async updateGACQIRecord(cqiId: string, data: Partial<GACQIRecord>): Promise<GACQIRecord> {
+    const response = await api.patch(`/obe/ga-cqi/${cqiId}/`, data);
+    return response.data;
+  }
+
   // Approve GA CQI
   async approveGACQI(cqiId: string): Promise<GACQIRecord> {
     const response = await api.patch(`/obe/ga-cqi/${cqiId}/approve/`);
@@ -211,7 +283,7 @@ class OBEService {
 
   // Reject GA CQI
   async rejectGACQI(cqiId: string, hodComment: string): Promise<GACQIRecord> {
-    const response = await api.patch(`/obe/ga-cqi/${cqiId}/reject/`, { hod_rejection_comment: hodComment });
+    const response = await api.patch(`/obe/ga-cqi/${cqiId}/reject/`, { hod_comment: hodComment });
     return response.data;
   }
 
@@ -228,8 +300,19 @@ class OBEService {
   }
 
   // Get Batch GA Report
-  async getBatchGAReport(batchId: string): Promise<any> {
-    const response = await api.get(`/obe/batches/${batchId}/ga-report/`);
+  async getBatchGAReport(batchId: string, params?: {
+    mode?: 'semester' | 'cumulative';
+    semester?: number;
+    scope?: 'cohort' | 'student';
+    student_id?: string;
+  }): Promise<GAReportItem[] | ReadinessResponse | BatchGAReportResponse> {
+    const response = await api.get(`/obe/ga-reports/${batchId}/`, { params });
+    return response.data;
+  }
+
+  // Get Teacher GA Context
+  async getTeacherGAContext(courseId: string): Promise<TeacherGAContext> {
+    const response = await api.get(`/obe/teacher/ga-context/${courseId}/`);
     return response.data;
   }
 

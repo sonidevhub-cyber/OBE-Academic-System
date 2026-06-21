@@ -110,7 +110,17 @@ class BatchDeactivateView(generics.GenericAPIView):
 
 
 class AllBatchesView(generics.ListAPIView):
-    permission_classes = [IsSACOrCoordinator]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (
+                request.user.role in ['SAC', 'coordinator', 'hod']
+                or request.user.secondary_role in ['coordinator', 'hod']
+            )
+        )
 
     def get_queryset(self):
         queryset = Batch.objects.filter(is_active=True, status='active').select_related('program')

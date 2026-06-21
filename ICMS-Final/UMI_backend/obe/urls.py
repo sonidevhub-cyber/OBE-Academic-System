@@ -1,15 +1,15 @@
-from django.urls import path 
-from .views import ( 
-    PEOListCreateView, PEODetailView, 
-    GAListCreateView, GADetailView, 
-    GAPEOMatrixView, 
-    CLOListCreateView, CLODetailView, 
+from django.urls import path
+from .views import (
+    PEOListCreateView, PEODetailView,
+    GAListCreateView, GADetailView,
+    GAPEOMatrixView,
+    CLOListCreateView, CLODetailView,
     CLOCopyView, CLOGAMatrixView,
-    CourseSessionListView, 
-    CourseSessionCreateView, 
-    CourseSessionUpdateView, 
-    CurriculumVersionListView, 
-    CurriculumVersionDeleteView, 
+    CourseSessionListView,
+    CourseSessionCreateView,
+    CourseSessionUpdateView,
+    CurriculumVersionListView,
+    CurriculumVersionDeleteView,
     EffectiveCurriculumView,
     # New views
     GAAllView,
@@ -20,90 +20,92 @@ from .views import (
     BatchSemesterGASummaryView,
     BatchProgramGASummaryView,
     GACQICreateView,
+    GACQIRecordDetailView,
     GACQIApproveView,
     GACQIRejectView,
     GACQIHistoryView,
     CourseUnlockView,
     BatchGAReportView,
-    CourseCLOReportView
-) 
+    CourseCLOReportView,
+    TeacherGAContextView
+)
 
-urlpatterns = [ 
-    # PEO 
-    path( 
-        'programs/<uuid:program_id>/peos/', 
-        PEOListCreateView.as_view() 
-    ), 
-    path( 
-        'peos/<uuid:pk>/', 
-        PEODetailView.as_view() 
-    ), 
+urlpatterns = [
+    # PEO
+    path(
+        'programs/<uuid:program_id>/peos/',
+        PEOListCreateView.as_view()
+    ),
+    path(
+        'peos/<uuid:pk>/',
+        PEODetailView.as_view()
+    ),
 
-    # GA 
-    path( 
-        'programs/<uuid:program_id>/gas/', 
-        GAListCreateView.as_view() 
-    ), 
-    path( 
-        'gas/<uuid:pk>/', 
-        GADetailView.as_view() 
-    ), 
+    # GA
+    path(
+        'programs/<uuid:program_id>/gas/',
+        GAListCreateView.as_view()
+    ),
+    path(
+        'gas/<uuid:pk>/',
+        GADetailView.as_view()
+    ),
 
-    # GA-PEO Matrix 
-    path( 
-        'programs/<uuid:program_id>/ga-peo-matrix/', 
-        GAPEOMatrixView.as_view() 
-    ), 
+    # GA-PEO Matrix
+    path(
+        'programs/<uuid:program_id>/ga-peo-matrix/',
+        GAPEOMatrixView.as_view()
+    ),
 
-    # CLO 
-    path( 
-        'courses/<uuid:course_id>/versions/<int:version_id>/clos/', 
-        CLOListCreateView.as_view() 
-    ), 
-    path( 
-        'clos/<uuid:pk>/', 
-        CLODetailView.as_view() 
-    ), 
-    path( 
-        'courses/<uuid:course_id>/versions/<int:version_id>/clos/copy/', 
-        CLOCopyView.as_view() 
-    ), 
+    # CLO
+    path(
+        'courses/<uuid:course_id>/versions/<int:version_id>/clos/',
+        CLOListCreateView.as_view()
+    ),
+    path(
+        'clos/<uuid:pk>/',
+        CLODetailView.as_view()
+    ),
+    path(
+        'courses/<uuid:course_id>/versions/<int:version_id>/clos/copy/',
+        CLOCopyView.as_view()
+    ),
 
-    # CLO-GA Matrix 
-    path( 
-        'courses/<uuid:course_id>/versions/<int:version_id>/clo-ga-matrix/', 
-        CLOGAMatrixView.as_view() 
-    ), 
+    # CLO-GA Matrix
+    path(
+        'courses/<uuid:course_id>/versions/<int:version_id>/clo-ga-matrix/',
+        CLOGAMatrixView.as_view()
+    ),
 
-    # Course Sessions 
-    path( 
-        'batches/<uuid:batch_id>/sessions/', 
-        CourseSessionListView.as_view() 
-    ), 
-    path( 
-        'sessions/', 
-        CourseSessionCreateView.as_view() 
-    ), 
-    path( 
-        'sessions/<uuid:pk>/', 
-        CourseSessionUpdateView.as_view() 
-    ), 
+    # Course Sessions
+    path(
+        'batches/<uuid:batch_id>/sessions/',
+        CourseSessionListView.as_view()
+    ),
+    path(
+        'sessions/',
+        CourseSessionCreateView.as_view()
+    ),
+    path(
+        'sessions/<uuid:pk>/',
+        CourseSessionUpdateView.as_view()
+    ),
 
-    # Curriculum Version 
-    path( 
-        'batches/<uuid:batch_id>/curriculum/', 
-        CurriculumVersionListView.as_view() 
-    ), 
-    path( 
-        'curriculum/<uuid:pk>/delete/', 
-        CurriculumVersionDeleteView.as_view() 
-    ), 
+    # Curriculum Version
+    path(
+        'batches/<uuid:batch_id>/curriculum/',
+        CurriculumVersionListView.as_view()
+    ),
+    path(
+        'curriculum/<uuid:pk>/delete/',
+        CurriculumVersionDeleteView.as_view()
+    ),
 
-    # Effective Curriculum 
-    path( 
-        'batches/<uuid:batch_id>/effective-curriculum/', 
-        EffectiveCurriculumView.as_view() 
-    ), 
+    # Effective Curriculum
+    path(
+        'batches/<uuid:batch_id>/effective-curriculum/',
+        EffectiveCurriculumView.as_view()
+    ),
 
     # ========== NEW GA MODULE ENDPOINTS ==========
     # 1. Get all GAs
@@ -127,23 +129,22 @@ urlpatterns = [
     # 7. Program GA summary
     path('batches/<uuid:batch_id>/program-ga-summary/', BatchProgramGASummaryView.as_view()),
     
-    # 8. Create GA CQI
+    # 8. GA CQI endpoints
     path('ga-cqi/', GACQICreateView.as_view()),
-    
-    # 9. Approve GA CQI
+    path('ga-cqi/<uuid:cqi_id>/', GACQIRecordDetailView.as_view()),
     path('ga-cqi/<uuid:cqi_id>/approve/', GACQIApproveView.as_view()),
-    
-    # 10. Reject GA CQI
     path('ga-cqi/<uuid:cqi_id>/reject/', GACQIRejectView.as_view()),
-    
-    # 11. Get GA CQI history
     path('ga-cqi/<uuid:cqi_id>/history/', GACQIHistoryView.as_view()),
     
-    # 12. Unlock course assessment
+    # 9. Unlock course assessment
     path('courses/<uuid:session_id>/unlock/', CourseUnlockView.as_view()),
     
-    # 13. Generate batch GA report
-    path('batches/<uuid:batch_id>/ga-report/', BatchGAReportView.as_view()),
-    # 14. Course CLO Report
-    path('courses/<uuid:session_id>/clo-report/', CourseCLOReportView.as_view())
+    # 10. GA Report endpoint
+    path('ga-reports/<uuid:batch_id>/', BatchGAReportView.as_view()),
+    
+    # 11. Course CLO Report
+    path('courses/<uuid:session_id>/clo-report/', CourseCLOReportView.as_view()),
+    
+    # 12. Teacher GA Context endpoint
+    path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view())
 ] 

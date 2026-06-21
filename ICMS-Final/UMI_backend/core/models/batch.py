@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.db.models import Count
 
 
 class Batch(models.Model):
@@ -62,6 +63,28 @@ class Batch(models.Model):
     class Meta:
         unique_together = ('program', 'name')
         ordering = ['-start_year']
+
+    @property
+    def is_program_end_ready(self):
+        # Check if current_semester is equal to total_semesters of the program
+        if self.current_semester != self.program.total_semesters:
+            return False
+        
+        # Check if all courses in current and past semesters are assessment done
+        from obe.models import CourseSession
+        total_courses = CourseSession.objects.filter(
+            batch=self,
+            is_active=True,
+            semester__number__lte=self.current_semester
+        ).count()
+        done_courses = CourseSession.objects.filter(
+            batch=self,
+            is_active=True,
+            semester__number__lte=self.current_semester,
+            assessment_status='ASSESSMENT_DONE'
+        ).count()
+        
+        return total_courses == done_courses
 
     def __str__(self) -> str:
         return f"{self.name} ({self.custom_id})"

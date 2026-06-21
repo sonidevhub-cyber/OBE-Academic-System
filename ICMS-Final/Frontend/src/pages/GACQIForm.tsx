@@ -6,8 +6,8 @@ const GACQIForm: React.FC = () => {
   const { cqiId } = useParams<{ cqiId: string }>();
   const [cqi, setCqi] = useState<GACQIRecord | null>(null);
   const [history, setHistory] = useState<GACQIResubmissionHistory[]>([]);
-  const [reason, setReason] = useState('');
-  const [remedy, setRemedy] = useState('');
+  const [rootCause, setRootCause] = useState('');
+  const [remedialPlan, setRemedialPlan] = useState('');
   const [hodComment, setHodComment] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,15 +32,27 @@ const GACQIForm: React.FC = () => {
         id: cqiId,
         ga: '1',
         ga_title: 'GA-1: Problem Solving',
-        trigger_type: 'SEMESTER_EARLY_WARNING',
-        affected_course_sessions: ['1', '2'],
-        reason: '',
-        remedy: '',
-        status: 'PENDING_HOD_APPROVAL',
-        hod_rejection_comment: null,
+        ga_code: 'GA-1',
+        batch: '1',
+        batch_name: 'Batch 2021-2025',
+        cqi_level: 'SEMESTER',
+        semester: 5,
+        attainment_value: 55.0,
+        kpi_threshold_at_trigger: 60.0,
+        root_cause: '',
+        remedial_plan: '',
+        hod_comment: '',
+        status: 'PENDING',
+        submitted_by: null,
+        approved_by: null,
+        is_audit_visible: true,
+        is_locked: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        history: [],
       });
+      setRootCause('');
+      setRemedialPlan('');
     } catch (err) {
       console.error(err);
       setError('Failed to load CQI data');
@@ -50,7 +62,7 @@ const GACQIForm: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (!reason || !remedy) {
+    if (!rootCause || !remedialPlan) {
       setError('Please fill out all required fields');
       return;
     }
@@ -58,19 +70,19 @@ const GACQIForm: React.FC = () => {
       setLoading(true);
       if (cqiId && cqi) {
         // Update existing CQI
-        await obeService.createGACQI({
-          ...cqi,
-          reason,
-          remedy,
+        await obeService.updateGACQIRecord(cqiId, {
+          root_cause: rootCause,
+          remedial_plan: remedialPlan,
         });
       } else {
         // Create new CQI (for demonstration)
         await obeService.createGACQI({
-          reason,
-          remedy,
-        });
+          root_cause: rootCause,
+          remedial_plan: remedialPlan,
+        } as Partial<GACQIRecord>);
       }
       alert('CQI submitted successfully');
+      loadCQIData();
     } catch (err) {
       console.error(err);
       setError('Failed to submit CQI');
@@ -125,9 +137,10 @@ const GACQIForm: React.FC = () => {
               <span className="font-semibold">GA:</span> {cqi.ga_title}
             </div>
             <div>
-              <span className="font-semibold">Trigger Type:</span>
+              <span className="font-semibold">CQI Level:</span>
               <span className="ml-2 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                {cqi.trigger_type}
+                {cqi.cqi_level === 'SEMESTER' ? 'Semester End CQI' : 'Program End CQI'}
+                {cqi.semester && ` - Semester ${cqi.semester}`}
               </span>
             </div>
             <div>
@@ -136,10 +149,21 @@ const GACQIForm: React.FC = () => {
                 {cqi.status}
               </span>
             </div>
+            <div>
+              <span className="font-semibold">Attainment:</span> {cqi.attainment_value?.toFixed(1)}%
+            </div>
+            <div>
+              <span className="font-semibold">KPI:</span> {cqi.kpi_threshold_at_trigger}%
+            </div>
           </div>
-          {cqi.hod_rejection_comment && (
-            <div className="mt-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded">
-              <strong>HOD Rejection Comment:</strong> {cqi.hod_rejection_comment}
+          {cqi.is_locked && (
+            <div className="mt-3 p-3 bg-green-50 border border-green-100 rounded-lg text-green-700 font-medium">
+              <span className="flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Locked - Program End CQI Approved
+              </span>
             </div>
           )}
         </div>
@@ -168,34 +192,34 @@ const GACQIForm: React.FC = () => {
         <div className="space-y-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Reason for Deficiency
+              Root Cause
             </label>
             <textarea
-              className="w-full p-3 border rounded-lg"
-              rows={4}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Describe the reason for the GA-level deficiency..."
-              disabled={cqi?.status === 'FULLY_APPROVED'}
-            />
+                className="w-full p-3 border rounded-lg"
+                rows={4}
+                value={rootCause}
+                onChange={(e) => setRootCause(e.target.value)}
+                placeholder="Describe the root cause of the GA-level deficiency..."
+                disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
+              />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Remedial Action Plan
+              Remedial Plan
             </label>
             <textarea
               className="w-full p-3 border rounded-lg"
               rows={4}
-              value={remedy}
-              onChange={(e) => setRemedy(e.target.value)}
+              value={remedialPlan}
+              onChange={(e) => setRemedialPlan(e.target.value)}
               placeholder="Describe the remedial action plan..."
-              disabled={cqi?.status === 'FULLY_APPROVED'}
+              disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
             />
           </div>
           <button
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
             onClick={handleSubmit}
-            disabled={loading || cqi?.status === 'FULLY_APPROVED'}
+            disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
           >
             Submit CQI
           </button>
@@ -206,23 +230,23 @@ const GACQIForm: React.FC = () => {
         <div className="space-y-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Reason for Deficiency
+              Root Cause
             </label>
             <textarea
               className="w-full p-3 border rounded-lg bg-gray-50"
               rows={4}
-              value={cqi?.reason}
+              value={cqi?.root_cause || ''}
               disabled
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Remedial Action Plan
+              Remedial Plan
             </label>
             <textarea
               className="w-full p-3 border rounded-lg bg-gray-50"
               rows={4}
-              value={cqi?.remedy}
+              value={cqi?.remedial_plan || ''}
               disabled
             />
           </div>
@@ -242,14 +266,14 @@ const GACQIForm: React.FC = () => {
             <button
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
               onClick={handleApprove}
-              disabled={loading || cqi?.status === 'FULLY_APPROVED'}
+              disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
             >
               Approve
             </button>
             <button
               className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400"
               onClick={handleReject}
-              disabled={loading || cqi?.status === 'FULLY_APPROVED'}
+              disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
             >
               Reject
             </button>
@@ -269,13 +293,19 @@ const GACQIForm: React.FC = () => {
                   <span><strong>Submitted:</strong> {new Date(item.submitted_at).toLocaleString()}</span>
                 </div>
                 <div className="mb-2">
-                  <strong>Reason:</strong>
-                  <p className="mt-1 text-sm">{item.reason_snapshot}</p>
+                  <strong>Root Cause:</strong>
+                  <p className="mt-1 text-sm">{item.root_cause_snapshot}</p>
                 </div>
                 <div>
-                  <strong>Remedy:</strong>
-                  <p className="mt-1 text-sm">{item.remedy_snapshot}</p>
+                  <strong>Remedial Plan:</strong>
+                  <p className="mt-1 text-sm">{item.remedial_plan_snapshot}</p>
                 </div>
+                {item.hod_comment_snapshot && (
+                  <div className="mt-2">
+                    <strong>HOD Comment:</strong>
+                    <p className="mt-1 text-sm">{item.hod_comment_snapshot}</p>
+                  </div>
+                )}
               </div>
             ))}
           </div>

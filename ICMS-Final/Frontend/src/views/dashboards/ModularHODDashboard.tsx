@@ -5,6 +5,7 @@ import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
 
 import GAReport from '../../pages/GAReport';
+import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import PEOReport from '../../pages/PEOReport';
 import StudentOBEList from '../../pages/StudentOBEList';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
@@ -472,7 +473,7 @@ const ModularHODDashboard: React.FC = () => {
         );
 
       case 'ga-report':
-        return <GAReport />;
+        return <CoordinatorGAReportModule />;
 
       case 'peo-report':
         return <PEOReport />;

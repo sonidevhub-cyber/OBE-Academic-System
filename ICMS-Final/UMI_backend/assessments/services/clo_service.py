@@ -21,13 +21,16 @@ class CLOService:
             return {"error": "No finalized assessments found"}
 
         # Get course and semester info
+        course = None
+        semester = None
         try:
             course = AcademicCourse.objects.get(id=course_id)
-            semester = AcademicSemester.objects.get(id=semester_id)
         except AcademicCourse.DoesNotExist:
-            course = None
+            pass
+        try:
+            semester = AcademicSemester.objects.get(id=semester_id)
         except AcademicSemester.DoesNotExist:
-            semester = None
+            pass
 
         clos = list(CLO.objects.filter(course_id=course_id))
         questions = list(
