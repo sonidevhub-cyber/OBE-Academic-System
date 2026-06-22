@@ -265,9 +265,9 @@ const CoordinatorCLOReportModule: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
             Back to Courses
           </button>
-          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(cloReport.course.semester.includes('Done') ? 'Finalized' : 'NOT_ASSESSED')}`}>
-            {getStatusIcon(cloReport.course.semester.includes('Done') ? 'Finalized' : 'NOT_ASSESSED')}
-            Finalized
+          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor('NOT_ASSESSED')}`}>
+            {getStatusIcon('NOT_ASSESSED')}
+            Not Finalized
           </span>
         </div>
         <h2 className="text-2xl font-black text-gray-900">{cloReport.course.title}</h2>
@@ -297,7 +297,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
               </div>
               <p className="text-gray-600 font-medium mb-4">{clo.description}</p>
 
-              {clo.status !== 'NOT_ASSESSED' && clo.overall_attainment ? (
+              {clo.status !== 'NOT_ASSESSED' && clo.overall_attainment !== null ? (
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-500 font-semibold">Attainment</span>
@@ -323,8 +323,8 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 <div className="flex flex-wrap gap-2">
                   {clo.mapped_assessments.length > 0 ? (
                     clo.mapped_assessments.map((a) => (
-                      <span key={a} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold">
-                        {a}
+                      <span key={a.id} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold">
+                        {a.title}
                       </span>
                     ))
                   ) : (
@@ -357,14 +357,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
               {cloReport.assessment_effectiveness.map((assmnt, idx) => (
                 <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 font-bold text-gray-700">
-                    {assmnt.is_single_point_of_failure ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-amber-500" title="Single point of failure">⚠️</span>
-                        {assmnt.assessment_name}
-                      </div>
-                    ) : (
-                      assmnt.assessment_name
-                    )}
+                    {assmnt.assessment?.title}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
@@ -375,12 +368,11 @@ const CoordinatorCLOReportModule: React.FC = () => {
                       ))}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-center font-bold text-gray-700">{assmnt.avg_attainment.toFixed(1)}%</td>
+                  <td className="px-4 py-3 text-center font-bold text-gray-700">{assmnt.avg_attainment?.toFixed(1) ?? '-'}%</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-black px-3 py-1 rounded-full ${getStatusBadgeColor(assmnt.effectiveness)}`}>
                       {assmnt.effectiveness}
                     </span>
-                    {assmnt.note && <p className="text-xs text-gray-500 mt-1">{assmnt.note}</p>}
                   </td>
                 </tr>
               ))}

@@ -165,23 +165,27 @@ export interface CourseSession {
 }
 
 // --- CLO Report Interfaces ---
+export interface AssessmentInfo {
+  id: string;
+  title: string;
+  weightage: number;
+}
+
 export interface CLOSummary {
   clo_code: string;
   description: string;
   target_kpi: number;
   overall_attainment: number | null;
   status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
-  mapped_assessments: string[];
-  unmapped_assessments: string[];
+  mapped_assessments: AssessmentInfo[];
+  unmapped_assessments: AssessmentInfo[];
 }
 
 export interface AssessmentEffectiveness {
-  assessment_name: string;
+  assessment: AssessmentInfo;
   mapped_clos: string[];
-  avg_attainment: number;
-  effectiveness: 'GOOD' | 'NEEDS_REVIEW';
-  is_single_point_of_failure: boolean;
-  note: string;
+  avg_attainment: number | null;
+  effectiveness: 'EFFECTIVE' | 'INEFFECTIVE';
 }
 
 export interface CLOCQIListItem {
@@ -199,7 +203,7 @@ export interface CLOReportResponse {
   course: {
     code: string;
     title: string;
-    semester: string;
+    semester: number | null;
     session: string;
   };
   clo_summary: CLOSummary[];

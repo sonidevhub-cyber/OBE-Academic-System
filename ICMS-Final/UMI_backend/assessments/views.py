@@ -105,9 +105,13 @@ class CreateAssessmentView(APIView):
             "error": f"{data['type']} already exists"
         }, status=400)
     
-        # ✅ CLO VALIDATION
+        # ✅ CLO VALIDATION: get CLOs for the course and the batch's curriculum version (if any)
+        from django.db.models import Q
+        clos_query = Q(course_id=data['course'], is_active=True)
+        if batch.curriculum_version:
+            clos_query |= Q(curriculum_version=batch.curriculum_version)
         valid_clos = set(
-            CLO.objects.filter(course_id=data['course'])
+            CLO.objects.filter(clos_query)
             .values_list('id', flat=True)
         )
 
