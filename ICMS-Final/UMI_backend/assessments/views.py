@@ -19,7 +19,7 @@ from .models import (
 )
 from core.models import Batch, Semester
 from students.models import Student
-from obe.models import CLO
+from obe.models import CLO, GA
 from .serializer import AssessmentCreateSerializer, AssessmentDetailSerializer
 
 
@@ -189,6 +189,9 @@ class CreateAssessmentView(APIView):
     ]
 }, status=201)
 from assessments.services.clo_service import CLOService   # 🔥 IMPORT ADD
+from obe.views.ga_views import mark_existing_sessions_as_done   # 🔥 NEW
+from obe.services import calculate_all_course_ga_scores, check_and_trigger_ga_cqi   # 🔥 NEW
+from obe.models import CourseSession   # 🔥 NEW
 
 class EnterMarksView(APIView):
     permission_classes = [IsAuthenticated]
@@ -235,16 +238,22 @@ class EnterMarksView(APIView):
                 assessment=assessment
             ).update(marks_obtained=total)
 
-        # 🔥 FINALIZE
+        # 🔥 FINALIZE ONLY IF IT'S FINAL, OR ALL ASSESSMENTS ARE DONE
         assessment.is_finalized = True
         assessment.save()
 
-        # =====================================================
-        # 🔥 MOST IMPORTANT (ONLY FINAL)
-        # =====================================================
-        if assessment.assessment_type == "final":
-            print(f"[EnterMarksView] Final assessment submitted for course {assessment.course_id}, batch {assessment.batch_id}, semester {assessment.semester_id}")
-            from obe.models import CourseSession
+        # Check if all assessments for this course session are now finalized
+        all_assessments = Assessment.objects.filter(
+            course_id=assessment.course_id,
+            batch=assessment.batch,
+            semester=assessment.semester
+        )
+        all_finalized = all(a.is_finalized for a in all_assessments)
+        
+        is_course_session_finalized = all_finalized
+        
+        if is_course_session_finalized:
+            print(f"[EnterMarksView] All assessments finalized for course {assessment.course_id}, batch {assessment.batch_id}, semester {assessment.semester_id}")
             # Generate CLO report and CLOAttainment
             CLOService.generate_student_report(
                 course_id=assessment.course_id,
@@ -265,10 +274,35 @@ class EnterMarksView(APIView):
                 }
             )
             print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: {course_session.id} - status set to ASSESSMENT_DONE")
+            
+            # Calculate Course GA Scores
+            calculate_all_course_ga_scores(course_session)
+            
+            # Check and mark existing sessions in the same semester as done
+            mark_existing_sessions_as_done(assessment.batch, assessment.semester)
+            
+            # Check if all courses in the semester are done → trigger semester-level CQI
+            all_sessions_in_semester = CourseSession.objects.filter(
+                batch=assessment.batch,
+                semester=assessment.semester,
+                is_active=True
+            )
+            done_sessions_in_semester = all_sessions_in_semester.filter(assessment_status='ASSESSMENT_DONE')
+            if all_sessions_in_semester.count() == done_sessions_in_semester.count() and all_sessions_in_semester.exists():
+                # Calculate semester GA attainment and check for semester-level CQI for all GAs
+                gas = GA.objects.filter(program=assessment.batch.program, is_active=True)
+                for ga in gas:
+                    check_and_trigger_ga_cqi(assessment.batch, ga, 'SEMESTER', assessment.semester.number)
+            
+            # Check if program end is ready → trigger cumulative-level CQI
+            if assessment.batch.is_program_end_ready:
+                gas = GA.objects.filter(program=assessment.batch.program, is_active=True)
+                for ga in gas:
+                    check_and_trigger_ga_cqi(assessment.batch, ga, 'CUMULATIVE')
 
         return Response({
             "message": "Marks saved and finalized",
-            "is_final": assessment.assessment_type == "final"
+            "is_final": is_course_session_finalized
         }, status=200)    
 from rest_framework.views import APIView
 from rest_framework.response import Response

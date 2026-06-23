@@ -20,7 +20,7 @@ class PEOSerializer(serializers.ModelSerializer):
         fields = [ 
             'id', 'program', 'title', 
             'description', 'order_number', 
-            'is_active', 'created_at' 
+            'kpi_threshold', 'is_active', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 
 
@@ -169,11 +169,17 @@ class CourseSessionSerializer(
     course_name = serializers.CharField(
         source='course.name', read_only=True
     ) 
+    course_code = serializers.CharField(
+        source='course.code', read_only=True
+    ) 
     batch_name = serializers.CharField(
         source='batch.name', read_only=True
     ) 
     semester_name = serializers.CharField(
         source='semester.name', read_only=True
+    ) 
+    semester_number = serializers.IntegerField(
+        source='semester.number', read_only=True
     ) 
     instructor_name = serializers.CharField(
         source='instructor.full_name',
@@ -184,8 +190,8 @@ class CourseSessionSerializer(
         model = CourseSession 
         fields = [ 
             'id', 'course', 'batch', 'semester',
-            'instructor', 'course_name', 
-            'batch_name', 'semester_name', 'instructor_name', 
+            'instructor', 'course_name', 'course_code',
+            'batch_name', 'semester_name', 'semester_number', 'instructor_name', 
             'is_active', 'assessment_status', 'created_at' 
         ] 
         read_only_fields = ['id', 'created_at'] 

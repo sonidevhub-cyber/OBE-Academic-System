@@ -21,6 +21,7 @@ class PEO(models.Model):
         blank=True, null=True 
     ) 
     order_number = models.IntegerField() 
+    kpi_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('60.00')) 
     is_active = models.BooleanField(default=True) 
     created_at = models.DateTimeField( 
         auto_now_add=True 
@@ -306,8 +307,10 @@ class GACQIRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # Ensure only one CQI record per (ga, batch, cqi_level)
-        unique_together = ('ga', 'batch', 'cqi_level')
+        # Ensure only one CQI record per (ga, batch, cqi_level, semester) for SEMESTER
+        # And one per (ga, batch, cqi_level) for CUMULATIVE
+        # Unique constraints are handled via raw SQL in migration 0012
+        pass
 
     def __str__(self):
         return f"{self.ga} - {self.cqi_level} ({self.status})"

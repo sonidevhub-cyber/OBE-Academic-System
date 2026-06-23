@@ -16,12 +16,15 @@ import {
 import obeService, { PEO, GA, GAPEOMatrix } from '../../../api/obeService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
 import { curriculumService, CurriculumVersion } from '../../../api/curriculumService';
+import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
 
 type SubTabId = 'vision' | 'peo' | 'ga' | 'ga-peo' | 'clo-pi';
 
 const CoordinatorOBEMappingModule: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<SubTabId>('vision');
+  const { currentUser } = useAuth();
+  const isHOD = currentUser?.effective_role === 'hod' || currentUser?.role === 'hod';
+  const [activeSubTab, setActiveSubTab] = useState<SubTabId>(isHOD ? 'vision' : 'clo-pi');
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [versions, setVersions] = useState<CurriculumVersion[]>([]);
@@ -168,7 +171,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       title: item.title, 
       description: item.description, 
       order_number: item.order_number,
-      kpi_target: item.kpi_target || 60,
+      kpi_target: item.kpi_target || item.kpi_threshold || 60,
       bloom_level: item.bloom_level || 'K2',
       performance_indicators: []
     } : { 
@@ -188,11 +191,16 @@ const CoordinatorOBEMappingModule: React.FC = () => {
 
     try {
       if (modalType === 'peo') {
+        // Prepare data with kpi_threshold instead of kpi_target for PEO
+        const peoData = {
+          ...formData,
+          kpi_threshold: formData.kpi_target
+        };
         if (editingItem) {
-          await obeService.updatePEO(editingItem.id, formData);
+          await obeService.updatePEO(editingItem.id, peoData);
           toast.success('PEO updated');
         } else {
-          await obeService.createPEO(selectedProgram.id, formData);
+          await obeService.createPEO(selectedProgram.id, peoData);
           toast.success('PEO created');
         }
         loadPeosAndGas(selectedProgram.id);
@@ -321,11 +329,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     };
 
   const subTabs = [
-    { id: 'vision', label: 'Program Vision', icon: Target },
-    { id: 'peo', label: 'PEO Definitions', icon: Award },
-    { id: 'ga', label: 'GA Definitions', icon: Info },
-    { id: 'ga-peo', label: 'GA-PEO Mapping', icon: LayoutGrid },
-    { id: 'clo-pi', label: 'CLO-GA Mapping', icon: BookOpen },
+    ...(isHOD ? [
+      { id: 'vision', label: 'Program Vision', icon: Target },
+      { id: 'peo', label: 'PEO Definitions', icon: Award },
+      { id: 'ga', label: 'GA Definitions', icon: Info },
+      { id: 'ga-peo', label: 'GA-PEO Mapping', icon: LayoutGrid },
+    ] : [
+      { id: 'clo-pi', label: 'CLO-GA Mapping', icon: BookOpen },
+    ]),
   ];
 
   return (
@@ -343,7 +354,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           </select>
         </div>
 
-        {activeSubTab === 'clo-pi' && (
+        {!isHOD && activeSubTab === 'clo-pi' && (
           <>
             <div>
               <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Curriculum Version (Draft)</label>
@@ -431,19 +442,21 @@ const CoordinatorOBEMappingModule: React.FC = () => {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h3 className="text-xl font-black text-gray-900">
-                    {activeSubTab === 'peo' ? 'Program Educational Objectives (PEOs)' : 'Graduate Attributes (GAs)' }
+                    {activeSubTab === 'peo' ? 'Program Educational Objectives (PEOs)' : 'Graduate Attributes (GAs)'}
                   </h3>
                   <p className="text-gray-400 text-sm mt-1">
                     Manage the {activeSubTab.toUpperCase()}s defined for this program.
                   </p>
                 </div>
-                <button 
-                  onClick={() => handleOpenModal(activeSubTab)}
-                  className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-all"
-                >
-                  <Plus size={18} />
-                  Add {activeSubTab.toUpperCase()}
-                </button>
+                {isHOD && (
+                  <button 
+                    onClick={() => handleOpenModal(activeSubTab)}
+                    className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-all"
+                  >
+                    <Plus size={18} />
+                    Add {activeSubTab.toUpperCase()}
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -456,14 +469,16 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                         </span>
                         <h4 className="font-bold text-gray-900 text-lg">{item.title}</h4>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => handleOpenModal(activeSubTab, item)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg">
-                          <Settings size={18} />
-                        </button>
-                        <button onClick={() => handleDeleteItem(activeSubTab, item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+                      {isHOD && (
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => handleOpenModal(activeSubTab, item)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg">
+                            <Settings size={18} />
+                          </button>
+                          <button onClick={() => handleDeleteItem(activeSubTab, item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <p className="text-gray-600 text-sm leading-relaxed">{item.description}</p>
                   </div>
@@ -479,13 +494,15 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                   <h3 className="text-xl font-black text-gray-900">GA to PEO Mapping Matrix</h3>
                   <p className="text-gray-400 text-sm mt-1">Map Graduate Attributes to Program Educational Objectives.</p>
                 </div>
-                <button 
-                  onClick={() => handleSaveMatrix('ga-peo')}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
-                >
-                  <Save size={18} />
-                  Save Mappings
-                </button>
+                {isHOD && (
+                  <button 
+                    onClick={() => handleSaveMatrix('ga-peo')}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
+                  >
+                    <Save size={18} />
+                    Save Mappings
+                  </button>
+                )}
               </div>
 
               {gaPeoMatrix ? (
@@ -516,12 +533,13 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             return (
                               <td key={peo.id} className="p-6 border-b border-gray-50 text-center">
                                 <button
-                                  onClick={() => handleMatrixChange(ga.id, peo.id, 'ga-peo')}
+                                  onClick={() => isHOD && handleMatrixChange(ga.id, peo.id, 'ga-peo')}
+                                  disabled={!isHOD}
                                   className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto transition-all transform active:scale-95 ${
                                     active 
                                       ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
-                                      : 'bg-gray-50 text-gray-300 hover:bg-gray-100'
-                                  }`}
+                                      : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
+                                  } ${!isHOD ? 'cursor-not-allowed opacity-60' : ''}`}
                                 >
                                   {active ? <Save size={20} /> : <Plus size={20} />}
                                 </button>
@@ -706,6 +724,19 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                       className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
                     />
                   </div>
+                  {(modalType === 'clo' || modalType === 'ga' || modalType === 'peo') && (
+                    <div>
+                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Threshold (%)</label>
+                      <input
+                        type="number"
+                        required
+                        value={formData.kpi_target}
+                        onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
+                        placeholder="e.g., 70"
+                        className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                      />
+                    </div>
+                  )}
                   {modalType === 'clo' && (
                     <div>
                       <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Bloom Level</label>
@@ -724,31 +755,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                       </select>
                     </div>
                   )}
-                  {modalType === 'ga' && (
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Target (%)</label>
-                      <input
-                        type="number"
-                        required
-                        value={formData.kpi_target}
-                        onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
-                        className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                      />
-                    </div>
-                  )}
                 </div>
-                {modalType === 'clo' && (
-                  <div>
-                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Target (%)</label>
-                    <input
-                      type="number"
-                      required
-                      value={formData.kpi_target}
-                      onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
-                      className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                  </div>
-                )}
                 <div>
                   <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
                   <textarea
