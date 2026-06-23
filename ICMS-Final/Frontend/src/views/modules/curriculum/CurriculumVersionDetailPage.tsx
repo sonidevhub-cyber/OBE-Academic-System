@@ -40,11 +40,9 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   // Create/Add Course state
   const [showAddCourseModal, setShowAddCourseModal] = useState(false);
   const [allCourses, setAllCourses] = useState<any[]>([]);
-  const [newCourse, setNewCourse] = useState<{ course: string; semester_no: number }>({
-    course: '',
+  const [newCourse, setNewCourse] = useState<{ semester_no: number }>({
     semester_no: 1,
   });
-  const [addCourseMode, setAddCourseMode] = useState<'existing' | 'new'>('existing'); // 'existing' or 'new'
   const [newCourseData, setNewCourseData] = useState({
     name: '',
     code: '',
@@ -414,44 +412,35 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     const action = async () => {
       try {
         setSubmitting(true);
-        let courseIdToAdd: string | number;
 
-        if (addCourseMode === 'existing') {
-          if (!newCourse.course || newCourse.course === 'null' || newCourse.course === 'undefined') {
-            toast.error('Please select a valid course.');
-            return;
-          }
-          courseIdToAdd = newCourse.course;
-        } else {
-          // Create New Course
-          if (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours) {
-            toast.error('Please fill all fields for the new course.');
-            return;
-          }
-
-          if (!version?.program) {
-            toast.error('Program information missing from version');
-            return;
-          }
-
-          const createCourseResponse = await curriculumService.createCourse({
-            name: newCourseData.name,
-            code: newCourseData.code,
-            credit_hours: newCourseData.credit_hours,
-            course_type: newCourseData.course_type,
-            program_id: version.program,
-            semester_no: newCourse.semester_no,
-            parent_course: newCourseData.parent_course_id || undefined,
-          });
-          const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
-          courseIdToAdd = createdCourse.id;
-          toast.success('New course created successfully!');
+        // Create New Course
+        if (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours) {
+          toast.error('Please fill all fields for the new course.');
+          return;
         }
+
+        if (!version?.program) {
+          toast.error('Program information missing from version');
+          return;
+        }
+
+        const createCourseResponse = await curriculumService.createCourse({
+          name: newCourseData.name,
+          code: newCourseData.code,
+          credit_hours: newCourseData.credit_hours,
+          course_type: newCourseData.course_type,
+          program_id: version.program,
+          semester_no: newCourse.semester_no,
+          parent_course: newCourseData.parent_course_id || undefined,
+        });
+        const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
+        const courseIdToAdd = createdCourse.id;
+        toast.success('New course created successfully!');
 
         await curriculumService.addCourseToVersion(version.id, courseIdToAdd, newCourse.semester_no);
         toast.success('Course added successfully!');
         setShowAddCourseModal(false);
-        setNewCourse({ course: '', semester_no: 1 });
+        setNewCourse({ semester_no: 1 });
         fetchVersion();
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Failed to add course.');
@@ -767,55 +756,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
               Add Course to Semester {newCourse.semester_no}
             </h2>
 
-            <div className="flex mb-4 bg-gray-100 rounded-lg p-1">
-              <button
-                type="button"
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  addCourseMode === 'existing' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:bg-gray-200'
-                }`}
-                onClick={() => {
-                  setAddCourseMode('existing');
-                  setNewCourse({ ...newCourse, course: '' });
-                }}
-              >
-                Existing Course
-              </button>
-              <button
-                type="button"
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  addCourseMode === 'new' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:bg-gray-200'
-                }`}
-                onClick={() => {
-                  setAddCourseMode('new');
-                  setNewCourseData({ name: '', code: '', credit_hours: 3, course_type: 'LECTURE', parent_course_id: '' });
-                }}
-              >
-                Create New
-              </button>
-            </div>
-
             <div className="space-y-4">
-              {addCourseMode === 'existing' ? (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Course</label>
-                  <select
-                    value={newCourse.course}
-                    onChange={(e) => setNewCourse({ ...newCourse, course: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  >
-                    <option value="">Select a course...</option>
-                    {allCourses
-                      .filter(c => c.semester_number === newCourse.semester_no)
-                      .map((course) => (
-                        <option key={course.id} value={course.id}>
-                          {course.name} ({course.code})
-                        </option>
-                      ))
-                    }
-                  </select>
-                </div>
-              ) : (
-                <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Course Type</label>
                     <select
@@ -907,8 +848,6 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                       />
                     </div>
                   </div>
-                </>
-              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Semester Number</label>
@@ -944,11 +883,9 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                 <button
                   onClick={handleAddCourse}
                   disabled={
-                    submitting ||
-                    (addCourseMode === 'existing' && !newCourse.course) ||
-                    (addCourseMode === 'new' &&
-                      (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours))
-                  }
+                  submitting ||
+                  (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours)
+                }
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-400 shadow-md flex items-center justify-center"
                 >
                   {submitting ? (
@@ -971,7 +908,10 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
               {version.status === 'draft' && (
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setShowAddCourseModal(true)}
+                    onClick={() => {
+                      setNewCourseData({ name: '', code: '', credit_hours: 3, course_type: 'LECTURE', parent_course_id: '' });
+                      setShowAddCourseModal(true);
+                    }}
                     className="flex items-center px-4 py-2 border border-dashed border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors text-sm font-semibold"
                   >
                     <Plus className="w-4 h-4 mr-2" />

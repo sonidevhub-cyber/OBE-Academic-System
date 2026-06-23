@@ -5,21 +5,19 @@ import { toast } from 'react-toastify';
 import { Loader2, PlusCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// This interface might need to be adjusted based on the actual API response for all courses
-interface CourseOption {
-    id: number;
-    course_name: string;
-    course_code: string;
-}
-
 const MasterCurriculumDetailPage = () => {
     const { id } = useParams<{ id: string }>();
     const [curriculum, setCurriculum] = useState<CurriculumVersion | null>(null);
     const [loading, setLoading] = useState(true);
     const [showAddCourseModal, setShowAddCourseModal] = useState(false);
-    const [allCourses, setAllCourses] = useState<CourseOption[]>([]);
-    const [selectedCourse, setSelectedCourse] = useState<number | ''>('');
-
+    
+    const [newCourseData, setNewCourseData] = useState({
+        name: '',
+        code: '',
+        credit_hours: 3,
+        course_type: 'LECTURE',
+        parent_course_id: '',
+    });
     const [selectedSemester, setSelectedSemester] = useState(1);
     const [submitting, setSubmitting] = useState(false);
 
@@ -36,27 +34,33 @@ const MasterCurriculumDetailPage = () => {
         }
     }, [id]);
 
-    const fetchAllCourses = useCallback(async () => {
-        try {
-            const response = await curriculumService.getAllCourses();
-            setAllCourses(response.data);
-        } catch (error) {
-            toast.error("Failed to load courses.");
-        }
-    }, []);
-
     useEffect(() => {
         fetchCurriculumDetails();
-        fetchAllCourses();
-    }, [fetchCurriculumDetails, fetchAllCourses]);
+    }, [fetchCurriculumDetails]);
 
     const handleAddCourse = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!id || selectedCourse === '') return;
+        if (!id) return;
+        if (!newCourseData.name || !newCourseData.code || !newCourseData.credit_hours) {
+            toast.error('Please fill all fields for the new course.');
+            return;
+        }
 
         setSubmitting(true);
         try {
-            await curriculumService.addCourseToVersion(parseInt(id, 10), selectedCourse, selectedSemester);
+            const createCourseResponse = await curriculumService.createCourse({
+                name: newCourseData.name,
+                code: newCourseData.code,
+                credit_hours: newCourseData.credit_hours,
+                course_type: newCourseData.course_type,
+                program_id: curriculum?.program || 0,
+                semester_no: selectedSemester,
+                parent_course: newCourseData.parent_course_id || undefined,
+            });
+            const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
+            const courseIdToAdd = createdCourse.id;
+            
+            await curriculumService.addCourseToVersion(parseInt(id, 10), courseIdToAdd, selectedSemester);
             toast.success("Course added successfully!");
             setShowAddCourseModal(false);
             fetchCurriculumDetails(); // Refresh the curriculum details
@@ -64,7 +68,7 @@ const MasterCurriculumDetailPage = () => {
             toast.error("Failed to add course.");
         } finally {
             setSubmitting(false);
-            setSelectedCourse('');
+            setNewCourseData({ name: '', code: '', credit_hours: 3, course_type: 'LECTURE', parent_course_id: '' });
             setSelectedSemester(1);
         }
     };
@@ -106,7 +110,10 @@ const MasterCurriculumDetailPage = () => {
                     <p className="text-gray-500 mt-1">Manage courses for this master curriculum.</p>
                 </div>
                 <button
-                    onClick={() => setShowAddCourseModal(true)}
+                    onClick={() => {
+                        setNewCourseData({ name: '', code: '', credit_hours: 3, course_type: 'LECTURE', parent_course_id: '' });
+                        setShowAddCourseModal(true);
+                    }}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                 >
                     <PlusCircle className="w-4 h-4" />
@@ -178,32 +185,57 @@ const MasterCurriculumDetailPage = () => {
 
                                     <div className="space-y-4">
                                         <div className="space-y-2">
-                                            <label htmlFor="course-select" className="text-sm font-semibold text-gray-700">Course</label>
+                                            <label htmlFor="course-type-select" className="text-sm font-semibold text-gray-700">Course Type</label>
                                             <select
-                                                id="course-select"
-                                                value={selectedCourse}
-                                                onChange={(e) => {
-                                                    const next = e.target.value;
-                                                    setSelectedCourse(next === '' ? '' : Number(next));
-                                                }}
-
-                                                required
+                                                id="course-type-select"
+                                                value={newCourseData.course_type}
+                                                onChange={(e) => setNewCourseData({ 
+                                                    ...newCourseData, 
+                                                    course_type: e.target.value as 'LECTURE' | 'LAB',
+                                                    parent_course_id: ''
+                                                })}
                                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
                                             >
-                                                <option value="" disabled>Select a course</option>
-                                                {allCourses.map((c: any) => {
-                                                    const value = c.id ?? c.course_id ?? c.courseId ?? c.custom_id;
-                                                    if (value === undefined || value === null) return null;
-                                                    const code = c.course_code ?? c.code ?? c.custom_id ?? value;
-                                                    const name = c.course_name ?? c.name ?? c.custom_id ?? value;
-                                                    return (
-                                                        <option key={String(value)} value={String(value)}>
-
-                                                            {code} - {name}
-                                                        </option>
-                                                    );
-                                                })}
+                                                <option value="LECTURE">Theory (Lecture)</option>
+                                                <option value="LAB">Practical (Lab)</option>
                                             </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label htmlFor="course-name-input" className="text-sm font-semibold text-gray-700">Course Name</label>
+                                            <input
+                                                id="course-name-input"
+                                                type="text"
+                                                value={newCourseData.name}
+                                                onChange={(e) => setNewCourseData({ ...newCourseData, name: e.target.value })}
+                                                required
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="e.g., Data Structures"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label htmlFor="course-code-input" className="text-sm font-semibold text-gray-700">Course Code</label>
+                                            <input
+                                                id="course-code-input"
+                                                type="text"
+                                                value={newCourseData.code}
+                                                onChange={(e) => setNewCourseData({ ...newCourseData, code: e.target.value })}
+                                                required
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="e.g., CS-201"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label htmlFor="credit-hours-input" className="text-sm font-semibold text-gray-700">Credit Hours</label>
+                                            <input
+                                                id="credit-hours-input"
+                                                type="number"
+                                                min="1"
+                                                max="6"
+                                                value={newCourseData.credit_hours}
+                                                onChange={(e) => setNewCourseData({ ...newCourseData, credit_hours: parseInt(e.target.value) || 3 })}
+                                                required
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <label htmlFor="semester-input" className="text-sm font-semibold text-gray-700">Semester</label>
@@ -223,7 +255,7 @@ const MasterCurriculumDetailPage = () => {
 
                                 <div className="bg-gray-50 px-8 py-4 flex justify-end gap-3 rounded-b-2xl border-t">
                                     <button type="button" onClick={() => setShowAddCourseModal(false)} className="px-6 py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-100">Cancel</button>
-                                    <button type="submit" disabled={submitting} className="flex items-center gap-2 px-6 py-2 bg-indigo-600 text-white rounded-xl shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <button type="submit" disabled={submitting || !newCourseData.name || !newCourseData.code || !newCourseData.credit_hours} className="flex items-center gap-2 px-6 py-2 bg-indigo-600 text-white rounded-xl shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
                                         {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                                         <span>{submitting ? 'Adding...' : 'Add Course'}</span>
                                     </button>
