@@ -23,6 +23,7 @@ export interface PEO {
   title: string;
   description: string;
   order_number: number;
+  kpi_threshold: number;
   is_active: boolean;
   created_at: string;
 }
@@ -155,6 +156,7 @@ export interface CourseSession {
   semester: any;
   instructor: any;
   course_name: string;
+  course_code: string;
   batch_name: string;
   semester_name: string;
   semester_number?: number;
@@ -204,11 +206,36 @@ export interface CLOReportResponse {
     code: string;
     title: string;
     semester: number | null;
+    batch: string | null;
     session: string;
   };
   clo_summary: CLOSummary[];
   assessment_effectiveness: AssessmentEffectiveness[];
   cqi_list: CLOCQIListItem[];
+}
+
+export interface AlumniDashboardResponse {
+  name: string;
+  roll_no: string;
+  batch: string;
+  program: string;
+  graduation_year: string;
+  cgpa: number;
+  completed_courses: number;
+  current_employer: string;
+  designation: string;
+  transcripts: Array<{
+    semester: string;
+    courses: Array<{
+      semester: string;
+      course_code: string;
+      course_name: string;
+      credits: number;
+      percentage: number;
+      gpa: number;
+    }>;
+    courses_count: number;
+  }>;
 }
 
 // --- Batch Interfaces ---
@@ -338,6 +365,12 @@ class OBEService {
   // Get Course CLO Report
   async getCourseCLOReport(sessionId: string): Promise<CLOReportResponse> {
     const response = await api.get(`/obe/courses/${sessionId}/clo-report/`);
+    return response.data;
+  }
+
+  // Get Alumni Dashboard
+  async getAlumniDashboard(): Promise<AlumniDashboardResponse> {
+    const response = await api.get('/obe/alumni/dashboard/');
     return response.data;
   }
 

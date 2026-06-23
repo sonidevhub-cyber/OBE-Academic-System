@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AnnouncementModule from '../modules/AnnouncementModule';
 import SimpleFeedbackModule from '../modules/SimpleFeedbackModule';
 import FeedbackButton from '../forms/FeedbackButton';
+import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 
 import GAReport from '../../pages/GAReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
@@ -28,7 +29,8 @@ import {
   LogOut,
   FileBarChart,
   Users,
-  BookOpen
+  BookOpen,
+  Settings
 } from 'lucide-react';
 
 interface Department {
@@ -66,7 +68,7 @@ interface Student {
   email: string;
 }
 
-type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "peo-report" | "student-obe" | "notice" | "feedback";
+type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "peo-report" | "student-obe" | "notice" | "feedback" | "obe-management";
 
 const ModularHODDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -91,6 +93,7 @@ const ModularHODDashboard: React.FC = () => {
 
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "obe-management", label: "PEO/GA Management", icon: Settings },
     { id: "cqi", label: "CLO CQI Control", icon: ClipboardCheck },
     { id: "clo-report", label: "CLO Reports", icon: BookOpen },
     { id: "ga-report", label: "GA Reports", icon: FileBarChart },
@@ -247,6 +250,9 @@ const ModularHODDashboard: React.FC = () => {
             </div>
           </motion.div>
         );
+
+      case 'obe-management':
+        return <CoordinatorOBEMappingModule />;
 
       case 'cqi':
         return <HODCQI />;

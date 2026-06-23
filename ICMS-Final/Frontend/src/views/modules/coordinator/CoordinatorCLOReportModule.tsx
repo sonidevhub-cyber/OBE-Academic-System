@@ -207,17 +207,14 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className="inline-flex items-center justify-center w-12 h-12 bg-indigo-100 text-indigo-700 rounded-xl font-black text-lg">
-                    {session.semester_number || session.semester_name.match(/\d+/)?.[0] || '?'}
-                  </span>
+                  <span className="text-lg font-black text-indigo-700">{session.course_code}</span>
                   <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'NOT_ASSESSED')}`}>
                     {getStatusIcon(session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'NOT_ASSESSED')}
                     {session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'In Progress'}
                   </span>
                 </div>
-                <h3 className="text-xl font-black text-gray-900 mb-1">{session.course.code}</h3>
-                <p className="text-gray-600 font-semibold">{session.course.name}</p>
-                <p className="text-gray-400 text-sm mt-2">{session.semester_name}</p>
+                <h3 className="text-xl font-black text-gray-900 mb-1">{session.course_name}</h3>
+                <p className="text-gray-400 text-sm mt-1">{session.batch_name} • {session.semester_name}</p>
               </motion.div>
             ))
           )}
@@ -271,7 +268,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
           </span>
         </div>
         <h2 className="text-2xl font-black text-gray-900">{cloReport.course.title}</h2>
-        <p className="text-gray-500 font-semibold mt-1">{cloReport.course.code} • {cloReport.course.semester}</p>
+        <p className="text-gray-500 font-semibold mt-1">{cloReport.course.code} • {cloReport.course.batch} • Semester {cloReport.course.semester}</p>
       </div>
 
       {/* 1. CLO Summary Cards */}

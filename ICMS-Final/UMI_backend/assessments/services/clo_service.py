@@ -51,11 +51,9 @@ class CLOService:
 
         report = []
 
+        # Initialize class totals (will accumulate across all students)
         class_clo_obtained = {f"CLO-{clo.order_number}": Decimal('0') for clo in clos}
         class_clo_total = {f"CLO-{clo.order_number}": Decimal('0') for clo in clos}
-
-        # Track type-specific totals
-        type_totals = {}
 
         for idx, student in enumerate(students, 1):
             row = {
@@ -68,6 +66,10 @@ class CLOService:
 
             obtained_marks = Decimal('0')
             total_marks = Decimal('0')
+
+            # Initialize per-student CLO totals
+            student_clo_obtained = {f"CLO-{clo.order_number}": Decimal('0') for clo in clos}
+            student_clo_total = {f"CLO-{clo.order_number}": Decimal('0') for clo in clos}
 
             for assessment in assessments:
                 assessment_questions = [q for q in questions if q.assessment_id == assessment.id]
@@ -99,6 +101,9 @@ class CLOService:
                         "total": float(clo_total)
                     }
 
+                    # Update both student and class totals
+                    student_clo_obtained[clo_code] += Decimal(clo_obtained)
+                    student_clo_total[clo_code] += Decimal(clo_total)
                     class_clo_obtained[clo_code] += Decimal(clo_obtained)
                     class_clo_total[clo_code] += Decimal(clo_total)
 
@@ -120,9 +125,9 @@ class CLOService:
 
             for clo in clos:
                 clo_code = f"CLO-{clo.order_number}"
-                total_clo = class_clo_total[clo_code]
+                total_clo = student_clo_total[clo_code]
                 if total_clo > 0:
-                    percent = (class_clo_obtained[clo_code] / total_clo) * 100
+                    percent = (student_clo_obtained[clo_code] / total_clo) * 100
                 else:
                     percent = Decimal('0')
 

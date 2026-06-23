@@ -28,7 +28,8 @@ from .views import (
     BatchGAReportView,
     CourseCLOReportView,
     TeacherGAContextView,
-    BatchStudentsListView
+    BatchStudentsListView,
+    AlumniDashboardView
 )
 
 urlpatterns = [
@@ -150,5 +151,7 @@ urlpatterns = [
     path('courses/<uuid:session_id>/clo-report/', CourseCLOReportView.as_view()),
     
     # 13. Teacher GA Context endpoint
-    path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view())
+    path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view()),
+    # 14. Alumni Dashboard
+    path('alumni/dashboard/', AlumniDashboardView.as_view())
 ] 

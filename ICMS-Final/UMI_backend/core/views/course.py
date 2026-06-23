@@ -11,7 +11,20 @@ class CourseListCreateView(generics.ListCreateAPIView):
     def get_permissions(self):
         if self.request.method == 'GET':
             return [permissions.AllowAny()]
-        return [IsSAC()]
+        # Allow SAC, HOD, and Coordinator to create courses
+        from rest_framework.permissions import BasePermission
+        class IsSACHODCoordinator(BasePermission):
+            def has_permission(self, request, view):
+                return bool(
+                    request.user and request.user.is_authenticated and (
+                        request.user.role == 'SAC' or
+                        request.user.role == 'hod' or
+                        request.user.secondary_role == 'hod' or
+                        request.user.role == 'coordinator' or
+                        request.user.secondary_role == 'coordinator'
+                    )
+                )
+        return [IsSACHODCoordinator()]
 
     def get_serializer_class(self):
         return CourseCreateSerializer if self.request.method == 'POST' else CourseSerializer

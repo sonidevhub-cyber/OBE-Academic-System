@@ -927,11 +927,7 @@ const CoordinatorGAReportModule: React.FC = () => {
                   <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
                     <FileBarChart className="w-5 h-5 text-indigo-600" />
                     Graduate Attribute Summary
-                  </h3>
-                  <div className="text-sm text-gray-500 mb-4">
-                    Debug Info: scope={scope}, selectedStudentId={selectedStudentId}, reportData={JSON.stringify(reportData, null, 2)}, getGAItems().length={getGAItems().length}
-                  </div>
-                  <div className="space-y-4">
+                  </h3>                  <div className="space-y-4">
                     {getGAItems().length === 0 && (
                       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
                         <div className="text-2xl mb-4">📊</div>

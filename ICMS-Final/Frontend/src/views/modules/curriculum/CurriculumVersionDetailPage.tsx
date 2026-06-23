@@ -93,7 +93,11 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     const queryParams = new URLSearchParams(location.search);
     const tab = queryParams.get('tab');
     if (tab === 'courses' || tab === 'history') setActiveTab(tab);
-  }, [location.search]);
+    // If SAC, make sure activeTab isn't 'obe'
+    if (isSAC && activeTab === 'obe') {
+      setActiveTab('courses');
+    }
+  }, [location.search, isSAC, activeTab]);
 
   useEffect(() => {
     if (isNew) {
@@ -383,13 +387,13 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   const ensureEditable = async (action: () => Promise<void>) => {
     if (!version) return;
     
-    // If it's a draft and only has one batch, it's safe to edit
-    if (version.status === 'draft' && version.assigned_batches?.length === 1) {
+    // If it's a draft, it's safe to edit directly (no matter how many batches it has)
+    if (version.status === 'draft') {
       await action();
       return;
     }
 
-    // If it's shared or finalized, we need to branch
+    // If it's finalized or archived, we need to branch
     setPendingAction(() => action);
     
     if (version.assigned_batches && version.assigned_batches.length > 1) {
@@ -736,13 +740,15 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
           <Book className="w-4 h-4 inline mr-2" />
           Courses
         </button>
-        <button
-          onClick={() => setActiveTab('obe')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'obe' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-        >
-          <Target className="w-4 h-4 inline mr-2" />
-          OBE Mapping
-        </button>
+        {!isSAC && (
+          <button
+            onClick={() => setActiveTab('obe')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'obe' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <Target className="w-4 h-4 inline mr-2" />
+            OBE Mapping
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('history')}
           className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
@@ -962,7 +968,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
           <div>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-800">Course Listing</h2>
-              {version.status === 'draft' && !isSAC && (
+              {version.status === 'draft' && (
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => setShowAddCourseModal(true)}
@@ -1044,7 +1050,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
           </div>
         )}
 
-        {activeTab === 'obe' && (
+        {activeTab === 'obe' && !isSAC && (
           <div className="space-y-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900 flex items-center">

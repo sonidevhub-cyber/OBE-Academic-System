@@ -32,6 +32,13 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
     total_score = Decimal('0.00')
     total_weight = Decimal('0.00')
 
+    # Get students via User model, which has the correct batch
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    user_students = User.objects.filter(batch=course_session.batch, role='student')
+    students = [Student.objects.get(user=user) for user in user_students if hasattr(user, 'student_profile')]
+    enrolled_students_count = len(students)
+
     for mapping in mappings:
         # Calculate real CLO attainment
         clo = mapping.clo
@@ -49,8 +56,6 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
         if total_marks == 0:
             continue
             
-        students = Student.objects.filter(batch=course_session.batch)
-        enrolled_students_count = students.count()
         total_obtained = Decimal('0')
         student_marks = StudentQuestionMark.objects.filter(question__in=questions)
         total_obtained = sum(sm.marks_obtained for sm in student_marks)
@@ -69,16 +74,13 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
     else:
         final_score = Decimal('0')
 
-    # Calculate enrolled students count
-    enrolled_students = Student.objects.filter(batch=course_session.batch).count()
-
     # Create or update CourseGAScore
     course_ga_score, created = CourseGAScore.objects.update_or_create(
         course_session=course_session,
         ga=ga,
         defaults={
             'score': final_score,
-            'enrolled_students': enrolled_students,
+            'enrolled_students': enrolled_students_count,
             'is_stale': False
         }
     )
@@ -104,7 +106,10 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
                 scores.append(score)
 
         # Now calculate StudentCLOScores
-        students = Student.objects.filter(batch=course_session.batch)
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user_students = User.objects.filter(batch=course_session.batch, role='student')
+        students = [Student.objects.get(user=user) for user in user_students if hasattr(user, 'student_profile')]
         # Get all CLOs for this course
         clos = CLO.objects.filter(
             course=course_session.course,
@@ -224,7 +229,7 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
     """
     # Get all course sessions for this student in this semester
     course_sessions = CourseSession.objects.filter(
-        batch=student.batch,
+        batch=student.user.batch,
         semester=semester,
         is_active=True,
         assessment_status='ASSESSMENT_DONE'
@@ -266,9 +271,9 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA):
     """
     ga_code = f'GA-{ga.order_number}'
     print("=== calculate_ga_attainment_cumulative_student called for student:", student.name, "ga:", ga_code)
-    print("student.batch:", student.batch)
+    print("student.user.batch:", student.user.batch)
     course_sessions = CourseSession.objects.filter(
-        batch=student.batch,
+        batch=student.user.batch,
         is_active=True,
         assessment_status='ASSESSMENT_DONE'
     )
@@ -323,21 +328,29 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA):
 def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str, semester: int = None):
     """
     Check if GA attainment is below threshold and create GACQIRecord if needed
-    NOTE: ONLY triggers for CUMULATIVE (Program End) — SEMESTER is early warning only!
     """
-    # Only trigger for CUMULATIVE, never for SEMESTER
-    if cqi_level != 'CUMULATIVE':
+    if cqi_level == 'SEMESTER' and semester is None:
         return None
 
-    attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
+    if cqi_level == 'CUMULATIVE':
+        attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
+    else:
+        # SEMESTER level
+        from core.models import Semester
+        sem_obj = Semester.objects.filter(program=batch.program, number=semester).first()
+        if not sem_obj:
+            return None
+        attainment = calculate_ga_attainment_semester_cohort(batch, sem_obj, ga)
 
     if attainment is None:
         return None
 
-    # Check if already has a non-fully-approved CQI (any cqi_level, since only CUMULATIVE now)
+    # Check if already has a non-fully-approved CQI for this (ga, batch, cqi_level, semester)
     existing_cqi = GACQIRecord.objects.filter(
         ga=ga,
         batch=batch,
+        cqi_level=cqi_level,
+        semester=semester if cqi_level == 'SEMESTER' else None,
         status__in=['PENDING', 'SENT_BACK']
     ).exists()
 
@@ -350,7 +363,7 @@ def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str, semester: int
             ga=ga,
             batch=batch,
             cqi_level=cqi_level,
-            semester=None,
+            semester=semester if cqi_level == 'SEMESTER' else None,
             attainment_value=attainment,
             kpi_threshold_at_trigger=ga.kpi_threshold,
             status='PENDING'
