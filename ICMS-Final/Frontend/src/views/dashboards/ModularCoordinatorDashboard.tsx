@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
 import { 
-  LayoutDashboard, 
+  LayoutDashboard,
+  MessageSquare, 
   BookOpen, 
   Users, 
   User,
@@ -32,8 +33,11 @@ import PEOReport from '../../pages/PEOReport';
 import StudentOBEList from '../../pages/StudentOBEList';
 
 import { api } from '../../api/api';
+import CoordinatorFeedbackView from "../pages/CoordinatorFeedbackView";
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'peo-report' | 'student-obe';
+
+
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'peo-report' | 'student-obe' | 'feedback' ;
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -156,6 +160,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'student-obe', label: 'Student OBE', icon: Users },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
+    { id: "feedback", label: "Feedback", icon: MessageSquare }
   ];
 
   const renderContent = () => {
@@ -223,6 +228,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
         return <SacProgramSetup onManagePromotion={() => {}} />;
+        case 'feedback':
+  return <CoordinatorFeedbackView />;
       default:
         return null;
     }

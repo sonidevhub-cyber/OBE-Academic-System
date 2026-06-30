@@ -20,6 +20,9 @@ import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-hot-toast';
+import HODFeedbackControl from "../pages/HODFeedbackControl";
+import EnableResultEditing from "../pages/EnableResultEditing";
+
 import {
   LayoutDashboard,
   ClipboardCheck,
@@ -68,7 +71,7 @@ interface Student {
   email: string;
 }
 
-type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "peo-report" | "student-obe" | "notice" | "feedback" | "obe-management";
+type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "peo-report" | "student-obe" | "notice" | "feedback" | "obe-management"| "result-editing";
 
 const ModularHODDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -101,6 +104,7 @@ const ModularHODDashboard: React.FC = () => {
     { id: "student-obe", label: "Student OBE", icon: Users },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "feedback", label: "Feedback", icon: MessageSquare },
+    { id: "result-editing",label: "Result lock",icon: Settings,},
   ];
 
   useEffect(() => {
@@ -271,22 +275,15 @@ const ModularHODDashboard: React.FC = () => {
 
       case 'notice':
         return <HODNotice />;
+      case "result-editing":
+        return <EnableResultEditing/>;  
 
-      case 'feedback':
-        return (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-4">Feedback Management</h3>
-              <p className="text-gray-600 mb-4">
-                View feedback from students and give feedback to students.
-              </p>
-            </div>
-            <SimpleFeedbackModule 
-              token={token || ''} 
-              userType="hod"
-            />
-          </div>
-        );
+     case 'feedback':
+  return (
+    <div className="space-y-6">
+      <HODFeedbackControl />
+    </div>
+  );
 
       default:
         return <div>Content for {activeTab}</div>;

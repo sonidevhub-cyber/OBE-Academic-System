@@ -53,7 +53,7 @@ class Assessment(models.Model):
 
     # 🔥 IMPORTANT (OBE FLOW)
     is_finalized = models.BooleanField(default=False)
-
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
@@ -258,8 +258,8 @@ class CQI(models.Model):
         default='pending'
     )
 
-    hod_comment = models.TextField(null=True, blank=True)
-
+    coordinator_comment = models.TextField(null=True, blank=True)
+    show_next_offering = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

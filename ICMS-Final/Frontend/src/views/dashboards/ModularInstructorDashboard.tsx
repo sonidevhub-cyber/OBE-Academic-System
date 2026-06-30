@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { api } from "../../api/api";
+
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAllocations } from '../../context/AllocationContext';
@@ -10,6 +12,7 @@ import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
 
+
 type TabId = 'dashboard' | 'courses' | 'attendance' | 'schedule' | 'obe';
 
 const ModularInstructorDashboard: React.FC = () => {
@@ -18,7 +21,7 @@ const ModularInstructorDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>('courses');
   const [instructorProfile, setInstructorProfile] = useState<any>(null);
-  
+  const [cqiPopup, setCqiPopup] = useState<any[]>([]);
   const currentInstructorId = Number(
     currentUser?.instructor_id ??
     currentUser?.instructor_profile?.id ??
@@ -50,6 +53,18 @@ const ModularInstructorDashboard: React.FC = () => {
       cancelled = true;
     };
   }, [currentUser]);
+  useEffect(() => {
+   loadNextBatchCQI();
+}, []);
+const loadNextBatchCQI = async () => {
+   try {
+      const res = await api.get("/feedback/next-batch-cqi/");
+
+      setCqiPopup(res.data || []);
+   } catch (err) {
+      console.log(err);
+   }
+};
 
   const handleViewCourseDetails = (course: any) => {
   navigate(`/teacher/course-details/${course.allocation_id}`);
@@ -299,7 +314,37 @@ const ModularInstructorDashboard: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-[#E8F5E8]">
+<>
+    {cqiPopup.length > 0 && (
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
+            <div className="bg-white rounded-xl p-6 w-[500px]">
+
+                <h2 className="text-xl font-bold text-red-600 mb-4">
+                    Previous Batch CQI Required
+                </h2>
+
+                {cqiPopup.map((item, index) => (
+                    <div key={index} className="border rounded p-3 mb-2">
+                        <p><b>Course:</b> {item.course}</p>
+                        <p><b>Previous Batch:</b> {item.previous_batch}</p>
+                        <p><b>Root Cause:</b> {item.root_cause}</p>
+                        <p><b>Remedial Plan:</b> {item.remedial_plan}</p>
+                    </div>
+                ))}
+
+                <button
+                    className="mt-4 bg-blue-600 text-white px-4 py-2 rounded"
+                    onClick={() => setCqiPopup([])}
+                >
+                    OK
+                </button>
+
+            </div>
+        </div>
+    )}
+
+    
+      <div className="flex min-h-screen w-full bg-[#E8F5E8]">
       {/* Sidebar */}
       <div className='w-64 bg-gradient-to-b from-blue-600 via-indigo-700 to-purple-800 text-white p-4 space-y-2 min-h-screen shadow-xl flex flex-col'>
         <div className='mb-8 text-center'>
@@ -381,6 +426,7 @@ const ModularInstructorDashboard: React.FC = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 

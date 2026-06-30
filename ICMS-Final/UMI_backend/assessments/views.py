@@ -8,6 +8,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from students.models import Student
 from .models import Assessment, StudentAssessment
+
 import uuid
 
 
@@ -18,6 +19,7 @@ from .models import (
     StudentQuestionMark
 )
 from core.models import Batch, Semester
+
 from students.models import Student
 from obe.models import CLO, GA
 from .serializer import AssessmentCreateSerializer, AssessmentDetailSerializer
@@ -188,10 +190,11 @@ class CreateAssessmentView(APIView):
         for q in questions_objs
     ]
 }, status=201)
-from assessments.services.clo_service import CLOService   # 🔥 IMPORT ADD
-from obe.views.ga_views import mark_existing_sessions_as_done   # 🔥 NEW
-from obe.services import calculate_all_course_ga_scores, check_and_trigger_ga_cqi   # 🔥 NEW
-from obe.models import CourseSession   # 🔥 NEW
+from assessments.services.clo_service import CLOService
+from obe.views.ga_views import mark_existing_sessions_as_done
+from obe.services import calculate_all_course_ga_scores, check_and_trigger_ga_cqi
+from obe.models import CourseSession
+from assessments.models import CLOAttainment
 
 class EnterMarksView(APIView):
     permission_classes = [IsAuthenticated]
@@ -201,6 +204,7 @@ class EnterMarksView(APIView):
 
         data = request.data
 
+        # ✅ Step 1: Assessment fetch karo
         try:
             assessment = Assessment.objects.get(
                 id=assessment_id,
@@ -209,14 +213,22 @@ class EnterMarksView(APIView):
         except Assessment.DoesNotExist:
             return Response({"error": "Assessment not found"}, status=404)
 
-        # ❌ Already finalized check
-        if assessment.is_finalized:
-            return Response({
-                "error": "Marks already finalized",
-                "is_final": assessment.assessment_type == "final"
-            }, status=400)
+        # ✅ Step 2: Course session fetch karo (assessment mile ke baad)
+        course_session = CourseSession.objects.filter(
+            course=assessment.course,
+            batch=assessment.batch,
+            semester=assessment.semester
+        ).first()
+        
 
-        # ✅ SAVE MARKS
+        # ✅ Step 3: Finalized check
+        if assessment.is_finalized:
+            if not course_session or not course_session.allow_result_editing:
+                return Response({
+                    "error": "Marks already finalized. Admin must enable editing."
+                }, status=400)
+
+        # ✅ Step 4: Marks save karo
         for entry in data:
             StudentQuestionMark.objects.update_or_create(
                 student_id=entry['student_id'],
@@ -224,7 +236,7 @@ class EnterMarksView(APIView):
                 defaults={'marks_obtained': entry['marks']}
             )
 
-        # ✅ UPDATE TOTAL MARKS
+        # ✅ Step 5: Total marks update karo
         students = Student.objects.filter(user__batch=assessment.batch)
 
         for s in students:
@@ -238,30 +250,47 @@ class EnterMarksView(APIView):
                 assessment=assessment
             ).update(marks_obtained=total)
 
-        # 🔥 FINALIZE ONLY IF IT'S FINAL, OR ALL ASSESSMENTS ARE DONE
+        # ✅ Step 6: Assessment finalize karo
         assessment.is_finalized = True
         assessment.save()
 
-        # Check if all assessments for this course session are now finalized
+        # ✅ Step 7: allow_result_editing reset karo agar tha
+        if course_session and course_session.allow_result_editing:
+            course_session.allow_result_editing = False
+            course_session.save()
+
+        # ✅ Step 8: Check karo sab assessments finalize hue ya nahi
         all_assessments = Assessment.objects.filter(
             course_id=assessment.course_id,
             batch=assessment.batch,
             semester=assessment.semester
         )
         all_finalized = all(a.is_finalized for a in all_assessments)
-        
+
         is_course_session_finalized = all_finalized
-        
+        has_weak_clo = False  # default
+
         if is_course_session_finalized:
-            print(f"[EnterMarksView] All assessments finalized for course {assessment.course_id}, batch {assessment.batch_id}, semester {assessment.semester_id}")
-            # Generate CLO report and CLOAttainment
+            print(f"[EnterMarksView] All assessments finalized for course {assessment.course_id}, "
+                  f"batch {assessment.batch_id}, semester {assessment.semester_id}")
+
+            # ✅ Step 9: CLO report generate karo
             CLOService.generate_student_report(
                 course_id=assessment.course_id,
                 batch_id=assessment.batch_id,
                 semester_id=assessment.semester_id
             )
 
-            # Update or create CourseSession status
+            # ✅ Step 10: Weak CLOs check karo
+            weak_clos = CLOAttainment.objects.filter(
+                course=assessment.course,
+                batch=assessment.batch,
+                semester=assessment.semester,
+                is_achieved=False
+            )
+            has_weak_clo = weak_clos.exists()
+
+            # ✅ Step 11: CourseSession update karo
             course_session, created = CourseSession.objects.update_or_create(
                 course_id=assessment.course_id,
                 batch_id=assessment.batch_id,
@@ -273,36 +302,57 @@ class EnterMarksView(APIView):
                     'assessment_status': "ASSESSMENT_DONE"
                 }
             )
-            print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: {course_session.id} - status set to ASSESSMENT_DONE")
-            
-            # Calculate Course GA Scores
+            print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: "
+                  f"{course_session.id} - status set to ASSESSMENT_DONE")
+
+            # ✅ Step 12: GA scores calculate karo
             calculate_all_course_ga_scores(course_session)
-            
-            # Check and mark existing sessions in the same semester as done
+
+            # ✅ Step 13: Existing sessions mark as done
             mark_existing_sessions_as_done(assessment.batch, assessment.semester)
-            
-            # Check if all courses in the semester are done → trigger semester-level CQI
+
+            # ✅ Step 14: Semester-level CQI check
             all_sessions_in_semester = CourseSession.objects.filter(
                 batch=assessment.batch,
                 semester=assessment.semester,
                 is_active=True
             )
-            done_sessions_in_semester = all_sessions_in_semester.filter(assessment_status='ASSESSMENT_DONE')
-            if all_sessions_in_semester.count() == done_sessions_in_semester.count() and all_sessions_in_semester.exists():
-                # Calculate semester GA attainment and check for semester-level CQI for all GAs
-                gas = GA.objects.filter(program=assessment.batch.program, is_active=True)
+            done_sessions_in_semester = all_sessions_in_semester.filter(
+                assessment_status='ASSESSMENT_DONE'
+            )
+
+            if (
+                all_sessions_in_semester.exists() and
+                all_sessions_in_semester.count() == done_sessions_in_semester.count()
+            ):
+                gas = GA.objects.filter(
+                    program=assessment.batch.program,
+                    is_active=True
+                )
                 for ga in gas:
-                    check_and_trigger_ga_cqi(assessment.batch, ga, 'SEMESTER', assessment.semester.number)
-            
-            # Check if program end is ready → trigger cumulative-level CQI
+                    check_and_trigger_ga_cqi(
+                        assessment.batch, ga, 'SEMESTER', assessment.semester.number
+                    )
+
+            # ✅ Step 15: Cumulative-level CQI check
             if assessment.batch.is_program_end_ready:
-                gas = GA.objects.filter(program=assessment.batch.program, is_active=True)
+                gas = GA.objects.filter(
+                    program=assessment.batch.program,
+                    is_active=True
+                )
                 for ga in gas:
                     check_and_trigger_ga_cqi(assessment.batch, ga, 'CUMULATIVE')
 
         return Response({
             "message": "Marks saved and finalized",
-            "is_final": is_course_session_finalized
+            "is_final": is_course_session_finalized,
+            "has_weak_clo": has_weak_clo,
+            "trigger_cqi": has_weak_clo,
+            "next_step": (
+                "CQI_REQUIRED"
+                if has_weak_clo
+                else "REPORT_TO_COORDINATOR"
+            )
         }, status=200)    
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -338,7 +388,7 @@ class CQIView(APIView):
             return Response({"error": "Invalid semester number format"}, status=400)
 
         try:
-            from academic_structure.models import Batch, Semester
+            from core.models import Batch, Semester
             # 🔥 Batch object
             batch_obj = Batch.objects.get(id=batch_uuid)
 
@@ -397,9 +447,13 @@ class CQIView(APIView):
                 }
             )
             if not created:
+                if cqi.status == "approved":
+                    return Response({"error": "Approved cqi cannot be edited"}, status=400)
+                
                 cqi.reason = data['reason']
                 cqi.action_plan = data['action_plan']
                 cqi.status = 'pending'
+                cqi.show_next_offering = False
                 cqi.save()
         except Exception as e:
             return Response({"error": str(e)}, status=400)
@@ -466,38 +520,7 @@ class CheckCQIView(APIView):
                 for c in remaining_clos
             ]
         })
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from .models import CQI
-from .serializer import CQISerializer
 
-
-class HODCQIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-
-        course = request.GET.get("course")
-        batch = request.GET.get("batch")
-        semester = request.GET.get("semester")
-
-        queryset = CQI.objects.select_related('clo', 'instructor', 'reviewed_by') \
-            .filter(status='pending') \
-            .order_by('-created_at')
-
-        # 🔍 Filters
-        if course:
-            queryset = queryset.filter(course_id=course)
-        if batch:
-            queryset = queryset.filter(batch_id=batch)
-        if semester:
-            queryset = queryset.filter(semester_id=semester)
-
-        # 🔥 SERIALIZER USE
-        serializer = CQISerializer(queryset, many=True)
-
-        return Response(serializer.data)
 class UpdateCQIStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -513,16 +536,24 @@ class UpdateCQIStatusView(APIView):
         if status not in ["approved", "rejected"]:
             return Response({"error": "Invalid status"}, status=400)
 
+        # Update status
         cqi.status = status
         cqi.reviewed_by = request.user
+        cqi.coordinator_comment = request.data.get("coordinator_comment", "")
 
-        # 🔥 ADD THIS
-        cqi.hod_comment = request.data.get("hod_comment", "")
+        # ✅ If Coordinator approves
+        if status == "approved":
+            cqi.show_next_offering = True
+
+        # ✅ If Coordinator rejects
+        elif status == "rejected":
+            cqi.show_next_offering = False
 
         cqi.save()
 
-        return Response({"message": f"CQI {status} successfully"})
-
+        return Response({
+            "message": f"CQI {status} successfully"
+        })
 import uuid
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -618,7 +649,7 @@ class CheckCQIStatusView(APIView):
                 "id": c.id,
                 "clo": c.clo.id,
                 "status": c.status,
-                "hod_comment": c.hod_comment
+                "coordinator_comment": c.coordinator_comment
             }
             for c in cqis
         ]
@@ -656,13 +687,17 @@ class ResubmitCQIView(APIView):
         cqi.reason = request.data.get("reason", cqi.reason)
         cqi.action_plan = request.data.get("action_plan", cqi.action_plan)
 
+        # 🔥 Reset status for re-review
         cqi.status = "pending"
         cqi.reviewed_by = None
-        cqi.hod_comment = None
+        cqi.coordinator_comment = None
+
+        # ✅ Important
+        cqi.show_next_offering = False
 
         cqi.save()
 
-        return Response({"message": "CQI resubmitted"})           
+        return Response({"message": "CQI resubmitted"})
 from django.db.models import Sum
 
 @api_view(['GET'])
@@ -722,7 +757,7 @@ def student_result(request):
         "percentage": round(percentage, 2),
         "gpa": gpa,
         "status": "PASS" if percentage >= 50 else "FAIL"
-    })
+    })    
 class CoordinatorCQIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -770,3 +805,354 @@ class CoordinatorCQIView(APIView):
             })
 
         return Response(data)
+import uuid
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+
+from .models import CQI
+
+
+class PreviousCQIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+
+        course = request.GET.get("course")
+        clo = request.GET.get("clo")
+
+        # Required parameters
+        if not course or not clo:
+            return Response(
+                {"error": "course and clo are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate UUID
+        try:
+            course_uuid = uuid.UUID(course)
+            clo_uuid = uuid.UUID(clo)
+        except ValueError:
+            return Response(
+                {"error": "Invalid UUID"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get latest approved CQI
+        cqi = (
+            CQI.objects.filter(
+                course_id=course_uuid,
+                clo_id=clo_uuid,
+                status="approved",
+                show_next_offering=True
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not cqi:
+            return Response({
+                "show_previous_cqi": False
+            })
+
+        return Response({
+            "show_previous_cqi": True,
+            "clo": str(cqi.clo.id),
+            "reason": cqi.reason,
+            "action_plan": cqi.action_plan,
+            "approved_at": cqi.created_at
+        }) 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+
+from assessments.models import Assessment
+
+
+class AssessmentHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+
+        course = request.GET.get("course")
+        batch = request.GET.get("batch")
+        semester = request.GET.get("semester")
+
+        assessments = Assessment.objects.filter(
+            course_id=course,
+            batch_id=batch,
+            semester_id=semester,
+            is_finalized=True
+        ).order_by("-created_at")
+
+        data = []
+
+        for ass in assessments:
+
+            data.append({
+
+                "id": ass.id,
+
+                "title": ass.title,
+
+                "type": ass.assessment_type,
+
+                "date": ass.assessment_date,
+
+                "total_marks": ass.total_marks,
+
+            })
+
+        return Response(data)
+from decimal import Decimal
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+
+from assessments.models import (
+    Assessment,
+    Question,
+    StudentQuestionMark
+)
+
+from students.models import Student
+from obe.models import CourseSession
+
+
+class AssessmentMarksView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, assessment_id):
+
+        assessment = Assessment.objects.get(id=assessment_id)
+
+        session = CourseSession.objects.filter(
+
+            course=assessment.course,
+
+            batch=assessment.batch,
+
+            semester=assessment.semester,
+
+            is_active=True
+
+        ).first()
+
+        students = Student.objects.filter(
+            user__batch=assessment.batch
+        )
+
+        questions = Question.objects.filter(
+            assessment=assessment
+        ).select_related("clo")
+
+        result = []
+
+        for student in students:
+
+            row = {
+
+                "student_id": student.student_id,
+
+                "name": student.name,
+
+                "questions": []
+
+            }
+
+            total = Decimal("0")
+
+            for q in questions:
+
+                mark = StudentQuestionMark.objects.filter(
+
+                    student=student,
+
+                    question=q
+
+                ).first()
+
+                obtained = mark.marks_obtained if mark else 0
+
+                total += Decimal(obtained)
+
+                row["questions"].append({
+                    "mark_id": mark.id if mark else None,
+
+                    "question_id": q.id,
+                    "question": f"Q{len(row['questions']) + 1}",
+                    "clo": f"CLO-{q.clo.order_number}",
+
+                    "marks_obtained": float(obtained),
+
+                    "total": float(q.marks)
+
+                })
+
+            row["total"] = float(total)
+
+            result.append(row)
+
+        return Response({
+
+            "assessment": {
+
+                "id": str(assessment.id),
+
+                "title": assessment.title,
+
+                "type": assessment.assessment_type,
+
+                "total_marks": float(assessment.total_marks),
+
+            },
+
+            "allow_editing": session.allow_result_editing if session else False,
+
+            "students": result
+
+        })        
+from django.db import transaction
+from django.db.models import Sum
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+from assessments.models import StudentQuestionMark, StudentAssessment
+from obe.models import CourseSession, GA
+from obe.services import (
+    calculate_all_course_ga_scores,
+    check_and_trigger_ga_cqi,
+)
+
+
+class UpdateStudentMarksView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def put(self, request):
+
+        marks = request.data.get("marks", [])
+
+        if not marks:
+            return Response(
+                {"error": "No marks received."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get first assessment/session only once
+        try:
+            first_mark = StudentQuestionMark.objects.select_related(
+                "question__assessment"
+            ).get(id=marks[0]["mark_id"])
+
+            assessment = first_mark.question.assessment
+
+            session = CourseSession.objects.get(
+                course=assessment.course,
+                batch=assessment.batch,
+                semester=assessment.semester,
+                is_active=True
+            )
+
+        except StudentQuestionMark.DoesNotExist:
+            return Response(
+                {"error": "Invalid mark id."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        except CourseSession.DoesNotExist:
+            return Response(
+                {"error": "Course Session not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # HOD Permission
+        if not session.allow_result_editing:
+            return Response(
+                {"error": "Result editing is disabled."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        updated = 0
+        updated_assessments = set()
+
+        for item in marks:
+
+            mark_id = item.get("mark_id")
+            obtained = item.get("marks_obtained")
+
+            try:
+                mark = StudentQuestionMark.objects.select_related(
+                    "student",
+                    "question",
+                    "question__assessment"
+                ).get(id=mark_id)
+
+            except StudentQuestionMark.DoesNotExist:
+                continue
+
+            question = mark.question
+            assessment = question.assessment
+
+            updated_assessments.add(assessment.id)
+
+            # Validation
+            if float(obtained) > float(question.marks):
+                return Response(
+                    {
+                        "error": f"Marks cannot exceed {question.marks}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Update Marks
+            mark.marks_obtained = obtained
+            mark.save()
+
+            # Recalculate Student Assessment
+            total_marks = StudentQuestionMark.objects.filter(
+                student=mark.student,
+                question__assessment=assessment
+            ).aggregate(
+                total=Sum("marks_obtained")
+            )["total"] or 0
+
+            student_assessment, created = StudentAssessment.objects.get_or_create(
+                student=mark.student,
+                assessment=assessment
+            )
+
+            student_assessment.marks_obtained = total_marks
+            student_assessment.save()
+
+            updated += 1
+
+        # Recalculate OBE once
+        calculate_all_course_ga_scores(session)
+
+        gas = GA.objects.filter(
+            program=session.course.program,
+            is_active=True
+        )
+
+        for ga in gas:
+            check_and_trigger_ga_cqi(
+                batch=session.batch,
+                ga=ga,
+                cqi_level="SEMESTER",
+                semester=session.semester.number
+            )
+
+        return Response(
+            {
+                "message": f"{updated} marks updated successfully.",
+                "updated_assessments": list(updated_assessments)
+            },
+            status=status.HTTP_200_OK
+        )

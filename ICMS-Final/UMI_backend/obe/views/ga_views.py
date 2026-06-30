@@ -742,3 +742,26 @@ class BatchGAReportView(APIView):
             'ga_reports': response_items
         })
 
+class EnableResultEditingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, session_id):
+        try:
+            session = CourseSession.objects.get(
+                id=session_id,
+                is_active=True
+            )
+        except CourseSession.DoesNotExist:
+            return Response(
+                {"error": "Course session not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Enable editing
+        session.allow_result_editing = True
+        session.save()
+
+        return Response({
+            "message": "Result editing enabled successfully."
+        }, status=status.HTTP_200_OK)

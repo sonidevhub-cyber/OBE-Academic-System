@@ -205,6 +205,7 @@ class CourseSession(models.Model):
         null=True, blank=True
     ) 
     assessment_done = models.BooleanField(default=False)
+    allow_result_editing = models.BooleanField(default=False)
     locked_at = models.DateTimeField(null=True, blank=True)
     unlocked_by = models.ForeignKey(
         'core.CustomUser', 
@@ -277,9 +278,10 @@ class GACQIRecord(models.Model):
     batch = models.ForeignKey(
         'core.Batch',
         on_delete=models.CASCADE,
-        related_name='ga_cqi_records'
+        related_name='ga_cqi_records',
+        null=True, blank=True
     )
-    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES)
+    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES,default='SEMESTER')
     semester = models.IntegerField(null=True, blank=True)
     attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)

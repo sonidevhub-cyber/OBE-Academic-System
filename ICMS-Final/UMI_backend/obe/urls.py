@@ -31,6 +31,7 @@ from .views import (
     BatchStudentsListView,
     AlumniDashboardView
 )
+from .views.ga_views import EnableResultEditingView
 
 urlpatterns = [
     # PEO
@@ -153,5 +154,10 @@ urlpatterns = [
     # 13. Teacher GA Context endpoint
     path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view()),
     # 14. Alumni Dashboard
-    path('alumni/dashboard/', AlumniDashboardView.as_view())
+    path('alumni/dashboard/', AlumniDashboardView.as_view()),
+
+    # edit admin
+    path(
+    "course-sessions/<uuid:session_id>/enable-editing/",
+    EnableResultEditingView.as_view())
 ] 

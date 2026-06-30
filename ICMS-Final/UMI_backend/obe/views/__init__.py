@@ -19,7 +19,8 @@ from .ga_views import (
     GACQIHistoryView,
     CourseUnlockView,
     BatchStudentsListView,
-    BatchGAReportView
+    BatchGAReportView,
+    EnableResultEditingView,
 )
 from .clo_views import (
     CLOListCreateView,
@@ -75,6 +76,7 @@ __all__ = [
     'EffectiveCurriculumView',
     'TeacherGAContextView',
     'CourseCLOReportView',
-    'AlumniDashboardView'
+    'AlumniDashboardView',
+    'EnableResultEditingView'
 ]
 

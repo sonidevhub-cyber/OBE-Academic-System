@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../api/api';
-
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  LineChart,
+  Line,
+  ResponsiveContainer,
+} from "recharts";
 interface OBEReportProps {
   courseId: string;
   batchId: string;
@@ -10,6 +24,7 @@ interface OBEReportProps {
 const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) => {
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+ 
 
   useEffect(() => {
     fetchReport();
@@ -35,6 +50,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
       
       console.log("Processed report data:", data);
       setReportData(data);
+     
     } catch (err) {
       console.error("Error fetching report:", err);
     } finally {
@@ -45,6 +61,51 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
   if (loading) return <div className="text-center py-8">Loading Report...</div>;
   if (!reportData) return <div className="text-center py-8">No report data available</div>;
 
+  const totalStudents = reportData.students?.length || 0;
+
+const passedStudents =
+  reportData.students?.filter((s: any) => s.status === "PASS").length || 0;
+
+const failedStudents = totalStudents - passedStudents;
+
+const overallPercentage =
+  totalStudents > 0
+    ? (
+        reportData.students.reduce(
+          (sum: number, s: any) => sum + s.percentage,
+          0
+        ) / totalStudents
+      ).toFixed(2)
+    : 0;
+
+const overallGPA =
+  totalStudents > 0
+    ? (
+        reportData.students.reduce(
+          (sum: number, s: any) => sum + s.gpa,
+          0
+        ) / totalStudents
+      ).toFixed(2)
+    : 0;
+    const pieData = [
+  { name: "Passed", value: passedStudents },
+  { name: "Failed", value: failedStudents },
+];
+
+const barData = reportData.students?.map((s: any) => ({
+  name: s.name,
+  GPA: s.gpa,
+})) || [];
+
+const lineData = Object.entries(reportData.class_clo_attainment || {}).map(
+  ([clo, value]: any) => ({
+    clo,
+    percentage: value.percentage,
+  })
+);
+
+const COLORS = ["#22c55e", "#ef4444"];
+  
   const getTypeTitle = (type: string) => {
     switch (type) {
       case 'quiz': return 'Quiz';
@@ -81,7 +142,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
         <h3 className="text-xl font-bold text-gray-800">
           {reportData.course?.code && reportData.course?.name ? (
             `${reportData.course.code} - ${reportData.course.name}`
-          ) : "OBE Report"}
+          ) : "Student Report"}
         </h3>
         {reportData.semester?.number && (
           <p className="text-gray-600 mt-1">Semester: {reportData.semester.number}</p>
@@ -92,6 +153,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
         <button className="bg-green-600 text-white px-4 py-2 rounded-lg">
           Export Excel
         </button>
+        
       </div>
 
       <table className="w-full border-collapse border border-gray-300">
@@ -177,11 +239,11 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
                       <>
                         {ass.clos?.map((clo: any, cloIdx: number) => (
                           <td
-                            key={`${groupIdx}-${assIdx}-${cloIdx}`}
-                            className="border p-2 text-center"
-                          >
-                            {studentAssData?.clo_data?.[clo.clo]?.obtained ?? 0}
-                          </td>
+  key={`${groupIdx}-${assIdx}-${cloIdx}`}
+  className="border p-2 text-center"
+>
+  {studentAssData?.clo_data?.[clo.clo]?.obtained ?? 0}
+</td>
                         ))}
                       </>
                     );
@@ -349,6 +411,139 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
           </tr>
         </tbody>
       </table>
+      <div className="grid grid-cols-5 gap-4 mt-8">
+
+<div className="bg-blue-100 rounded-lg p-4 text-center shadow">
+<h3 className="font-bold">Total Students</h3>
+<p className="text-2xl font-bold">{totalStudents}</p>
+</div>
+
+<div className="bg-green-100 rounded-lg p-4 text-center shadow">
+<h3 className="font-bold">Passed</h3>
+<p className="text-2xl font-bold">{passedStudents}</p>
+</div>
+
+<div className="bg-red-100 rounded-lg p-4 text-center shadow">
+<h3 className="font-bold">Failed</h3>
+<p className="text-2xl font-bold">{failedStudents}</p>
+</div>
+
+<div className="bg-yellow-100 rounded-lg p-4 text-center shadow">
+<h3 className="font-bold">Overall %</h3>
+<p className="text-2xl font-bold">{overallPercentage}%</p>
+</div>
+
+<div className="bg-purple-100 rounded-lg p-4 text-center shadow">
+<h3 className="font-bold">Overall GPA</h3>
+<p className="text-2xl font-bold">{overallGPA}</p>
+</div>
+
+</div>
+{/* ================= PERFORMANCE ANALYTICS ================= */}
+
+<div className="mt-10">
+
+  <h2 className="text-2xl font-bold mb-5">
+    Performance Analytics
+  </h2>
+
+  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    {/* ================= PASS / FAIL PIE ================= */}
+    <div className="bg-white shadow rounded-lg p-5">
+      <h3 className="font-bold text-center mb-3">
+        Pass / Fail Ratio
+      </h3>
+
+      <ResponsiveContainer width="100%" height={300}>
+        <PieChart>
+          <Pie
+            data={pieData}
+            dataKey="value"
+            nameKey="name"
+            outerRadius={100}
+            label
+          >
+            {pieData.map((entry: any, index: number) => (
+              <Cell
+                key={index}
+                fill={COLORS[index % COLORS.length]}
+              />
+            ))}
+          </Pie>
+
+          <Tooltip />
+          <Legend />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+
+    {/* ================= PASS / FAIL BAR ================= */}
+    <div className="bg-white shadow rounded-lg p-5">
+      <h3 className="font-bold text-center mb-3">
+        Pass vs Fail
+      </h3>
+
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart
+          data={[
+            {
+              name: "Students",
+              Pass: passedStudents,
+              Fail: failedStudents,
+            },
+          ]}
+        >
+          <CartesianGrid strokeDasharray="3 3" />
+
+          <XAxis dataKey="name" />
+
+          <YAxis />
+
+          <Tooltip />
+
+          <Legend />
+
+          <Bar dataKey="Pass" fill="#22c55e" />
+
+          <Bar dataKey="Fail" fill="#ef4444" />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+
+    {/* ================= CLO LINE CHART ================= */}
+    <div className="bg-white shadow rounded-lg p-5 lg:col-span-2">
+      <h3 className="font-bold text-center mb-3">
+        CLO Attainment
+      </h3>
+
+      <ResponsiveContainer width="100%" height={350}>
+        <LineChart data={lineData}>
+
+          <CartesianGrid strokeDasharray="3 3" />
+
+          <XAxis dataKey="clo" />
+
+          <YAxis />
+
+          <Tooltip />
+
+          <Legend />
+
+          <Line
+            type="monotone"
+            dataKey="percentage"
+            stroke="#2563eb"
+            strokeWidth={3}
+          />
+
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+
+  </div>
+
+</div>
     </div>
   );
 };

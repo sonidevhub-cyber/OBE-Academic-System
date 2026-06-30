@@ -4,6 +4,7 @@ import { instructorCourseService, InstructorCourse } from "../../api/instructorC
 import ManageClass from "../pages/ManageClass";
 import OBEReport from "../pages/OBEReport";
 import AttainmentAnalysis from "../pages/AttainmentAnalysis";
+import AssessmentHistory from "../pages/AssessmentHistory";
 
 const OBEModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState("assessment");
@@ -56,8 +57,10 @@ const OBEModule: React.FC = () => {
 
   const tabs = [
     { id: "assessment", label: "Assessment" },
-    { id: "reports", label: "OBE Reports" },
+    {id: "history", label: "Assessment History"},
+    { id: "reports", label: "Course Report" },
     { id: "attainment", label: "Attainment Analysis" }
+
   ];
 
   return (
@@ -128,6 +131,14 @@ const OBEModule: React.FC = () => {
 
         {activeTab === "reports" && selectedCourse && (
           <OBEReport
+            courseId={String(selectedCourse.course_id)}
+            batchId={String(selectedCourse.batch_id)}
+            semesterId={String(selectedCourse.semester_id)}
+          />
+        )}
+
+        {activeTab === "history" && selectedCourse && (
+          <AssessmentHistory
             courseId={String(selectedCourse.course_id)}
             batchId={String(selectedCourse.batch_id)}
             semesterId={String(selectedCourse.semester_id)}

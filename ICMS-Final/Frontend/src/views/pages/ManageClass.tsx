@@ -46,6 +46,7 @@ const ManageClass: React.FC<Props> = ({ courseId, batchId, semesterId, selectedC
   const [date, setDate] = useState("");
   const [weakClos, setWeakClos] = useState<any[]>([]);
   const [showCQI, setShowCQI] = useState(false);
+  const [previousCQI, setPreviousCQI] = useState<any[]>([]);
   const [questions, setQuestions] = useState<Question[]>([
     { clo: "", description: "", level: "", kpi: 0, marks: 0 }
   ]);
@@ -121,18 +122,46 @@ useEffect(() => {
   })
   .catch(() => {});
 }, [courseId, batchId, semesterId]);
+useEffect(() => {
+
+    if (!courseId || clos.length === 0) return;
+
+    const fetchPreviousCQI = async () => {
+
+        const list: any[] = [];
+
+        for (const clo of clos) {
+
+            try {
+
+                const res = await api.get(
+                    "/assessments/previous-cqi/",
+                    {
+                        params: {
+                            course: courseId,
+                            clo: clo.id
+                        }
+                    }
+                );
+
+                if (res.data.show_previous_cqi) {
+                    list.push(res.data);
+                }
+
+            } catch (err) {}
+
+        }
+
+        setPreviousCQI(list);
+
+    };
+
+    fetchPreviousCQI();
+
+}, [courseId, clos]);
   // ================= CLO SELECT =================
   const handleCLOChange = (value: string, index: number) => {
 
-  // ❌ duplicate check
-  const alreadySelected = questions.some(
-    (q, i) => q.clo === value && i !== index
-  );
-
-  if (alreadySelected) {
-    toast.error("This CLO is already selected");
-    return;
-  }
 
   const selected = clos.find(c => c.id === value);
   if (!selected) return;
@@ -156,11 +185,26 @@ useEffect(() => {
   };
 
   const addCLO = () => {
-    setQuestions([
-      ...questions,
-      { clo: "", description: "", level: "", kpi: 0, marks: 0 }
-    ]);
-  };
+
+  // Agar last row complete nahi hai to nayi row na add ho
+  const last = questions[questions.length - 1];
+
+  if (!last.clo) {
+    toast.error("Please select CLO first.");
+    return;
+  }
+
+  setQuestions([
+    ...questions,
+    {
+      clo: "",
+      description: "",
+      level: "",
+      kpi: 0,
+      marks: 0
+    }
+  ]);
+};
 
   // ================= MARKS =================
   const handleMarksChange = (key: string, value: string) => {
@@ -176,40 +220,6 @@ useEffect(() => {
         return;
       }
 
-      // // ================= PRESENTATION =================
-      // if (type === "presentation") {
-
-      //   const res = await api.post("/assessments/create/", {
-      //     course: courseId,
-      //     batch: batchId,
-      //     title,
-      //     type,
-      //     total_marks: Number(totalMarks),
-      //     date,
-      //     questions: [] // no CLO
-      //   });
-
-      //   const assessmentId = res.data.assessment_id;
-
-      //   const payload: any[] = [];
-
-      //   students.forEach(s => {
-      //     const total =
-      //       (marks[`${s.student_id}-content`] || 0) +
-      //       (marks[`${s.student_id}-delivery`] || 0) +
-      //       (marks[`${s.student_id}-confidence`] || 0);
-
-      //     payload.push({
-      //       student_id: s.student_id,
-      //       marks: total
-      //     });
-      //   });
-
-      //   await api.post(`/assessments/${assessmentId}/enter-marks/`, payload);
-
-      //   toast.success("Presentation saved ✅");
-      //   return;
-      // }
 
       // ================= NORMAL ASSESSMENT =================
       const totalQ = questions.reduce((sum, q) => sum + q.marks, 0);
@@ -247,12 +257,12 @@ useEffect(() => {
       const payload: any[] = [];
 
       students.forEach(s => {
-        questions.forEach(q => {
-          const key = `${s.student_id}-${q.clo}`;
+        questions.forEach((q, index) => {
+          const key = `${s.student_id}-${index}`;
 
           payload.push({
             student_id: s.student_id,
-            question_id: cloMap[q.clo],
+            question_id: backendQuestions[index].id,
             marks: Number(marks[key] || 0)
           });
         });
@@ -264,18 +274,20 @@ useEffect(() => {
 );
 
 // 🔥 CQI trigger
-if (response.data.is_final) {
+if (response.data.trigger_cqi) {
 
-  const cqiCheck = await api.get(
-    `/assessments/cqi/check/${assessmentId}/`
-  );
+    const cqiCheck = await api.get(
+        `/assessments/cqi/check/${assessmentId}/`
+    );
 
-  if (cqiCheck.data.show_cqi) {
-    setWeakClos(cqiCheck.data.weak_clos); // 🔥 MUST
+    setWeakClos(cqiCheck.data.weak_clos || []);
     setShowCQI(true);
-  } else if (cqiCheck.data.message) {
-    toast.info(cqiCheck.data.message);
-  }
+
+}
+else {
+
+    toast.success("Report sent to Coordinator.");
+
 }
 
 toast.success("Assessment completed ✅");
@@ -332,98 +344,247 @@ toast.success("Assessment completed ✅");
 
         {/* CLO SECTION */}
         <div>
+        {/* Previous Approved CQI */}
+
+{previousCQI.length > 0 && (
+
+<div className="bg-green-50 border rounded p-4 mb-5">
+
+<h2 className="font-bold text-green-700">
+Previous Approved CQI
+</h2>
+
+{previousCQI.map((item, index) => (
+
+<div
+key={index}
+className="border rounded p-3 mt-3"
+>
+
+<p><b>CLO:</b> {item.clo}</p>
+
+<p><b>Reason:</b> {item.reason}</p>
+
+<p><b>Action Plan:</b> {item.action_plan}</p>
+
+</div>
+
+))}
+
+</div>
+
+)}
   <h3 className="font-bold flex gap-2 items-center mb-2">
     <TaskIcon />
     CLO Mapping
   </h3>
 
-  {questions.map((q, index) => (
-    <div key={index} className="border p-3 mt-3 rounded bg-gray-50">
+ <table className="w-full border mt-3">
 
-      <select
-        value={q.clo}
-        onChange={(e) => handleCLOChange(e.target.value, index)}
-        className="border p-2 w-full rounded"
-      >
-        <option value="">Select CLO</option>
-        {clos.map(c => (
-          <option key={c.id} value={c.id}>
-            CLO-{c.order_number}
-          </option>
-        ))}
-      </select>
+<thead className="bg-gray-100">
 
-      {q.clo && (
-        <div className="mt-2 flex gap-3 items-center">
-          <span>{q.description}</span>
-          <span>{q.level}</span>
-          <span>{q.kpi}%</span>
+<tr>
+<th className="border p-2">Questions</th>
+<th className="border p-2">CLO</th>
 
-          <input
-            type="number"
-            className="w-20 border text-center"
-            placeholder="Marks"
-            onChange={(e) =>
-              handleQuestionMarks(e.target.value, index)
-            }
-          />
-        </div>
-      )}
+<th className="border p-2">Description</th>
 
-    </div>
-  ))}
+<th className="border p-2">Bloom</th>
 
-  {/* <button
-    onClick={addCLO}
-    className="mt-2 bg-gray-200 px-3 py-1 rounded"
-  >
-    {type === "presentation" ? "+ Add Criteria" : "+ Add CLO"}
-  </button>
+<th className="border p-2">KPI</th>
+
+<th className="border p-2">Marks</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+{questions.map((q,index)=>(
+
+<tr key={index}>
+  <td className="border p-2 font-semibold text-center">
+  Q{index + 1}
+</td>
+
+<td className="border p-2">
+
+<select
+value={q.clo}
+onChange={(e)=>handleCLOChange(e.target.value,index)}
+className="w-full border rounded p-1"
+>
+
+<option>Select CLO</option>
+
+{clos.map(c=>(
+
+<option key={c.id} value={c.id}>
+CLO {c.order_number}
+</option>
+
+))}
+
+</select>
+
+</td>
+
+<td className="border p-2">
+
+{q.description}
+
+</td>
+
+<td className="border p-2">
+
+{q.level}
+
+</td>
+
+<td className="border p-2">
+
+{q.kpi}%
+
+</td>
+
+<td className="border p-2">
+
+<input
+type="number"
+value={q.marks}
+className="border w-20 p-1"
+onChange={(e)=>handleQuestionMarks(e.target.value,index)}
+/>
+
+</td>
+
+</tr>
+
+))}
+
+</tbody>
+
+</table>
+  <button
+  onClick={addCLO}
+  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded"
+>
+  + Add Question
+</button>
 </div>
 
-  {type === "presentation" && (
-  <PresentationRubrics
-    students={students}
-    questions={questions}
-    clos={clos}
-    marks={marks}
-    handleMarksChange={handleMarksChange}
-  />
-)} */}
-</div>
+
 
         {/* STUDENTS NORMAL */}
        
-          <div className="mt-6">
-            <h3 className="font-bold flex gap-2 items-center">
-              <UserIcon /> Student Marks
-            </h3>
+         <div className="overflow-auto mt-5">
 
-            {students.map(s => (
-              <div key={s.student_id} className="mt-2 border p-2 rounded">
+<table className="w-full border">
 
-                <div className="font-bold">{s.name}</div>
+<thead>
 
-                <div className="flex gap-2 mt-1">
-                  {questions.map(q => {
-                    const key = `${s.student_id}-${q.clo}`;
+<tr className="bg-gray-100">
 
-                    return (
-                      <input
-                        key={key}
-                        type="number"
-                        className="w-16 border text-center"
-                        onChange={(e) =>
-                          handleMarksChange(key, e.target.value)
-                        }
-                      />
-                    );
-                  })}
-                </div>
+<th className="border p-2">
 
-              </div>
-            ))}
-          </div>
+Student
+
+</th>
+
+{questions.map((q,index)=>(
+
+<th
+key={index}
+className="border p-2"
+>
+
+{q.clo
+  ? `Q${index + 1} (CLO ${clos.find(c => c.id === q.clo)?.order_number})`
+  : `Q${index + 1}`}
+
+</th>
+
+))}
+
+<th className="border p-2">
+
+Total
+
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+{students.map(student=>{
+
+let total=0;
+
+return(
+
+<tr key={student.student_id}>
+
+<td className="border p-2">
+
+{student.name}
+
+</td>
+
+{questions.map((q,index)=>{
+
+const key=`${student.student_id}-${index}`;
+
+const value=marks[key]||0;
+
+total+=value;
+
+return(
+
+<td
+key={index}
+className="border p-2"
+>
+
+<input
+  type="number"
+  min={0}
+  max={q.marks}
+  className="border w-16 text-center"
+  value={value}
+  onChange={(e) => {
+    const val = Number(e.target.value);
+
+    if (val <= q.marks) {
+      handleMarksChange(key, e.target.value);
+    }
+  }}
+/>
+</td>
+
+);
+
+})}
+
+<td className="border p-2 font-bold text-green-700 bg-green-50">
+
+{total}
+
+</td>
+
+</tr>
+
+);
+
+})}
+
+</tbody>
+
+</table>
+
+</div>
         
 
         <button

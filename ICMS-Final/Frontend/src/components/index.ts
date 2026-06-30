@@ -15,7 +15,7 @@ export { default as InstructorProfileModal } from './ui/modals/InstructorProfile
 export { default as NotificationBell } from './feedback/NotificationBell';
 export { default as NotificationToast } from './feedback/NotificationToast';
 export { default as ProfessionalFeedbackButton } from './feedback/ProfessionalFeedbackButton';
-export { default as ProfessionalFeedbackViewer } from './feedback/ProfessionalFeedbackViewer';
+// export { default as ProfessionalFeedbackViewer } from './feedback/ProfessionalFeedbackViewer';
 
 // ==================== FORM COMPONENTS ====================
 export { default as FeedbackButton } from './forms/FeedbackButton';
