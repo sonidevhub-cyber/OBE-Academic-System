@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from .models import Student
 from .serializers import StudentSerializer
 from core.permissions import IsSAC
+from core.responses import api_response
 
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all().select_related('user', 'department')
@@ -22,9 +23,33 @@ class StudentViewSet(viewsets.ModelViewSet):
         return queryset
     
     def get_permissions(self):
+        if self.action == 'profile':
+            return [permissions.IsAuthenticated()]
         if self.request.method == 'GET':
             return [permissions.AllowAny()]
         return [IsSAC()]
+
+    @action(detail=False, methods=['get'])
+    def profile(self, request):
+        from core.serializers.user import UserListSerializer
+
+        user = request.user
+        data = UserListSerializer(user, context={'request': request}).data
+
+        try:
+            student = Student.objects.get(user=user)
+            serializer = StudentSerializer(student, context={'request': request})
+            student_data = serializer.data
+
+            # Merge data
+            for key, value in student_data.items():
+                if key not in ['id', 'user']:
+                    data[key] = value
+
+        except Student.DoesNotExist:
+            pass
+
+        return api_response(data=data, message="Student profile retrieved successfully")
 
     @action(detail=True, methods=['post'], url_path='upload-image')
     def upload_image(self, request, pk=None):

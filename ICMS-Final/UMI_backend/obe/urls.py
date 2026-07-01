@@ -29,7 +29,36 @@ from .views import (
     CourseCLOReportView,
     TeacherGAContextView,
     BatchStudentsListView,
-    AlumniDashboardView
+    AlumniDashboardView,
+    # Exit survey views
+    GAExitSurveyQuestionListView,
+    ExitSurveyQuestionDetailView,
+    ExitSurveyCycleListView,
+    ExitSurveyCycleActivateView,
+    ExitSurveyCycleCloseView,
+    ExitSurveyResponseView,
+    GAIndirectScoreView,
+    # New exit survey views
+    ExitSurveyQuestionListView,
+    ExitSurveyQuestionGenerateView,
+    ExitSurveyTemplateStatusView,
+    ExitSurveyTemplateLockView,
+    ExitSurveyTemplateUnlockView,
+    BatchToggleExitSurveyView,
+    BatchInitiateGraduationView,
+    BatchPendingExitSurveyView,
+    ExitSurveyMyQuestionsView,
+    ExitSurveySubmitView,
+    StudentPortalStatusView,
+    # Alumni survey views
+    PEOAlumniSurveyQuestionListView,
+    AlumniSurveyQuestionDetailView,
+    AlumniSurveyCycleListView,
+    AlumniSurveyCycleCreateView,
+    AlumniSurveyCycleActivateView,
+    AlumniSurveyCycleCloseView,
+    AlumniSurveyResponseView,
+    PEOIndirectScoreView
 )
 
 urlpatterns = [
@@ -153,5 +182,53 @@ urlpatterns = [
     # 13. Teacher GA Context endpoint
     path('teacher/ga-context/<uuid:course_id>/', TeacherGAContextView.as_view()),
     # 14. Alumni Dashboard
-    path('alumni/dashboard/', AlumniDashboardView.as_view())
-] 
+    path('alumni/dashboard/', AlumniDashboardView.as_view()),
+    
+    # ========== EXIT SURVEY ENDPOINTS ==========
+    # Exit Survey Questions (HOD)
+    path('ga/<uuid:ga_id>/exit-survey-questions/', GAExitSurveyQuestionListView.as_view()),
+    path('exit-survey-questions/<uuid:pk>/', ExitSurveyQuestionDetailView.as_view()),
+    
+    # Exit Survey Cycles (Coordinator)
+    path('batches/<uuid:batch_id>/exit-survey-cycles/', ExitSurveyCycleListView.as_view()),
+    path('batches/<uuid:batch_id>/exit-survey-cycles/activate/', ExitSurveyCycleActivateView.as_view()),
+    path('exit-survey-cycles/<uuid:cycle_id>/close/', ExitSurveyCycleCloseView.as_view()),
+    
+    # Exit Survey Responses (Student - no auth)
+    path('exit-survey/<uuid:cycle_id>/', ExitSurveyResponseView.as_view()),
+    path('exit-survey/<uuid:cycle_id>/student/<uuid:student_id>/', ExitSurveyResponseView.as_view()),
+    
+    # GA Indirect Score
+    path('ga/<uuid:ga_id>/batch/<uuid:batch_id>/indirect-score/', GAIndirectScoreView.as_view()),
+    
+    # ========== ALUMNI SURVEY ROUTES ==========
+    # Alumni Survey Questions (HOD)
+    path('peo/<uuid:peo_id>/alumni-survey-questions/', PEOAlumniSurveyQuestionListView.as_view()),
+    path('alumni-survey-questions/<uuid:pk>/', AlumniSurveyQuestionDetailView.as_view()),
+    
+    # Alumni Survey Cycles (Coordinator)
+    path('batches/<uuid:batch_id>/alumni-survey-cycles/', AlumniSurveyCycleListView.as_view()),
+    path('batches/<uuid:batch_id>/alumni-survey-cycles/create/', AlumniSurveyCycleCreateView.as_view()),
+    path('alumni-survey-cycles/<uuid:cycle_id>/activate/', AlumniSurveyCycleActivateView.as_view()),
+    path('alumni-survey-cycles/<uuid:cycle_id>/close/', AlumniSurveyCycleCloseView.as_view()),
+    
+    # Alumni Survey Responses (Alumni - no auth)
+    path('alumni-survey/<uuid:cycle_id>/', AlumniSurveyResponseView.as_view()),
+    path('alumni-survey/<uuid:cycle_id>/student/<uuid:student_id>/', AlumniSurveyResponseView.as_view()),
+    
+    # PEO Indirect Score
+    path('peo/<uuid:peo_id>/batch/<uuid:batch_id>/indirect-score/', PEOIndirectScoreView.as_view()),
+    
+    # ========== NEW EXIT SURVEY ENDPOINTS ==========
+    path('exit-survey/questions/', ExitSurveyQuestionListView.as_view()),
+    path('exit-survey/questions/generate/', ExitSurveyQuestionGenerateView.as_view()),
+    path('exit-survey/template/status/', ExitSurveyTemplateStatusView.as_view()),
+    path('exit-survey/template/lock/', ExitSurveyTemplateLockView.as_view()),
+    path('exit-survey/template/unlock/', ExitSurveyTemplateUnlockView.as_view()),
+    path('batches/<uuid:batch_id>/toggle-exit-survey/', BatchToggleExitSurveyView.as_view()),
+    path('batches/<uuid:batch_id>/initiate-graduation/', BatchInitiateGraduationView.as_view()),
+    path('batches/<uuid:batch_id>/pending-exit-survey/', BatchPendingExitSurveyView.as_view()),
+    path('exit-survey/my-questions/', ExitSurveyMyQuestionsView.as_view()),
+    path('exit-survey/submit/', ExitSurveySubmitView.as_view()),
+    path('student/portal-status/', StudentPortalStatusView.as_view())
+]

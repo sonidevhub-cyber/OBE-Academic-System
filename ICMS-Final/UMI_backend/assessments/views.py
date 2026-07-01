@@ -695,7 +695,15 @@ def student_result(request):
             "title": assessment.title,
             "type": assessment.assessment_type,
             "obtained": obtained,
-            "total": total
+            "total": total,
+            "course": {
+                "id": str(assessment.course.id) if assessment.course else None,
+                "name": assessment.course.name if assessment.course else "Unknown Course"
+            },
+            "semester": {
+                "id": str(assessment.semester.id) if assessment.semester else None,
+                "name": assessment.semester.name if assessment.semester else "Unknown Semester"
+            }
         })
 
         total_obtained_all += obtained

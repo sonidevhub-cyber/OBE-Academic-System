@@ -6,8 +6,8 @@ from django.db import transaction
 from decimal import Decimal
 from core.models import Batch, Semester
 from students.models import Student
-from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore
-from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer
+from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score
+from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
 from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores
 
 
@@ -601,40 +601,16 @@ class BatchGAReportView(APIView):
     def get(self, request, batch_id):
         print("=== BatchGAReportView ===")
         print("batch_id:", batch_id)
-        print("request.query_params:", request.query_params)
         try:
             batch = Batch.objects.get(id=batch_id, is_active=True)
         except Batch.DoesNotExist:
             print("ERROR: Batch not found")
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        scope = request.query_params.get('scope', 'cohort')    # cohort|student
-        student_id = request.query_params.get('student_id', None)
-        print("scope:", scope)
-        print("student_id:", student_id)
-
-        # For scope=student
-        student_obj = None
-        if scope == 'student':
-            if not student_id:
-                print("ERROR: student_id missing")
-                return Response({'error': 'student_id is required when scope=student'}, status=status.HTTP_400_BAD_REQUEST)
-            # Get User first
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            try:
-                user = User.objects.get(id=student_id)
-                student_obj = Student.objects.get(user=user)
-            except (User.DoesNotExist, Student.DoesNotExist):
-                print("ERROR: Student not found")
-                return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
-            print("student_obj found:", student_obj)
-
-        # Readiness gate (only when scope=cohort)
-        if scope == 'cohort':
-            readiness = self._get_readiness_for_cumulative_cohort(batch)
-            if not readiness['ready']:
-                return Response(readiness)
+        # Readiness check
+        readiness = self._get_readiness_for_cumulative_cohort(batch)
+        if not readiness['ready']:
+            return Response(readiness)
 
         is_program_end_ready = batch.is_program_end_ready
         
@@ -643,96 +619,76 @@ class BatchGAReportView(APIView):
         response_items = []
         print("=== GA count:", gas.count())
 
+        from django.db.models import Avg
+        from decimal import Decimal
+
         for ga in gas:
-            ga_attainment = None
-            contributing_courses = []
-            ga_cqi_records = []
-            ga_code = f'GA-{ga.order_number}'
-
-            if scope == 'cohort':
-                ga_attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
-                
-                # Trigger cumulative CQI only if program end is ready
-                if is_program_end_ready:
-                    check_and_trigger_ga_cqi(batch, ga, 'CUMULATIVE')
-
-                # Contributing courses: show course_ga_score per course session (only <= current semester)
-                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
-
-                for session in cs_qs.select_related('course', 'semester'):
-                    score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
-                    if score:
-                        contributing_courses.append({
-                            'course_code': session.course.code,
-                            'course_name': session.course.name,
-                            'course_ga_score': float(score.score),
-                            'enrolled_students': score.enrolled_students,
-                            'semester': session.semester.number if session.semester else None,
-                            'credits': session.course.credit_hours,
-                        })
-
-                # GA CQI records: cohort only, and only if program end is ready
-                if is_program_end_ready:
-                    cqis = GACQIRecord.objects.filter(batch=batch, ga=ga, cqi_level='CUMULATIVE')
-                    for cqi in cqis:
-                        ga_cqi_records.append(GACQIRecordSerializer(cqi).data)
-
+            direct_score = calculate_ga_attainment_cumulative_cohort(batch, ga)
+            
+            # Calculate indirect score from exit survey
+            indirect_score = None
+            exit_responses = ExitSurveyResponse.objects.filter(
+                question__ga=ga,
+                student__batch=batch,
+                question__is_active=True
+            )
+            if exit_responses.exists():
+                avg_rating = exit_responses.aggregate(avg=Avg('rating_value'))['avg']
+                if avg_rating:
+                    indirect_score = (Decimal(avg_rating) / Decimal(5)) * Decimal(100)
+            
+            # Calculate final score: 80% direct + 20% indirect, fallback to direct if no indirect
+            if direct_score is not None:
+                if indirect_score is not None:
+                    final_score = (Decimal(direct_score) * Decimal(0.8)) + (Decimal(indirect_score) * Decimal(0.2))
+                else:
+                    final_score = Decimal(direct_score)
             else:
-                # scope=student
-                print("=== Processing student scope for", ga_code)
-                ga_attainment = calculate_ga_attainment_cumulative_student(student_obj, ga)
+                final_score = None
+            
+            # Trigger cumulative CQI only if program end is ready
+            if is_program_end_ready:
+                check_and_trigger_ga_cqi(batch, ga, 'CUMULATIVE')
 
-                # Contributing courses: show student's course_ga_score derived from StudentCLOScore (only <= current semester)
-                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
-                print("cs_qs count for student scope:", cs_qs.count())
+            # Contributing courses: show course_ga_score per course session (only <= current semester)
+            cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
+            contributing_courses = []
+            for session in cs_qs.select_related('course', 'semester'):
+                score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
+                if score:
+                    contributing_courses.append({
+                        'course_code': session.course.code,
+                        'course_name': session.course.name,
+                        'course_ga_score': float(score.score),
+                        'enrolled_students': score.enrolled_students,
+                        'semester': session.semester.number if session.semester else None,
+                        'credits': session.course.credit_hours,
+                    })
 
-                # For each course, compute one course_ga_score per student's course by using StudentCLOScore weighted sum.
-                for session in cs_qs.select_related('course', 'semester'):
-                    mappings = CLOGAMapping.objects.filter(clo__course=session.course, ga=ga, is_active=True, clo__is_active=True)
-                    print(f"session:", session.course.code, "mappings count:", mappings.count())
-                    if not mappings.exists():
-                        continue
-                    total_att = Decimal('0')
-                    total_w = Decimal('0')
-                    for m in mappings:
-                        # Check if m.clo has a code field first
-                        clo_code = None
-                        if hasattr(m.clo, 'code'):
-                            clo_code = m.clo.code
-                        elif hasattr(m.clo, 'order_number'):
-                            clo_code = f"CLO-{m.clo.order_number}"
-                        clo_score = StudentCLOScore.objects.filter(student=student_obj, clo=m.clo, course_session=session).first()
-                        print(f"clo:", clo_code, "clo_score:", clo_score)
-                        if clo_score:
-                            total_att += clo_score.attainment * m.weight
-                            total_w += m.weight
-                    if total_w > 0:
-                        course_ga_score = round(total_att / total_w, 2)
-                        print("course_ga_score for", session.course.code, "=", course_ga_score)
-                        contributing_courses.append({
-                            'course_code': session.course.code,
-                            'course_name': session.course.name,
-                            'course_ga_score': float(course_ga_score),
-                            'enrolled_students': 1,
-                            'semester': session.semester.number if session.semester else None,
-                            'credits': session.course.credit_hours,
-                        })
+            # GA CQI records: cohort only, and only if program end is ready
+            ga_cqi_records = []
+            if is_program_end_ready:
+                cqis = GACQIRecord.objects.filter(batch=batch, ga=ga, cqi_level='CUMULATIVE')
+                for cqi in cqis:
+                    ga_cqi_records.append(GACQIRecordSerializer(cqi).data)
 
-            if ga_attainment is None:
+            if final_score is None:
                 # Not assessed if missing data
                 status_str = 'NOT_ASSESSED'
             else:
-                status_str = 'ACHIEVED' if float(ga_attainment) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
+                status_str = 'ACHIEVED' if float(final_score) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
 
             response_items.append({
                 'ga_id': str(ga.id),
-                'ga_code': ga_code,
+                'ga_code': f'GA-{ga.order_number}',
                 'ga_title': ga.title,
-                'ga_attainment': float(ga_attainment) if ga_attainment is not None else None,
+                'direct_score': float(direct_score) if direct_score is not None else None,
+                'indirect_score': float(indirect_score) if indirect_score is not None else None,
+                'ga_attainment': float(final_score) if final_score is not None else None,
                 'ga_kpi_threshold': float(ga.kpi_threshold),
                 'status': status_str,
                 'contributing_courses': contributing_courses,
-                'ga_cqi_records': ga_cqi_records if (scope == 'cohort' and is_program_end_ready) else [],
+                'ga_cqi_records': ga_cqi_records,
             })
 
         print("=== returning response with response_items count:", len(response_items))
@@ -740,5 +696,513 @@ class BatchGAReportView(APIView):
         return Response({
             'is_program_end_ready': is_program_end_ready,
             'ga_reports': response_items
+        })
+
+
+# ========== EXIT SURVEY VIEWS ==========
+
+class GAExitSurveyQuestionListView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ga_id):
+        try:
+            ga = GA.objects.get(id=ga_id, is_active=True)
+        except GA.DoesNotExist:
+            return Response({'error': 'GA not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        questions = ExitSurveyQuestion.objects.filter(ga=ga, is_active=True).order_by('-created_at')
+        return Response(ExitSurveyQuestionSerializer(questions, many=True).data)
+
+
+class ExitSurveyQuestionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self, pk):
+        try:
+            return ExitSurveyQuestion.objects.get(id=pk, is_active=True)
+        except ExitSurveyQuestion.DoesNotExist:
+            return None
+    
+    def get(self, request, pk):
+        question = self.get_object(pk)
+        if not question:
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ExitSurveyQuestionSerializer(question).data)
+    
+    @transaction.atomic
+    def patch(self, request, pk):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can update exit survey questions'}, status=status.HTTP_403_FORBIDDEN)
+            
+        question = self.get_object(pk)
+        if not question:
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # If question is already locked, only allow updating is_active
+        if question.is_locked and 'is_locked' not in request.data and 'is_active' not in request.data:
+            return Response({'error': 'Question is locked and cannot be edited'}, status=status.HTTP_403_FORBIDDEN)
+            
+        serializer = ExitSurveyQuestionSerializer(question, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(ExitSurveyQuestionSerializer(question).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ExitSurveyCycleListView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        cycles = ExitSurveyCycle.objects.filter(batch=batch, is_active=True).order_by('-created_at')
+        return Response(ExitSurveyCycleSerializer(cycles, many=True).data)
+
+
+class ExitSurveyCycleActivateView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request, batch_id):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can activate exit surveys'}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Check if there's already an active cycle
+        active_cycle = ExitSurveyCycle.objects.filter(batch=batch, status='ACTIVE', is_active=True).first()
+        if active_cycle:
+            return Response({'error': 'There is already an active exit survey cycle for this batch'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Get all locked and active exit survey questions for the program
+        questions = ExitSurveyQuestion.objects.filter(
+            ga__program=batch.program,
+            is_locked=True,
+            is_active=True
+        )
+        if not questions.exists():
+            return Response({'error': 'No locked exit survey questions found for this program'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Create new cycle
+        from django.utils import timezone
+        cycle = ExitSurveyCycle.objects.create(
+            batch=batch,
+            status='ACTIVE',
+            activated_by=request.user,
+            activated_at=timezone.now()
+        )
+        
+        # TODO: Generate UUID links for students and send emails (requires Alumni survey pattern)
+        
+        return Response(ExitSurveyCycleSerializer(cycle).data, status=status.HTTP_201_CREATED)
+
+
+class ExitSurveyCycleCloseView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request, cycle_id):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can close exit surveys'}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            cycle = ExitSurveyCycle.objects.get(id=cycle_id, is_active=True)
+        except ExitSurveyCycle.DoesNotExist:
+            return Response({'error': 'Cycle not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        if cycle.status != 'ACTIVE':
+            return Response({'error': 'Only active cycles can be closed'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from django.utils import timezone
+        cycle.status = 'CLOSED'
+        cycle.closed_at = timezone.now()
+        cycle.save()
+        
+        return Response(ExitSurveyCycleSerializer(cycle).data)
+
+
+class ExitSurveyResponseView(APIView):
+    # No authentication required - accessed via UUID link
+    permission_classes = []
+    
+    def get(self, request, cycle_id):
+        # Get questions for this cycle's program
+        try:
+            cycle = ExitSurveyCycle.objects.get(id=cycle_id, status='ACTIVE', is_active=True)
+        except ExitSurveyCycle.DoesNotExist:
+            return Response({'error': 'Active cycle not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        questions = ExitSurveyQuestion.objects.filter(
+            ga__program=cycle.batch.program,
+            is_locked=True,
+            is_active=True
+        )
+        return Response(ExitSurveyQuestionSerializer(questions, many=True).data)
+    
+    @transaction.atomic
+    def post(self, request, cycle_id, student_id):
+        try:
+            cycle = ExitSurveyCycle.objects.get(id=cycle_id, status='ACTIVE', is_active=True)
+            student = Student.objects.get(id=student_id)
+        except (ExitSurveyCycle.DoesNotExist, Student.DoesNotExist):
+            return Response({'error': 'Cycle or student not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        responses_data = request.data.get('responses', [])
+        for resp_data in responses_data:
+            question_id = resp_data.get('question')
+            score = resp_data.get('score')
+            
+            try:
+                question = ExitSurveyQuestion.objects.get(id=question_id, is_locked=True, is_active=True)
+            except ExitSurveyQuestion.DoesNotExist:
+                continue
+                
+            # Update or create response
+            ExitSurveyResponse.objects.update_or_create(
+                cycle=cycle,
+                student=student,
+                question=question,
+                defaults={'score': score}
+            )
+            
+        return Response({'success': True})
+
+
+class GAIndirectScoreView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ga_id, batch_id):
+        try:
+            ga = GA.objects.get(id=ga_id, is_active=True)
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except (GA.DoesNotExist, Batch.DoesNotExist):
+            return Response({'error': 'GA or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        indirect_score_data = get_ga_indirect_score(ga_id, batch_id)
+        return Response(indirect_score_data)
+
+
+# ========== NEW EXIT SURVEY ENDPOINTS ==========
+class ExitSurveyQuestionListView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        ga_id = request.query_params.get('ga_id')
+        queryset = ExitSurveyQuestion.objects.filter(is_active=True)
+        if ga_id:
+            queryset = queryset.filter(ga_id=ga_id)
+        return Response(ExitSurveyQuestionSerializer(queryset, many=True).data)
+
+
+class ExitSurveyQuestionGenerateView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can generate exit survey questions'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get all active GAs
+        gas = GA.objects.filter(is_active=True)
+        
+        # Generate questions for each GA
+        for ga in gas:
+            # Deactivate existing active questions for this GA
+            ExitSurveyQuestion.objects.filter(ga=ga, is_active=True).update(is_active=False)
+            
+            # Create new question
+            question_text = f"I am confident in {ga.description}"
+            ExitSurveyQuestion.objects.create(
+                ga=ga,
+                question_text=question_text,
+                is_locked=False,
+                is_active=True
+            )
+        
+        return Response({'success': True})
+
+
+class ExitSurveyTemplateStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        template, created = ExitSurveyTemplate.objects.get_or_create(
+            defaults={'is_locked': False, 'version': 1}
+        )
+        from ..serializers import ExitSurveyTemplateSerializer
+        return Response(ExitSurveyTemplateSerializer(template).data)
+
+
+class ExitSurveyTemplateLockView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator = (user_role == 'coordinator') or (user_secondary_role == 'coordinator')
+        
+        if not is_coordinator:
+            return Response({'error': 'Only coordinators can lock the template'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get or create template
+        template, created = ExitSurveyTemplate.objects.get_or_create(
+            defaults={'is_locked': False, 'version': 1}
+        )
+        
+        # Lock all active questions
+        from django.utils import timezone
+        ExitSurveyQuestion.objects.filter(is_active=True).update(is_locked=True)
+        
+        # Lock the template
+        template.is_locked = True
+        template.locked_at = timezone.now()
+        template.save()
+        
+        from ..serializers import ExitSurveyQuestionSerializer
+        return Response(ExitSurveyQuestionSerializer(ExitSurveyQuestion.objects.filter(is_active=True, is_locked=True), many=True).data)
+
+
+class ExitSurveyTemplateUnlockView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator_or_hod = (user_role in ['coordinator', 'hod']) or (user_secondary_role in ['coordinator', 'hod'])
+        
+        if not is_coordinator_or_hod:
+            return Response({'error': 'Only coordinators or HODs can unlock the template'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get or create template
+        template, created = ExitSurveyTemplate.objects.get_or_create(
+            defaults={'is_locked': False, 'version': 1}
+        )
+        
+        if not template.is_locked:
+            return Response({'error': 'Template is already unlocked'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Unlock all active questions
+        from django.utils import timezone
+        ExitSurveyQuestion.objects.filter(is_active=True).update(is_locked=False)
+        
+        # Unlock the template
+        template.is_locked = False
+        template.version += 1
+        template.locked_at = None
+        template.save()
+        
+        from ..serializers import ExitSurveyQuestionSerializer
+        return Response(ExitSurveyQuestionSerializer(ExitSurveyQuestion.objects.filter(is_active=True), many=True).data)
+
+
+class BatchToggleExitSurveyView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def patch(self, request, batch_id):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_coordinator_or_hod = (user_role in ['coordinator', 'hod']) or (user_secondary_role in ['coordinator', 'hod'])
+        
+        if not is_coordinator_or_hod:
+            return Response({'error': 'Only coordinators or HODs can toggle exit survey'}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        from django.utils import timezone
+        batch.exit_survey_enabled = not batch.exit_survey_enabled
+        if batch.exit_survey_enabled:
+            batch.exit_survey_enabled_at = timezone.now()
+        else:
+            batch.exit_survey_enabled_at = None
+        batch.save()
+        
+        return Response({
+            'exit_survey_enabled': batch.exit_survey_enabled,
+            'exit_survey_enabled_at': batch.exit_survey_enabled_at
+        })
+
+
+class BatchInitiateGraduationView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request, batch_id):
+        user_role = request.user.role
+        if user_role != 'SAC':
+            return Response({'error': 'Only SAC can initiate graduation'}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if batch.graduation_initiated:
+            return Response({'error': 'Graduation already initiated'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from django.utils import timezone
+        batch.graduation_initiated = True
+        batch.graduation_initiated_at = timezone.now()
+        batch.save()
+        
+        # Auto-graduate students who already submitted the exit survey
+        # TODO: Uncomment once student model has status and is_active fields
+        # for student in Student.objects.filter(batch=batch, exit_survey_submitted=True):
+        #     student.status = 'alumni'
+        #     student.is_active = False
+        #     student.save()
+        
+        return Response({
+            'graduation_initiated': True,
+            'graduation_initiated_at': batch.graduation_initiated_at
+        })
+
+
+class BatchPendingExitSurveyView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        pending_students = Student.objects.filter(batch=batch, exit_survey_submitted=False)
+        
+        # Prepare response
+        students_data = []
+        for student in pending_students:
+            students_data.append({
+                'id': student.id,
+                'name': student.name,
+                'registration_number': student.registration_number,
+                'status': student.status
+            })
+        
+        return Response({
+            'pending_count': pending_students.count(),
+            'students': students_data
+        })
+
+
+class ExitSurveyMyQuestionsView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            student = Student.objects.get(user=request.user)
+        except Student.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get all active and locked questions
+        questions = ExitSurveyQuestion.objects.filter(is_active=True, is_locked=True)
+        return Response(ExitSurveyQuestionSerializer(questions, many=True).data)
+
+
+class ExitSurveySubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        try:
+            student = Student.objects.get(user=request.user)
+        except Student.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if student.exit_survey_submitted:
+            return Response({'error': 'Exit survey already submitted'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        responses_data = request.data.get('responses', [])
+        
+        # Validate all questions are answered
+        questions = ExitSurveyQuestion.objects.filter(is_active=True, is_locked=True)
+        if len(responses_data) != questions.count():
+            return Response({'error': 'All questions must be answered'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create responses
+        for resp_data in responses_data:
+            question_id = resp_data.get('question_id')
+            rating_value = resp_data.get('rating_value')
+            
+            if not question_id or not rating_value:
+                return Response({'error': 'Missing question_id or rating_value'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                question = ExitSurveyQuestion.objects.get(id=question_id, is_active=True, is_locked=True)
+            except ExitSurveyQuestion.DoesNotExist:
+                return Response({'error': f'Question {question_id} not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            ExitSurveyResponse.objects.create(
+                student=student,
+                question=question,
+                rating_value=rating_value
+            )
+        
+        # Mark student as having submitted the survey
+        from django.utils import timezone
+        student.exit_survey_submitted = True
+        student.exit_survey_submitted_at = timezone.now()
+        
+        # If graduation has been initiated, auto-graduate the student
+        # TODO: Uncomment once student model has status and is_active fields
+        # if student.batch.graduation_initiated:
+        #     student.status = 'alumni'
+        #     student.is_active = False
+        
+        student.save()
+        
+        return Response({'success': True, 'message': 'Exit survey submitted successfully'})
+
+
+class StudentPortalStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            student = Student.objects.get(user=request.user)
+        except Student.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        batch = student.batch
+        
+        if not batch:
+            return Response({'locked': False})
+        
+        if not batch.exit_survey_enabled:
+            return Response({'locked': False})
+        
+        if student.exit_survey_submitted:
+            return Response({'locked': False})
+        
+        return Response({
+            'locked': True,
+            'reason': 'exit_survey_required'
         })
 

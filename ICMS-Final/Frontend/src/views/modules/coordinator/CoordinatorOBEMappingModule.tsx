@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import obeService, { PEO, GA, GAPEOMatrix } from '../../../api/obeService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
-import { curriculumService, CurriculumVersion } from '../../../api/curriculumService';
+import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../../api/curriculumService';
 import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -29,6 +29,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [versions, setVersions] = useState<CurriculumVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<CurriculumVersion | null>(null);
+  const [selectedVersionDetail, setSelectedVersionDetail] = useState<CurriculumVersion | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [clos, setClos] = useState<any[]>([]);
@@ -82,10 +83,50 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   }, [selectedProgram]);
 
   useEffect(() => {
-    if (selectedProgram) {
-      loadCourses(selectedProgram.id);
-    }
-  }, [selectedProgram]);
+    const fetchVersionDetail = async () => {
+      if (selectedVersion?.id) {
+        try {
+          const res = await curriculumService.getVersion(selectedVersion.id);
+          const versionData = Array.isArray(res.data) ? res.data[0] : (res.data as any).data || res.data;
+          setSelectedVersionDetail(versionData);
+
+          // Extract courses from courses_by_semester and sort by semester number
+          const extractedCourses: Course[] = [];
+          if (versionData.courses_by_semester) {
+            Object.values(versionData.courses_by_semester).forEach((semesterCourses: any) => {
+              semesterCourses.forEach((vc: CurriculumCourse) => {
+                extractedCourses.push({
+                  id: vc.course,
+                  name: vc.course_name,
+                  code: vc.course_code,
+                  course_type: vc.course_type as 'LECTURE' | 'LAB',
+                  credit_hours: vc.credit_hours,
+                  semester_id: '',
+                  program_id: versionData.program.toString(),
+                  semester_number: vc.semester_no
+                });
+              });
+            });
+          }
+          // Sort courses by semester number, then code
+          extractedCourses.sort((a, b) => {
+            if (a.semester_number !== b.semester_number) {
+              return (a.semester_number || 0) - (b.semester_number || 0);
+            }
+            return a.code.localeCompare(b.code);
+          });
+          setCourses(extractedCourses);
+        } catch (error) {
+          console.error('Failed to fetch version detail:', error);
+          setCourses([]);
+        }
+      } else {
+        setSelectedVersionDetail(null);
+        setCourses([]);
+      }
+    };
+    fetchVersionDetail();
+  }, [selectedVersion]);
 
   useEffect(() => {
     if (selectedCourse && selectedVersion) {
@@ -375,7 +416,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                 className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">Select Course</option>
-                {courses.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
+                {courses.map(c => <option key={c.id} value={c.id}>Semester {c.semester_number} - {c.code} - {c.name}</option>)}
               </select>
             </div>
           </>

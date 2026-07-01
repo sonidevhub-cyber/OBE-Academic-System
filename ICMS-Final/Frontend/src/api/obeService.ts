@@ -97,6 +97,8 @@ export interface GAReportItem {
   ga_id: string;
   ga_code: string;
   ga_title: string;
+  direct_score: number | null;
+  indirect_score: number | null;
   ga_attainment: number | null;
   ga_kpi_threshold: number;
   kpi_threshold?: number;
@@ -238,6 +240,41 @@ export interface AlumniDashboardResponse {
   }>;
 }
 
+// --- Exit Survey Interfaces ---
+export interface ExitSurveyQuestion {
+  id: string;
+  ga: GA;
+  ga_title: string;
+  ga_description: string;
+  question_text: string;
+  is_locked: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExitSurveyResponseSubmission {
+  responses: Array<{
+    question_id: string;
+    rating_value: number;
+  }>;
+}
+
+export interface StudentPortalStatus {
+  locked: boolean;
+  reason?: string;
+}
+
+export interface BatchPendingExitSurvey {
+  pending_count: number;
+  students: Array<{
+    id: string;
+    name: string;
+    registration_number: string;
+    status: string;
+  }>;
+}
+
 // --- Batch Interfaces ---
 export interface Batch {
   id: string;
@@ -371,6 +408,59 @@ class OBEService {
   // Get Alumni Dashboard
   async getAlumniDashboard(): Promise<AlumniDashboardResponse> {
     const response = await api.get('/obe/alumni/dashboard/');
+    return response.data;
+  }
+
+  // --- Exit Survey Methods ---
+  async getExitSurveyQuestions(gaId?: string): Promise<ExitSurveyQuestion[]> {
+    const params = gaId ? { ga_id: gaId } : {};
+    const response = await api.get('/obe/exit-survey/questions/', { params });
+    return response.data;
+  }
+
+  async generateExitSurveyQuestions(): Promise<{ success: boolean }> {
+    const response = await api.post('/obe/exit-survey/questions/generate/');
+    return response.data;
+  }
+
+  async lockExitSurveyTemplate(): Promise<ExitSurveyQuestion[]> {
+    const response = await api.post('/obe/exit-survey/template/lock/');
+    return response.data;
+  }
+
+  async toggleExitSurveyForBatch(batchId: string): Promise<{
+    exit_survey_enabled: boolean;
+    exit_survey_enabled_at: string | null;
+  }> {
+    const response = await api.patch(`/obe/batches/${batchId}/toggle-exit-survey/`);
+    return response.data;
+  }
+
+  async initiateGraduationForBatch(batchId: string): Promise<{
+    graduation_initiated: boolean;
+    graduation_initiated_at: string;
+  }> {
+    const response = await api.post(`/obe/batches/${batchId}/initiate-graduation/`);
+    return response.data;
+  }
+
+  async getPendingExitSurveyForBatch(batchId: string): Promise<BatchPendingExitSurvey> {
+    const response = await api.get(`/obe/batches/${batchId}/pending-exit-survey/`);
+    return response.data;
+  }
+
+  async getMyExitSurveyQuestions(): Promise<ExitSurveyQuestion[]> {
+    const response = await api.get('/obe/exit-survey/my-questions/');
+    return response.data;
+  }
+
+  async submitExitSurvey(data: ExitSurveyResponseSubmission): Promise<{ success: boolean; message: string }> {
+    const response = await api.post('/obe/exit-survey/submit/', data);
+    return response.data;
+  }
+
+  async getStudentPortalStatus(): Promise<StudentPortalStatus> {
+    const response = await api.get('/obe/student/portal-status/');
     return response.data;
   }
 

@@ -45,6 +45,10 @@ class Batch(models.Model):
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    exit_survey_enabled = models.BooleanField(default=False)
+    exit_survey_enabled_at = models.DateTimeField(null=True, blank=True)
+    graduation_initiated = models.BooleanField(default=False)
+    graduation_initiated_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.custom_id:

@@ -1,7 +1,16 @@
 from .peo_views import (
     PEOListCreateView,
     PEODetailView,
-    GAPEOMatrixView
+    GAPEOMatrixView,
+    # Alumni survey views
+    PEOAlumniSurveyQuestionListView,
+    AlumniSurveyQuestionDetailView,
+    AlumniSurveyCycleListView,
+    AlumniSurveyCycleCreateView,
+    AlumniSurveyCycleActivateView,
+    AlumniSurveyCycleCloseView,
+    AlumniSurveyResponseView,
+    PEOIndirectScoreView
 )
 from .ga_views import (
     GAListCreateView,
@@ -19,7 +28,27 @@ from .ga_views import (
     GACQIHistoryView,
     CourseUnlockView,
     BatchStudentsListView,
-    BatchGAReportView
+    BatchGAReportView,
+    # Exit survey views
+    GAExitSurveyQuestionListView,
+    ExitSurveyQuestionDetailView,
+    ExitSurveyCycleListView,
+    ExitSurveyCycleActivateView,
+    ExitSurveyCycleCloseView,
+    ExitSurveyResponseView,
+    GAIndirectScoreView,
+    # New exit survey views
+    ExitSurveyQuestionListView,
+    ExitSurveyQuestionGenerateView,
+    ExitSurveyTemplateStatusView,
+    ExitSurveyTemplateLockView,
+    ExitSurveyTemplateUnlockView,
+    BatchToggleExitSurveyView,
+    BatchInitiateGraduationView,
+    BatchPendingExitSurveyView,
+    ExitSurveyMyQuestionsView,
+    ExitSurveySubmitView,
+    StudentPortalStatusView
 )
 from .clo_views import (
     CLOListCreateView,
@@ -75,6 +104,35 @@ __all__ = [
     'EffectiveCurriculumView',
     'TeacherGAContextView',
     'CourseCLOReportView',
-    'AlumniDashboardView'
+    'AlumniDashboardView',
+    # Exit survey views
+    'GAExitSurveyQuestionListView',
+    'ExitSurveyQuestionDetailView',
+    'ExitSurveyCycleListView',
+    'ExitSurveyCycleActivateView',
+    'ExitSurveyCycleCloseView',
+    'ExitSurveyResponseView',
+    'GAIndirectScoreView',
+    # New exit survey views
+    'ExitSurveyQuestionListView',
+    'ExitSurveyQuestionGenerateView',
+    'ExitSurveyTemplateStatusView',
+    'ExitSurveyTemplateLockView',
+    'ExitSurveyTemplateUnlockView',
+    'BatchToggleExitSurveyView',
+    'BatchInitiateGraduationView',
+    'BatchPendingExitSurveyView',
+    'ExitSurveyMyQuestionsView',
+    'ExitSurveySubmitView',
+    'StudentPortalStatusView',
+    # Alumni survey views
+    'PEOAlumniSurveyQuestionListView',
+    'AlumniSurveyQuestionDetailView',
+    'AlumniSurveyCycleListView',
+    'AlumniSurveyCycleCreateView',
+    'AlumniSurveyCycleActivateView',
+    'AlumniSurveyCycleCloseView',
+    'AlumniSurveyResponseView',
+    'PEOIndirectScoreView'
 ]
 

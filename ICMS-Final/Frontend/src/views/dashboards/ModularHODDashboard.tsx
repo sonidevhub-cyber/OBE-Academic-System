@@ -8,8 +8,7 @@ import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMa
 import GAReport from '../../pages/GAReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
-import PEOReport from '../../pages/PEOReport';
-import StudentOBEList from '../../pages/StudentOBEList';
+import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
 import HODCQI from '../pages/HODCQI';
 import HODNotice from '../pages/HODNotice';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
@@ -30,7 +29,8 @@ import {
   FileBarChart,
   Users,
   BookOpen,
-  Settings
+  Settings,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface Department {
@@ -68,7 +68,7 @@ interface Student {
   email: string;
 }
 
-type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "peo-report" | "student-obe" | "notice" | "feedback" | "obe-management";
+type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "obe-report" | "notice" | "feedback" | "obe-management";
 
 const ModularHODDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -97,8 +97,7 @@ const ModularHODDashboard: React.FC = () => {
     { id: "cqi", label: "CLO CQI Control", icon: ClipboardCheck },
     { id: "clo-report", label: "CLO Reports", icon: BookOpen },
     { id: "ga-report", label: "GA Reports", icon: FileBarChart },
-    { id: "peo-report", label: "PEO Reports", icon: FileBarChart },
-    { id: "student-obe", label: "Student OBE", icon: Users },
+    { id: "obe-report", label: "OBE Report", icon: FileSpreadsheet },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "feedback", label: "Feedback", icon: MessageSquare },
   ];
@@ -263,11 +262,8 @@ const ModularHODDashboard: React.FC = () => {
       case 'ga-report':
         return <CoordinatorGAReportModule />;
 
-      case 'peo-report':
-        return <PEOReport />;
-
-      case 'student-obe':
-        return <StudentOBEList />;
+      case 'obe-report':
+        return <OBEReportDashboard />;
 
       case 'notice':
         return <HODNotice />;

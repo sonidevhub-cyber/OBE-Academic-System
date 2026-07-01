@@ -7,7 +7,13 @@ from .models import (
     CourseGAScore,
     GACQIRecord,
     GACQIResubmissionHistory,
-    StudentCLOScore
+    StudentCLOScore,
+    ExitSurveyQuestion,
+    ExitSurveyCycle,
+    ExitSurveyResponse,
+    AlumniSurveyQuestion,
+    AlumniSurveyCycle,
+    AlumniSurveyResponse
 )
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
@@ -224,3 +230,71 @@ class StudentCLOScoreSerializer(serializers.ModelSerializer):
         model = StudentCLOScore
         fields = ['id', 'student', 'clo', 'clo_code', 'course_session', 'attainment', 'calculated_at']
         read_only_fields = ['id', 'calculated_at'] 
+
+
+class ExitSurveyQuestionSerializer(serializers.ModelSerializer):
+    ga_title = serializers.CharField(source='ga.title', read_only=True)
+    ga_description = serializers.CharField(source='ga.description', read_only=True)
+    
+    class Meta:
+        model = ExitSurveyQuestion
+        fields = ['id', 'ga', 'ga_title', 'ga_description', 'question_text', 'is_locked', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ExitSurveyCycleSerializer(serializers.ModelSerializer):
+    batch_name = serializers.CharField(source='batch.name', read_only=True)
+    activated_by_name = serializers.CharField(source='activated_by.full_name', read_only=True, allow_null=True)
+    response_count = serializers.SerializerMethodField()
+    
+    def get_response_count(self, obj):
+        return obj.responses.values('student').distinct().count()
+    
+    class Meta:
+        model = ExitSurveyCycle
+        fields = ['id', 'batch', 'batch_name', 'status', 'activated_by', 'activated_by_name', 'activated_at', 'closed_at', 'response_count', 'created_at']
+        read_only_fields = ['id', 'created_at', 'activated_at', 'closed_at', 'response_count']
+
+
+class ExitSurveyResponseSerializer(serializers.ModelSerializer):
+    question_text = serializers.CharField(source='question.question_text', read_only=True)
+    ga_title = serializers.CharField(source='question.ga.title', read_only=True)
+    
+    class Meta:
+        model = ExitSurveyResponse
+        fields = ['id', 'cycle', 'student', 'question', 'question_text', 'ga_title', 'rating_value', 'submitted_at']
+        read_only_fields = ['id', 'submitted_at']
+
+
+class AlumniSurveyQuestionSerializer(serializers.ModelSerializer):
+    peo_title = serializers.CharField(source='peo.title', read_only=True)
+    peo_description = serializers.CharField(source='peo.description', read_only=True)
+    
+    class Meta:
+        model = AlumniSurveyQuestion
+        fields = ['id', 'peo', 'peo_title', 'peo_description', 'question_text', 'is_locked', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class AlumniSurveyCycleSerializer(serializers.ModelSerializer):
+    batch_name = serializers.CharField(source='batch.name', read_only=True)
+    activated_by_name = serializers.CharField(source='activated_by.full_name', read_only=True, allow_null=True)
+    response_count = serializers.SerializerMethodField()
+    
+    def get_response_count(self, obj):
+        return obj.responses.values('student').distinct().count()
+    
+    class Meta:
+        model = AlumniSurveyCycle
+        fields = ['id', 'batch', 'batch_name', 'survey_window', 'status', 'activated_by', 'activated_by_name', 'activated_at', 'closed_at', 'response_count', 'created_at']
+        read_only_fields = ['id', 'created_at', 'activated_at', 'closed_at', 'response_count']
+
+
+class AlumniSurveyResponseSerializer(serializers.ModelSerializer):
+    question_text = serializers.CharField(source='question.question_text', read_only=True)
+    peo_title = serializers.CharField(source='question.peo.title', read_only=True)
+    
+    class Meta:
+        model = AlumniSurveyResponse
+        fields = ['id', 'cycle', 'student', 'question', 'question_text', 'peo_title', 'score', 'submitted_at']
+        read_only_fields = ['id', 'submitted_at']

@@ -21,7 +21,6 @@ import Users from './pages/sac/Users';
 import TeacherManagement from './views/pages/TeacherManagement';
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
 import GAReport from './pages/GAReport';
-import PEOReport from './pages/PEOReport';
 import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
 import AlumniDashboard from './pages/alumni/AlumniDashboard';
@@ -30,6 +29,11 @@ import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
+
+// Import new exit survey components
+import CoordinatorExitSurveySetup from './views/modules/coordinator/CoordinatorExitSurveySetup';
+import StudentExitSurvey from './views/modules/student/StudentExitSurvey';
+import SACExitSurveyDashboard from './views/modules/sac/SACExitSurveyDashboard';
 
 const Dashboard = () => <AdminDashboard />;
 
@@ -81,6 +85,7 @@ const AppRoutes: React.FC = () => {
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
         <Route path="/student" element={<StudentDashboard />} />
         <Route path="/student-dashboard" element={<Navigate to="/student" />} />
+        <Route path="/student/exit-survey" element={<StudentExitSurvey />} />
       </Route>
 
       {/* Alumni Routes */}
@@ -104,13 +109,14 @@ const AppRoutes: React.FC = () => {
         <Route path="/coordinator" element={<ModularCoordinatorDashboard />} />
         <Route path="/coordinator-dashboard" element={<Navigate to="/coordinator" />} />
         <Route path="/curriculum-versions/:id" element={<CurriculumVersionDetailPage />} />
+        <Route path="/coordinator/exit-survey-setup" element={<CoordinatorExitSurveySetup />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['hod']} />}>
         <Route path="/hod" element={<ModularHODDashboard />} />
       </Route>
 
-      <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'coordinator', 'hod']} />}>
+      <Route element={<ProtectedRoute allowedRoles={['admin', 'director', 'coordinator', 'hod', 'SAC']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin-dashboard" element={<Navigate to="/admin" />} />
         <Route path="/sac/programs" element={<SacProgramSetup />} />
@@ -121,9 +127,9 @@ const AppRoutes: React.FC = () => {
         <Route path="/sac/users" element={<Users />} />
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
         <Route path="/reports/ga-attainment" element={<GAReport />} />
-        <Route path="/reports/peo-attainment" element={<PEOReport />} />
         <Route path="/reports/student-obe" element={<StudentOBEList />} />
         <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
+        <Route path="/sac/batches/:batchId/exit-survey-status" element={<SACExitSurveyDashboard />} />
       </Route>
 
       {/* Fallback route */}

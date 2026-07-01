@@ -18,13 +18,9 @@ const CoordinatorGAReportModule: React.FC = () => {
   const [localCqiData, setLocalCqiData] = useState<Record<string, Partial<GACQIRecord>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
-  const [scope, setScope] = useState<'cohort' | 'student'>('cohort');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [sortBy, setSortBy] = useState<'course_code' | 'course_ga_score' | 'semester' | 'credits'>('course_code');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [students, setStudents] = useState<Array<{id: string, student_id: string, name: string, roll_number: string, is_active: boolean}>>([]);
-  const [studentSearchQuery, setStudentSearchQuery] = useState<string>('');
   
   // Get current user and role
   const currentAuth = authService.getCurrentUser();
@@ -53,15 +49,8 @@ const CoordinatorGAReportModule: React.FC = () => {
   // Fetch GA Report for selected batch
   useEffect(() => {
     const fetchReport = async () => {
-      console.log("fetchReport called with:", { selectedBatchId, scope, selectedStudentId });
+      console.log("fetchReport called with:", { selectedBatchId });
       if (!selectedBatchId) {
-        setReportData(null);
-        setIsProgramEndReady(false);
-        return;
-      }
-      
-      // If scope is student but no student selected yet, don't fetch
-      if (scope === 'student' && !selectedStudentId) {
         setReportData(null);
         setIsProgramEndReady(false);
         return;
@@ -69,12 +58,7 @@ const CoordinatorGAReportModule: React.FC = () => {
 
       setLoading(true);
       try {
-        const params: any = { mode: 'cumulative', scope };
-        if (scope === 'student' && selectedStudentId) {
-          params.student_id = selectedStudentId;
-          console.log('Fetching student report with params:', params);
-        }
-        const data = await obeService.getBatchGAReport(selectedBatchId, params);
+        const data = await obeService.getBatchGAReport(selectedBatchId);
         console.log('Received report data:', data);
         setReportData(data);
         // Check if data is the new format
@@ -92,27 +76,6 @@ const CoordinatorGAReportModule: React.FC = () => {
     };
 
     fetchReport();
-  }, [selectedBatchId, scope, selectedStudentId]);
-
-  // Fetch Students for selected batch
-  useEffect(() => {
-    const fetchStudents = async () => {
-      if (!selectedBatchId) {
-        setStudents([]);
-        return;
-      }
-      try {
-        console.log("Fetching students for batch:", selectedBatchId);
-        const data = await obeService.getBatchStudents(selectedBatchId);
-        console.log("Received students:", data);
-        setStudents(data);
-      } catch (error) {
-        console.error("Error fetching students:", error);
-        toast.error('Failed to fetch students');
-      }
-    };
-
-    fetchStudents();
   }, [selectedBatchId]);
 
   const toggleGAExpansion = (gaCode: string) => {
@@ -148,11 +111,7 @@ const CoordinatorGAReportModule: React.FC = () => {
       await obeService.updateGACQIRecord(cqi.id, data);
       toast.success('Draft saved successfully');
       // Refetch the report
-      const params: any = { mode: 'cumulative', scope };
-      if (scope === 'student' && selectedStudentId) {
-        params.student_id = selectedStudentId;
-      }
-      const report = await obeService.getBatchGAReport(selectedBatchId, params);
+      const report = await obeService.getBatchGAReport(selectedBatchId);
       setReportData(report);
       if (report && 'is_program_end_ready' in report) {
         setIsProgramEndReady(report.is_program_end_ready);
@@ -175,11 +134,7 @@ const CoordinatorGAReportModule: React.FC = () => {
       await obeService.updateGACQIRecord(cqi.id, data);
       toast.success('Submitted - awaiting HOD approval');
       // Refetch the report
-      const params: any = { mode: 'cumulative', scope };
-      if (scope === 'student' && selectedStudentId) {
-        params.student_id = selectedStudentId;
-      }
-      const report = await obeService.getBatchGAReport(selectedBatchId, params);
+      const report = await obeService.getBatchGAReport(selectedBatchId);
       setReportData(report);
       if (report && 'is_program_end_ready' in report) {
         setIsProgramEndReady(report.is_program_end_ready);
@@ -198,11 +153,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     try {
       await obeService.approveGACQI(cqiId);
       toast.success('CQI approved');
-      const params: any = { mode: 'cumulative', scope };
-      if (scope === 'student' && selectedStudentId) {
-        params.student_id = selectedStudentId;
-      }
-      const report = await obeService.getBatchGAReport(selectedBatchId, params);
+      const report = await obeService.getBatchGAReport(selectedBatchId);
       setReportData(report);
       if (report && 'is_program_end_ready' in report) {
         setIsProgramEndReady(report.is_program_end_ready);
@@ -222,11 +173,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     try {
       await obeService.rejectGACQI(cqiId, comment);
       toast.success('CQI rejected');
-      const params: any = { mode: 'cumulative', scope };
-      if (scope === 'student' && selectedStudentId) {
-        params.student_id = selectedStudentId;
-      }
-      const report = await obeService.getBatchGAReport(selectedBatchId, params);
+      const report = await obeService.getBatchGAReport(selectedBatchId);
       setReportData(report);
       if (report && 'is_program_end_ready' in report) {
         setIsProgramEndReady(report.is_program_end_ready);
@@ -274,18 +221,6 @@ const CoordinatorGAReportModule: React.FC = () => {
       default:
         return <XCircle className="w-4 h-4" />;
     }
-  };
-
-  // Filter students based on search query
-  const getFilteredStudents = () => {
-    console.log("getFilteredStudents called, students:", students, "searchQuery:", studentSearchQuery);
-    if (!studentSearchQuery) return students;
-    const lowerQuery = studentSearchQuery.toLowerCase();
-    return students.filter(student => 
-      student.name.toLowerCase().includes(lowerQuery) ||
-      student.roll_number.toLowerCase().includes(lowerQuery) ||
-      student.student_id.toLowerCase().includes(lowerQuery)
-    );
   };
 
   const getSortedFilteredCourses = (courses: any[], kpiThreshold: number) => {
@@ -678,8 +613,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     );
   }
 
-  // Only return null if reportData is null AND we're not in student scope OR we have a selected student but no reportData
-  if (!reportData && !(scope === 'student' && !selectedStudentId)) {
+  if (!reportData) {
     return null;
   }
 
@@ -793,8 +727,8 @@ const CoordinatorGAReportModule: React.FC = () => {
     );
   }
 
-  // If neither array nor new response AND we're not in student scope without a selected student, return null
-  if (!isGAArray(reportData) && !isBatchGAReportResponse(reportData) && !(scope === 'student' && !selectedStudentId)) {
+  // If neither array nor new response, return null
+  if (!isGAArray(reportData) && !isBatchGAReportResponse(reportData)) {
     return null;
   }
 
@@ -826,18 +760,7 @@ const CoordinatorGAReportModule: React.FC = () => {
         </div>
         
         {/* Controls */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
-          <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Scope</label>
-            <select
-              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as 'cohort' | 'student')}
-            >
-              <option value="cohort">Cohort (Batch)</option>
-              <option value="student">Student</option>
-            </select>
-          </div>
+        <div className="pt-4 border-t border-gray-100">
           <div>
             <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Search Courses</label>
             <input
@@ -851,210 +774,15 @@ const CoordinatorGAReportModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Student or Cohort View */}
-      {scope === 'student' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Pane: Student List */}
-          <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-              <FileBarChart className="w-5 h-5 text-indigo-600" />
-              Students
-            </h3>
-            {/* Search Input */}
-            <div className="mb-4">
-              <input
-                type="text"
-                placeholder="Search by name, roll no, or ID..."
-                className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
-                value={studentSearchQuery}
-                onChange={(e) => setStudentSearchQuery(e.target.value)}
-              />
-            </div>
-            {/* Student List */}
-            <div className="space-y-2 max-h-[600px] overflow-y-auto">
-              {getFilteredStudents().map((student) => (
-                <div
-                  key={student.id}
-                  onClick={() => setSelectedStudentId(student.id)}
-                  className={`p-4 rounded-xl cursor-pointer transition-all ${
-                    selectedStudentId === student.id
-                      ? 'bg-indigo-50 border-2 border-indigo-300'
-                      : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
-                  }`}
-                >
-                  <div className="font-bold text-gray-800">{student.name}</div>
-                  <div className="text-sm text-gray-500">Roll No: {student.roll_number}</div>
-                  <div className="text-xs text-gray-400">ID: {student.student_id}</div>
-                </div>
-              ))}
-              {getFilteredStudents().length === 0 && (
-                <div className="text-center py-8 text-gray-400">No students found</div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Pane: Student Report */}
-          <div className="lg:col-span-2">
-            {loading ? (
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
-                <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-              </div>
-            ) : !selectedStudentId ? (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
-                <div className="text-4xl mb-4">📊</div>
-                <h3 className="text-xl font-black text-gray-800 mb-2">Select a Student</h3>
-                <p className="text-gray-500">Choose a student from the list to view their GA report</p>
-              </div>
-            ) : (
-              <div>
-                {/* Selected Student Header */}
-                {(() => {
-                  const selectedStudent = students.find(s => s.id === selectedStudentId);
-                  if (selectedStudent) {
-                    return (
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-                        <h3 className="text-xl font-black text-gray-800">{selectedStudent.name}</h3>
-                        <p className="text-gray-500 font-semibold">Roll No: {selectedStudent.roll_number} • ID: {selectedStudent.student_id}</p>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-
-                {/* GA Summary Cards */}
-                <div>
-                  <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-                    <FileBarChart className="w-5 h-5 text-indigo-600" />
-                    Graduate Attribute Summary
-                  </h3>                  <div className="space-y-4">
-                    {getGAItems().length === 0 && (
-                      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
-                        <div className="text-2xl mb-4">📊</div>
-                        <p className="text-gray-500">No GA data available for this student</p>
-                      </div>
-                    )}
-                    {getGAItems().map((ga: GAReportItem) => (
-                      <motion.div
-                        key={ga.ga_code ?? `ga-${Math.random()}`}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
-                      >
-                        {/* GA Header */}
-                        <div
-                          className="p-6 flex items-center justify-between cursor-pointer"
-                          onClick={() => toggleGAExpansion(ga.ga_code)}
-                        >
-                          <div className="flex items-center gap-4">
-                            {expandedGAs.includes(ga.ga_code) ? <ChevronDown size={20} className="text-gray-500" /> : <ChevronRight size={20} className="text-gray-500" />}
-                            <div>
-                              <div className="flex items-center gap-3 mb-1">
-                                <h4 className="text-xl font-bold text-gray-800">{ga.ga_code}</h4>
-                                <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(ga.status)}`}>
-                                  {getStatusIcon(ga.status)}
-                                  {ga.status}
-                                </span>
-                              </div>
-                              <p className="text-gray-600 font-medium">{ga.ga_title}</p>
-                            </div>
-                          </div>
-
-                          {/* GA Attainment */}
-                          <div className="text-center">
-                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">GA Attainment</p>
-                            <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
-                            <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
-                          </div>
-                        </div>
-
-                        {/* Expandable Contributing Courses */}
-                        {expandedGAs.includes(ga.ga_code) && (
-                          <div className="border-t border-gray-100 bg-gray-50 p-6">
-                            <div className="flex items-center justify-between mb-4">
-                              <h5 className="text-sm font-black text-gray-400 uppercase tracking-widest">Contributing Courses</h5>
-                              <div className="flex items-center gap-2">
-                                <label className="text-xs font-bold text-gray-500">Sort by:</label>
-                                <select
-                                  className="bg-white border border-gray-200 rounded-lg px-3 py-1 text-sm font-bold text-gray-700"
-                                  value={sortBy}
-                                  onChange={(e) => setSortBy(e.target.value as any)}
-                                >
-                                  <option value="course_code">Course Code</option>
-                                  <option value="course_ga_score">GA Score</option>
-                                  <option value="semester">Semester</option>
-                                  <option value="credits">Credits</option>
-                                </select>
-                                <button
-                                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                                  className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1 text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all"
-                                >
-                                  {sortOrder === 'asc' ? 'Asc' : 'Desc'}
-                                </button>
-                              </div>
-                            </div>
-                            <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white mb-6">
-                              <table className="w-full text-left border-collapse">
-                                <thead>
-                                  <tr className="bg-gray-50">
-                                    <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Course</th>
-                                    <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Semester</th>
-                                    <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Credits</th>
-                                    <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Course GA Score</th>
-                                    <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Enrolled Students</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {getSortedFilteredCourses(ga.contributing_courses ?? [], ga.ga_kpi_threshold).map((course: any, idx: number) => {
-                                    const isBelowTarget = course.course_ga_score < ga.ga_kpi_threshold;
-                                    return (
-                                      <tr key={idx} className={`border-t border-gray-100 hover:bg-gray-50 transition-colors ${isBelowTarget ? 'bg-red-50' : ''}`}>
-                                        <td className="px-4 py-3">
-                                          <div className="font-bold text-gray-700">
-                                            {course.course_code ?? 'N/A'}
-                                          </div>
-                                          <div className="text-sm text-gray-600">
-                                            {course.course_name ?? 'N/A'}
-                                          </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-center font-bold text-gray-700">
-                                          {course.semester ?? 'N/A'}
-                                        </td>
-                                        <td className="px-4 py-3 text-center font-bold text-gray-700">
-                                          {course.credits ?? 'N/A'}
-                                        </td>
-                                        <td className="px-4 py-3 text-center font-bold">
-                                          <span className={isBelowTarget ? 'text-red-600' : 'text-emerald-600'}>
-                                            {course.course_ga_score?.toFixed(1) ?? '0.0'}%
-                                          </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-center font-bold text-gray-700">{course.enrolled_students ?? '0'}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        )}
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        // Cohort View
+      {/* Cohort View */}
+      <div>
+        {/* GA Summary Cards */}
         <div>
-          {/* GA Summary Cards */}
-          <div>
-            <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-              <FileBarChart className="w-5 h-5 text-indigo-600" />
-              Graduate Attribute Summary
-            </h3>
-            <div className="space-y-4">
+          <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
+            <FileBarChart className="w-5 h-5 text-indigo-600" />
+            Graduate Attribute Summary
+          </h3>
+          <div className="space-y-4">
               {getGAItems().length === 0 && (
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
                   <div className="text-2xl mb-4">📊</div>
@@ -1087,11 +815,26 @@ const CoordinatorGAReportModule: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* GA Attainment */}
-                    <div className="text-center">
-                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">GA Attainment</p>
-                      <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
-                      <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
+                    {/* GA Scores */}
+                    <div className="flex items-center gap-6">
+                      {/* Direct Score */}
+                      <div className="text-center">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Direct Score</p>
+                        <p className="text-xl font-bold text-indigo-600">{ga.direct_score?.toFixed(1) ?? '0.0'}%</p>
+                      </div>
+                      
+                      {/* Indirect Score */}
+                      <div className="text-center">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Indirect Score</p>
+                        <p className="text-xl font-bold text-pink-500">{ga.indirect_score?.toFixed(1) ?? '—'}%</p>
+                      </div>
+                      
+                      {/* GA Attainment (Final Score) */}
+                      <div className="text-center">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Final Score</p>
+                        <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
+                        <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
+                      </div>
                     </div>
                   </div>
 
@@ -1389,7 +1132,6 @@ const CoordinatorGAReportModule: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
     </div>
   );
 };

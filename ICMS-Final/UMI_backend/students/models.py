@@ -3,6 +3,11 @@ from django.db import models
 from django.conf import settings
 
 class Student(models.Model):
+    # STATUS_CHOICES = [
+    #     ('active', 'Active'),
+    #     ('alumni', 'Alumni'),
+    # ]
+
     student_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     custom_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='student_profile')
@@ -26,6 +31,14 @@ class Student(models.Model):
     guardian_contact = models.CharField(max_length=20, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='students/', null=True, blank=True)
+    exit_survey_submitted = models.BooleanField(default=False)
+    exit_survey_submitted_at = models.DateTimeField(null=True, blank=True)
+    # status = models.CharField(
+    #     max_length=20,
+    #     choices=STATUS_CHOICES,
+    #     default='active',
+    # )
+    # is_active = models.BooleanField(default=True)
     
     def save(self, *args, **kwargs):
         if not self.custom_id:

@@ -12,7 +12,9 @@ import {
   LogOut,
   LayoutGrid,
   FileBarChart,
-  Award
+  Award,
+  FileSpreadsheet,
+  ClipboardList
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
@@ -28,12 +30,12 @@ import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
-import PEOReport from '../../pages/PEOReport';
-import StudentOBEList from '../../pages/StudentOBEList';
+import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
+import CoordinatorExitSurveySetup from '../modules/coordinator/CoordinatorExitSurveySetup';
 
 import { api } from '../../api/api';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'peo-report' | 'student-obe';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'obe-report' | 'exit-survey';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -152,8 +154,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
     { id: 'clo-reports', label: 'CLO Reports', icon: FileBarChart },
     { id: 'ga-reports', label: 'GA Reports', icon: Award },
-    { id: 'peo-report', label: 'PEO Report', icon: Award },
-    { id: 'student-obe', label: 'Student OBE', icon: Users },
+    { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
+    { id: 'exit-survey', label: 'Exit Survey Setup', icon: ClipboardList },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
   ];
@@ -215,10 +217,10 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <CoordinatorCLOReportModule />;
       case 'ga-reports':
         return <CoordinatorGAReportModule />;
-      case 'peo-report':
-        return <PEOReport />;
-      case 'student-obe':
-        return <StudentOBEList />;
+      case 'obe-report':
+        return <OBEReportDashboard />;
+      case 'exit-survey':
+        return <CoordinatorExitSurveySetup />;
       case 'instructors':
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':

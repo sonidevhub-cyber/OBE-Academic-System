@@ -8,9 +8,7 @@ const GAReport: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [selectedBatch, setSelectedBatch] = useState<string>('');
   const [mode, setMode] = useState<'semester' | 'cumulative'>('cumulative');
-  const [scope, setScope] = useState<'cohort' | 'student'>('cohort');
   const [selectedSemester, setSelectedSemester] = useState<number>(1);
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [report, setReport] = useState<GAReportItem[] | { ready: boolean; [key: string]: any } | BatchGAReportResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [expandedGA, setExpandedGA] = useState<string | null>(null);
@@ -58,12 +56,8 @@ const GAReport: React.FC = () => {
     const fetchReport = async () => {
       setLoading(true);
       try {
-        const params: any = { mode: 'cumulative', scope };
-        if (scope === 'student' && selectedStudentId) {
-          params.student_id = selectedStudentId;
-        }
-        console.log('Fetching GA report with params:', params);
-        const data = await obeService.getBatchGAReport(selectedBatch, params);
+        console.log('Fetching GA report');
+        const data = await obeService.getBatchGAReport(selectedBatch);
         console.log('Received data:', data);
         setReport(data);
         
@@ -94,7 +88,7 @@ const GAReport: React.FC = () => {
       }
     };
     fetchReport();
-  }, [selectedBatch, scope, selectedStudentId]);
+  }, [selectedBatch]);
 
   const isReady = useMemo(() => {
     if (!report) return false;
@@ -144,11 +138,7 @@ const GAReport: React.FC = () => {
   };
 
   const refreshReport = async () => {
-    const params: any = { mode: 'cumulative', scope };
-    if (scope === 'student' && selectedStudentId) {
-      params.student_id = selectedStudentId;
-    }
-    const newReport = await obeService.getBatchGAReport(selectedBatch, params);
+    const newReport = await obeService.getBatchGAReport(selectedBatch);
     setReport(newReport);
     if ('is_program_end_ready' in newReport) {
       setIsProgramEndReady(newReport.is_program_end_ready);
@@ -593,39 +583,6 @@ const GAReport: React.FC = () => {
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-500 uppercase">Scope:</span>
-          <button
-            onClick={() => setScope('cohort')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${scope === 'cohort'
-              ? 'bg-green-600 text-white'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-          >
-            Cohort
-          </button>
-          <button
-            onClick={() => setScope('student')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${scope === 'student'
-              ? 'bg-green-600 text-white'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-          >
-            Student
-          </button>
-        </div>
-
-        {scope === 'student' && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 uppercase">Student:</span>
-            <input
-              type="text"
-              placeholder="Enter Student ID"
-              value={selectedStudentId}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              className="bg-slate-100 px-4 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none"
-            />
-          </div>
-        )}
-
         <div className="flex items-center gap-2 flex-1">
           <span className="text-xs font-bold text-slate-500 uppercase">Search:</span>
           <input
@@ -692,12 +649,26 @@ const GAReport: React.FC = () => {
                       </span>
                     </div>
 
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="bg-slate-50 p-3 rounded-lg">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Direct Score</div>
+                        <div className="text-xl font-bold text-slate-700">
+                          {ga.direct_score !== null ? `${ga.direct_score.toFixed(1)}%` : 'N/A'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Indirect Score</div>
+                        <div className="text-xl font-bold text-slate-700">
+                          {ga.indirect_score !== null ? `${ga.indirect_score.toFixed(1)}%` : 'N/A'}
+                        </div>
+                      </div>
+                    </div>
                     <div className="relative pt-2 pb-1">
                       <div className="flex justify-between text-xs font-bold mb-1">
                         <span className="text-slate-400">
-                          Attainment: {ga.ga_attainment ? `${ga.ga_attainment.toFixed(1)}%` : 'N/A'}
+                          Final Attainment: {ga.ga_attainment ? `${ga.ga_attainment.toFixed(1)}%` : 'N/A'}
                         </span>
-                        <span className="text-indigo-600">KPI: {ga.kpi_threshold}%</span>
+                        <span className="text-indigo-600">KPI: {ga.ga_kpi_threshold}%</span>
                       </div>
                       <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden relative">
                         {ga.ga_attainment !== null && (
@@ -708,8 +679,8 @@ const GAReport: React.FC = () => {
                         )}
                         <div
                           className="absolute top-0 bottom-0 w-0.5 bg-indigo-600 z-10"
-                          style={{ left: `${ga.kpi_threshold}%` }}
-                          title={`KPI: ${ga.kpi_threshold}%`}
+                          style={{ left: `${ga.ga_kpi_threshold}%` }}
+                          title={`KPI: ${ga.ga_kpi_threshold}%`}
                         />
                       </div>
                     </div>
@@ -757,11 +728,9 @@ const GAReport: React.FC = () => {
                               <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
                                 GA Score
                               </th>
-                              {scope === 'cohort' && (
-                                <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                  Enrolled Students
-                                </th>
-                              )}
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                Enrolled Students
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -792,11 +761,9 @@ const GAReport: React.FC = () => {
                                       {course.course_ga_score.toFixed(1)}%
                                     </span>
                                   </td>
-                                  {scope === 'cohort' && (
-                                    <td className="px-4 py-3 text-center text-sm text-slate-600">
-                                      {course.enrolled_students}
-                                    </td>
-                                  )}
+                                  <td className="px-4 py-3 text-center text-sm text-slate-600">
+                                    {course.enrolled_students}
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -804,7 +771,7 @@ const GAReport: React.FC = () => {
                         </table>
                       </div>
 
-                      {scope === 'cohort' && isProgramEndReady && ga.ga_cqi_records.length > 0 && (
+                      {isProgramEndReady && ga.ga_cqi_records.length > 0 && (
                         <div className="mt-6 space-y-4">
                           <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest">
                             CQI Records
@@ -1011,7 +978,7 @@ const GAReport: React.FC = () => {
           </div>
 
           {/* CQI Flags for Cohort (only when program end ready) */}
-          {scope === 'cohort' && isProgramEndReady && failedGAs.length > 0 && (
+          {mode === 'cumulative' && isProgramEndReady && failedGAs.length > 0 && (
             <div className="mt-12 space-y-4">
               <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
                 <svg className="w-6 h-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
