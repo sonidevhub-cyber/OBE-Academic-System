@@ -6,11 +6,13 @@ from .models import Instructor
 from .serializers import InstructorSerializer
 from coordinators.models import TeacherAllocation
 from coordinators.serializers import TeacherAllocationSerializer
-
+from core.models import Batch
+from obe.models import GACQIRecord
 from .models import Instructor
 from .serializers import InstructorSerializer
 from coordinators.models import TeacherAllocation
 from core.responses import api_response
+from feedback.models import FeedbackCQI
 
 
 class InstructorViewSet(viewsets.ModelViewSet):
@@ -44,6 +46,16 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 program=alloc.course.program
             ).first()
             
+            previous_batch = Batch.objects.filter(
+                program=alloc.batch.program,
+                start_year__lt=alloc.batch.start_year
+            ).order_by("-start_year").first()
+            previous_cqi = None
+            if previous_batch:
+                previous_cqi = GACQIRecord.objects.filter(
+                    batch=previous_batch,
+                    status='FULLY_APPROVED').order_by('-created_at'
+                ).first()
             data.append({
                 'id': alloc.id,
                 'allocation_id': alloc.id,
@@ -63,7 +75,14 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'coordinator_name': alloc.allocated_by.full_name if alloc.allocated_by else 'N/A',
                 'curriculum_version': alloc.curriculum_version.version_no,
                 'curriculum_version_id': alloc.curriculum_version.id,
-                'status': 'active'
+                'status': 'active',
+                'has_previous_cqi': previous_cqi is not None,
+                'previous_cqi': {
+                 'id': str(previous_cqi.id),
+                'batch': previous_batch.name,
+                 'root_cause': previous_cqi.root_cause,
+                  'remedial_plan': previous_cqi.remedial_plan,
+                  } if previous_cqi else None,
             })
             
         return Response({'courses': data, 'results': data}) # Wrapped for different component expectations

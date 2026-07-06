@@ -42,9 +42,8 @@ from .views import (
     ExitSurveyQuestionListView,
     ExitSurveyQuestionGenerateView,
     ExitSurveyTemplateStatusView,
-    ExitSurveyTemplateLockView,
-    ExitSurveyTemplateUnlockView,
     BatchToggleExitSurveyView,
+    BatchToggleAlumniFeedbackView,
     BatchInitiateGraduationView,
     BatchPendingExitSurveyView,
     ExitSurveyMyQuestionsView,
@@ -60,6 +59,7 @@ from .views import (
     AlumniSurveyResponseView,
     PEOIndirectScoreView
 )
+from .views.ga_views import EnableResultEditingView
 
 urlpatterns = [
     # PEO
@@ -223,12 +223,16 @@ urlpatterns = [
     path('exit-survey/questions/', ExitSurveyQuestionListView.as_view()),
     path('exit-survey/questions/generate/', ExitSurveyQuestionGenerateView.as_view()),
     path('exit-survey/template/status/', ExitSurveyTemplateStatusView.as_view()),
-    path('exit-survey/template/lock/', ExitSurveyTemplateLockView.as_view()),
-    path('exit-survey/template/unlock/', ExitSurveyTemplateUnlockView.as_view()),
     path('batches/<uuid:batch_id>/toggle-exit-survey/', BatchToggleExitSurveyView.as_view()),
+    path('batches/<uuid:batch_id>/toggle-alumni-feedback/', BatchToggleAlumniFeedbackView.as_view()),
     path('batches/<uuid:batch_id>/initiate-graduation/', BatchInitiateGraduationView.as_view()),
     path('batches/<uuid:batch_id>/pending-exit-survey/', BatchPendingExitSurveyView.as_view()),
     path('exit-survey/my-questions/', ExitSurveyMyQuestionsView.as_view()),
     path('exit-survey/submit/', ExitSurveySubmitView.as_view()),
-    path('student/portal-status/', StudentPortalStatusView.as_view())
+    path('student/portal-status/', StudentPortalStatusView.as_view()),
+
+    # edit admin
+    path(
+        "course-sessions/<uuid:session_id>/enable-editing/",
+        EnableResultEditingView.as_view())
 ]

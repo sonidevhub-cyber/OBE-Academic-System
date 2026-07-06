@@ -1,9 +1,10 @@
+# feedback/serializers.py
+
 from rest_framework import serializers
-from .models import Feedback
+from .models import FeedbackResponse
 
-class FeedbackSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.username', read_only=True)
 
-    class Meta:
-        model = Feedback
-        fields = ['id', 'student', 'student_name', 'comment', 'created_at']
+class FeedbackResponseSerializer(serializers.Serializer):
+    course = serializers.UUIDField()
+    clo = serializers.UUIDField()
+    rating = serializers.IntegerField(min_value=1, max_value=5)

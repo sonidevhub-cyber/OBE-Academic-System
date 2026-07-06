@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('students', '0005_student_exit_survey_fields'),
-        ('obe', '0012_update_gacqirecord_unique_constraints'),
+        ('obe', '0002_coursesession_allow_result_editing'),
     ]
 
     operations = [

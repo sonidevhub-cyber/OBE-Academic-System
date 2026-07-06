@@ -12,8 +12,6 @@ from django.contrib.auth import get_user_model
 
 
 User = get_user_model()
-
-
 class BatchListCreateView(generics.ListCreateAPIView):
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -90,10 +88,17 @@ class GraduateBatchView(generics.GenericAPIView):
             return Response({'error': 'Already graduated'}, status=status.HTTP_400_BAD_REQUEST)
         if batch.current_semester < batch.program.total_semesters:
             return Response({'error': 'Not all semesters completed'}, status=status.HTTP_400_BAD_REQUEST)
+        if batch.pending_exit_survey_count > 0:
+            return Response({'error': f'Cannot graduate: {batch.pending_exit_survey_count} students still need to submit exit survey'}, status=status.HTTP_400_BAD_REQUEST)
+        if not batch.exit_survey_enabled:
+            return Response({'error': 'Exit survey not enabled for this batch'}, status=status.HTTP_400_BAD_REQUEST)
+        if not batch.is_program_end_ready:
+            return Response({'error': 'Program end not ready: not all course assessments are completed'}, status=status.HTTP_400_BAD_REQUEST)
 
         batch.status = 'graduated'
         batch.graduated_at = timezone.now()
-        batch.save(update_fields=['status', 'graduated_at'])
+        batch.graduation_status = 'graduated_complete'
+        batch.save(update_fields=['status', 'graduated_at', 'graduation_status'])
 
         count = User.objects.filter(batch=batch, role='student').update(role='alumni')
         return Response({'success': True, 'batch_name': batch.name, 'alumni_count': count}, status=status.HTTP_200_OK)
@@ -111,37 +116,32 @@ class BatchDeactivateView(generics.GenericAPIView):
 
 class AllBatchesView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = BatchListSerializer
 
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (
-                request.user.role in ['SAC', 'coordinator', 'hod']
-                or request.user.secondary_role in ['coordinator', 'hod']
-            )
         )
 
     def get_queryset(self):
-        queryset = Batch.objects.filter(is_active=True, status='active').select_related('program')
+        queryset = Batch.objects.filter(is_active=True).select_related('program')
+        alumni_feedback = self.request.query_params.get('alumni_feedback')
+        if alumni_feedback and alumni_feedback.lower() in ['1', 'true', 'yes', 'all']:
+            if alumni_feedback.lower() == 'all':
+                queryset = queryset.filter(
+                    status='graduated',
+                    graduated_at__isnull=False,
+                )
+            else:
+                queryset = queryset.filter(
+                    status='graduated',
+                    graduated_at__isnull=False,
+                )
+        else:
+            queryset = queryset.filter(status='active')
         program_id = self.request.query_params.get('program')
         if program_id:
             queryset = queryset.filter(program_id=program_id)
         return queryset
-
-    def list(self, request, *args, **kwargs):
-        items = self.get_queryset()
-        data = [
-            {
-                'id': str(b.id),
-                'name': b.name,
-                'program_id': str(b.program_id),
-                'program_name': b.program.name,
-                'session_type': b.session_type,
-                'current_semester': b.current_semester,
-                'has_curriculum': b.curriculum_version_id is not None,
-            }
-            for b in items
-        ]
-        return Response(data, status=status.HTTP_200_OK)
 

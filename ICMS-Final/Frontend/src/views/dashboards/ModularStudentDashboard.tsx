@@ -17,11 +17,14 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import StudentExitSurvey from '../modules/student/StudentExitSurvey';
+import { feedbackService } from '../../api/FeedbackServices';
 import { Toaster } from 'react-hot-toast';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
+import StudentFeedbackPopup from '../pages/StudentFeedbackPopup';
+import StudentResults from '../pages/StudentResults';
 
 type TabId = 'dashboard' | 'results';
 
@@ -36,14 +39,36 @@ const ModularStudentDashboard: React.FC = () => {
   const [portalLocked, setPortalLocked] = useState(false);
   const [selectedSemester, setSelectedSemester] = useState<string | null>(null);
   const [selectedCourse, setSelectedCourse] = useState<any>(null);
+  const [showFeedbackPopup, setShowFeedbackPopup] = useState(false);
 
+  // ✅ Feedback Status Check
+  useEffect(() => {
+    const checkFeedbackStatus = async () => {
+      try {
+        const batchId = currentUser?.batch_id || currentUser?.batch?.id;
+        if (!batchId) return;
+
+        const res = await feedbackService.status(batchId);
+        setShowFeedbackPopup(res?.enabled === true && res?.submitted === false);
+      } catch (err) {
+        console.error('Feedback status error:', err);
+      }
+    };
+
+    if (currentUser) checkFeedbackStatus();
+  }, [currentUser]);
+
+  // ✅ Result Fetch
   useEffect(() => {
     if (!currentUser?.id) return;
 
     const checkPortalStatus = async () => {
       try {
+        console.log('Checking portal status...');
         const status = await obeService.getStudentPortalStatus();
+        console.log('Portal status response:', status);
         setPortalLocked(status.locked && status.reason === 'exit_survey_required');
+        console.log('Set portal locked to:', status.locked && status.reason === 'exit_survey_required');
       } catch (error) {
         console.error('Failed to check portal status:', error);
       }
@@ -61,6 +86,7 @@ const ModularStudentDashboard: React.FC = () => {
       .finally(() => setLoading(false));
   }, [currentUser, navigate]);
 
+  // ✅ Profile Fetch
   useEffect(() => {
     let cancelled = false;
     const role = getEffectiveRole(currentUser, 'student');
@@ -485,8 +511,6 @@ const ModularStudentDashboard: React.FC = () => {
     );
   };
 
-
-
   return (
     <div className="flex min-h-screen w-full bg-gray-50">
       <Toaster position="top-right" />
@@ -501,10 +525,25 @@ const ModularStudentDashboard: React.FC = () => {
           </motion.div>
         </div>
       )}
+      {showFeedbackPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+          >
+            <StudentFeedbackPopup onSubmitSuccess={() => setShowFeedbackPopup(false)} />
+          </motion.div>
+        </div>
+      )}
       <div className={`w-72 bg-gradient-to-b ${sidebarGradient} text-white p-6 space-y-2 min-h-screen shadow-lg flex flex-col ${portalLocked ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="mb-10 text-center">
-          <div className="h-16 w-16 rounded-full bg-white/10 mx-auto mb-4 flex items-center justify-center border border-white/20">
-            <LayoutDashboard className="h-10 w-10 text-white" />
+          <div className="h-16 w-16 rounded-full bg-white/10 mx-auto mb-4 flex items-center justify-center border border-white/20 overflow-hidden">
+            {headerImageUrl ? (
+              <img src={headerImageUrl} alt={headerName} className="w-full h-full object-cover" />
+            ) : (
+              <LayoutDashboard className="h-10 w-10 text-white" />
+            )}
           </div>
           <h3 className="text-lg font-bold text-white">Student Portal</h3>
         </div>
@@ -567,7 +606,7 @@ const ModularStudentDashboard: React.FC = () => {
             </div>
             <div className="flex items-center space-x-4">
               <UniversalRoleSwitcher />
-              <TopbarProfileMenu userData={headerProfile} label="Student" />
+              <TopbarProfileMenu userData={headerProfile} />
             </div>
           </div>
         </header>

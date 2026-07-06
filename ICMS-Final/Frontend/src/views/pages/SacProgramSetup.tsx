@@ -25,8 +25,8 @@ import { curriculumService } from '../../api/curriculumService';
 import { studentService } from '../../api/apiService';
 import { toast } from 'react-toastify';
 
-// Define the interface for a student in this context
-interface Student {
+// Define the interface for a student in this context.
+interface BatchStudent {
   student_id: string;
   registration_number: string;
   custom_id?: string;
@@ -52,7 +52,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   const [activeTab, setActiveTab] = useState<'batches' | 'alumni'>('batches');
   
   const [selectedBatchForStudents, setSelectedBatchForStudents] = useState<Batch | null>(null);
-  const [batchStudents, setBatchStudents] = useState<Student[]>([]);
+  const [batchStudents, setBatchStudents] = useState<BatchStudent[]>([]);
   const [batchStudentsLoading, setBatchStudentsLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -174,7 +174,15 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
         batch: batch.id,
         role: roleFilter 
       } as any);
-      setBatchStudents(response.data);
+      const payload = response.data;
+      const students = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+      setBatchStudents(students);
     } catch (err) {
       setError('Failed to load batch students');
     } finally {
@@ -661,14 +669,27 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                                         )
                                       )}
                                       {selectedProgram && b.current_semester === selectedProgram.total_semesters && (
-                                        <button 
-                                          onClick={() => setGraduatingBatch(b)}
-                                          title="Graduate Batch"
-                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
-                                        >
-                                          <GraduationCap className="w-3.5 h-3.5" />
-                                          <span>Graduate</span>
-                                        </button>
+                                        <>
+                                          {!b.exit_survey_enabled || b.pending_exit_survey_count > 0 || !b.is_program_end_ready ? (
+                                            <button 
+                                              disabled
+                                              title={`Graduation not available: ${!b.exit_survey_enabled ? "Exit survey not enabled" : b.pending_exit_survey_count > 0 ? `${b.pending_exit_survey_count} students need to submit exit survey` : "Not all courses completed"}`}
+                                              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs font-bold"
+                                            >
+                                              <GraduationCap className="w-3.5 h-3.5" />
+                                              <span>Graduate</span>
+                                            </button>
+                                          ) : (
+                                            <button 
+                                              onClick={() => setGraduatingBatch(b)}
+                                              title="Graduate Batch"
+                                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
+                                            >
+                                              <GraduationCap className="w-3.5 h-3.5" />
+                                              <span>Graduate</span>
+                                            </button>
+                                          )}
+                                        </>
                                       )}
                                       <button onClick={() => handleDeleteBatch(b.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                                     </>
@@ -840,7 +861,9 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                           <td className="px-6 py-4 text-sm text-gray-500">{s.user_email}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-bold ${selectedBatchForStudents.status === 'graduated' ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>
-                              {selectedBatchForStudents.status === 'graduated' ? 'Alumni' : (s.semester?.name || `Semester ${selectedBatchForStudents.current_semester}`)}
+                              {selectedBatchForStudents.status === 'graduated'
+                                ? 'Alumni'
+                                : (s.semester?.name || `Semester ${selectedBatchForStudents.current_semester}`)}
                             </span>
                           </td>
                         </tr>

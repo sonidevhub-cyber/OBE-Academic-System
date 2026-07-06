@@ -21,12 +21,19 @@ from decimal import Decimal
 
 
 class PEOSerializer(serializers.ModelSerializer): 
+    alumni_survey_question_text = serializers.SerializerMethodField()
+
+    def get_alumni_survey_question_text(self, obj):
+        question = obj.alumni_survey_questions.filter(is_active=True).order_by('-created_at').first()
+        return question.question_text if question else None
+
     class Meta: 
         model = PEO 
         fields = [ 
             'id', 'program', 'title', 
             'description', 'order_number', 
-            'kpi_threshold', 'is_active', 'created_at' 
+            'kpi_threshold', 'is_active', 'created_at',
+            'alumni_survey_question_text'
         ] 
         read_only_fields = ['id', 'created_at'] 
 
@@ -39,7 +46,17 @@ class GASerializer(serializers.ModelSerializer):
             'description', 'order_number', 'kpi_threshold',
             'is_active', 'created_at' 
         ] 
-        read_only_fields = ['id', 'created_at'] 
+        read_only_fields = ['id', 'created_at']
+
+    def create(self, validated_data):
+        # Pop out any extra kwargs that aren't model fields
+        validated_data.pop('skip_exit_survey', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Pop out any extra kwargs that aren't model fields
+        validated_data.pop('skip_exit_survey', None)
+        return super().update(instance, validated_data) 
 
 
 class GAPEOMappingSerializer(
@@ -235,10 +252,15 @@ class StudentCLOScoreSerializer(serializers.ModelSerializer):
 class ExitSurveyQuestionSerializer(serializers.ModelSerializer):
     ga_title = serializers.CharField(source='ga.title', read_only=True)
     ga_description = serializers.CharField(source='ga.description', read_only=True)
+    ga_order_number = serializers.IntegerField(source='ga.order_number', read_only=True)
+    ga_code = serializers.SerializerMethodField()
+
+    def get_ga_code(self, obj):
+        return f"GA-{obj.ga.order_number}"
     
     class Meta:
         model = ExitSurveyQuestion
-        fields = ['id', 'ga', 'ga_title', 'ga_description', 'question_text', 'is_locked', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'ga', 'ga_title', 'ga_description', 'ga_order_number', 'ga_code', 'question_text', 'is_locked', 'is_active', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -280,14 +302,31 @@ class AlumniSurveyCycleSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source='batch.name', read_only=True)
     activated_by_name = serializers.CharField(source='activated_by.full_name', read_only=True, allow_null=True)
     response_count = serializers.SerializerMethodField()
+    eligible_alumni_count = serializers.SerializerMethodField()
+    response_rate = serializers.SerializerMethodField()
     
     def get_response_count(self, obj):
         return obj.responses.values('student').distinct().count()
+
+    def get_eligible_alumni_count(self, obj):
+        from django.contrib.auth import get_user_model
+        user_model = get_user_model()
+        return user_model.objects.filter(
+            batch=obj.batch,
+            role__iexact='alumni',
+            is_active=True
+        ).count()
+
+    def get_response_rate(self, obj):
+        eligible = self.get_eligible_alumni_count(obj)
+        if not eligible:
+            return 0
+        return round((self.get_response_count(obj) / eligible) * 100, 2)
     
     class Meta:
         model = AlumniSurveyCycle
-        fields = ['id', 'batch', 'batch_name', 'survey_window', 'status', 'activated_by', 'activated_by_name', 'activated_at', 'closed_at', 'response_count', 'created_at']
-        read_only_fields = ['id', 'created_at', 'activated_at', 'closed_at', 'response_count']
+        fields = ['id', 'batch', 'batch_name', 'survey_window', 'status', 'due_at', 'response_threshold', 'auto_extension_days', 'auto_extension_count', 'activated_by', 'activated_by_name', 'activated_at', 'closed_at', 'response_count', 'eligible_alumni_count', 'response_rate', 'created_at']
+        read_only_fields = ['id', 'created_at', 'activated_at', 'closed_at', 'response_count', 'eligible_alumni_count', 'response_rate']
 
 
 class AlumniSurveyResponseSerializer(serializers.ModelSerializer):

@@ -3,12 +3,19 @@ from assessments.models import Assessment, Question, StudentQuestionMark, CLOAtt
 from students.models import Student
 from obe.models import CLO
 from academic_structure.models import Course as AcademicCourse, Semester as AcademicSemester
-
+from obe.models import CourseSession
 
 class CLOService:
 
     @staticmethod
+
     def generate_student_report(course_id, batch_id, semester_id):
+        session=CourseSession.objects.filter(
+            course_id=course_id,
+            batch_id=batch_id,
+            semester_id=semester_id,
+            is_active=True
+        ).first()
         students = list(Student.objects.filter(user__batch_id=batch_id))
         assessments = list(Assessment.objects.filter(
             course_id=course_id,
@@ -242,6 +249,7 @@ class CLOService:
             "type_groups": formatted_assessments,
             "class_clo_attainment": class_clo_attainment,
             "all_clos": all_clos,
+            "allow_result_editing": session.allow_result_editing if session else False,
             "course": {
                 "code": course.code if course else "",
                 "name": course.name if course else ""

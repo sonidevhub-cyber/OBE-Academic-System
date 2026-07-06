@@ -33,6 +33,7 @@ class Student(models.Model):
     image = models.ImageField(upload_to='students/', null=True, blank=True)
     exit_survey_submitted = models.BooleanField(default=False)
     exit_survey_submitted_at = models.DateTimeField(null=True, blank=True)
+    is_late_submitter = models.BooleanField(default=False)
     # status = models.CharField(
     #     max_length=20,
     #     choices=STATUS_CHOICES,

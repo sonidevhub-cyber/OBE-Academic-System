@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.db.models import Count
+from django.utils import timezone
 
 
 class Batch(models.Model):
@@ -12,6 +13,13 @@ class Batch(models.Model):
     STATUS_CHOICES = [
         ('active', 'Active'),
         ('graduated', 'Graduated'),
+    ]
+
+    GRADUATION_STATUS_CHOICES = [
+        ("not_graduating", "Not Graduating"),
+        ("in_progress", "In Progress"),
+        ("graduated_partial", "Graduated Partial"),
+        ("graduated_complete", "Graduated Complete"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -47,8 +55,13 @@ class Batch(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     exit_survey_enabled = models.BooleanField(default=False)
     exit_survey_enabled_at = models.DateTimeField(null=True, blank=True)
-    graduation_initiated = models.BooleanField(default=False)
-    graduation_initiated_at = models.DateTimeField(null=True, blank=True)
+    alumni_feedback_enabled = models.BooleanField(default=False)
+    alumni_feedback_enabled_at = models.DateTimeField(null=True, blank=True)
+    graduation_status = models.CharField(
+        max_length=20,
+        choices=GRADUATION_STATUS_CHOICES,
+        default="not_graduating",
+    )
 
     def save(self, *args, **kwargs):
         if not self.custom_id:
@@ -67,6 +80,36 @@ class Batch(models.Model):
     class Meta:
         unique_together = ('program', 'name')
         ordering = ['-start_year']
+
+    @property
+    def is_graduating_eligible(self):
+        return self.current_semester == self.program.total_semesters
+
+    @property
+    def is_alumni_feedback_eligible(self):
+        return self.status == 'graduated' and bool(self.graduated_at)
+
+    @property
+    def pending_exit_survey_count(self):
+        from django.contrib.auth import get_user_model
+        from students.models import Student
+        User = get_user_model()
+        
+        # Get all students in this batch
+        users_in_batch = User.objects.filter(batch=self, role='student')
+        pending = 0
+        
+        for user in users_in_batch:
+            # Check if user has a student profile
+            try:
+                student_profile = Student.objects.get(user=user)
+                if not student_profile.exit_survey_submitted:
+                    pending +=1
+            except Student.DoesNotExist:
+                # If no student profile, count as pending
+                pending +=1
+        
+        return pending
 
     @property
     def is_program_end_ready(self):

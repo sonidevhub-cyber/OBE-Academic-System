@@ -24,10 +24,21 @@ axiosInstance.interceptors.request.use(
         console.error('Error parsing auth:', err);
       }
     }
-
+    console.log('[Axios Request]:', config.method?.toUpperCase(), config.baseURL + config.url, { params: config.params });
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+axiosInstance.interceptors.response.use(
+  (response) => {
+    console.log('[Axios Response]:', response.config.method?.toUpperCase(), response.config.url, response.status);
+    return response;
+  },
+  (error) => {
+    console.error('[Axios Error]:', error.response?.status, error.response?.data);
+    return Promise.reject(error);
+  }
 );
 
 // ❌ REMOVE refresh logic (IMPORTANT)

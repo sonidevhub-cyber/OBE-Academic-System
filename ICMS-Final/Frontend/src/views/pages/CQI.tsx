@@ -5,6 +5,7 @@ interface Props {
   weakClos: any[];   // 🔥 FROM BACKEND (IMPORTANT)
   courseId: string;
   batchId: string;
+  semesterNumber: string;
   semesterId: string;
   onComplete?: () => void;
 }
@@ -13,6 +14,7 @@ const CQI: React.FC<Props> = ({
   weakClos,
   courseId,
   batchId,
+  semesterNumber,
   semesterId,
   onComplete
 }) => {
@@ -29,7 +31,7 @@ const CQI: React.FC<Props> = ({
     const fetchCQI = async () => {
       try {
         const res = await api.get(
-          `/assessments/cqi/?course=${courseId}&batch=${batchId}&semester=${semesterId}`
+          `/assessments/cqi/?course=${courseId}&batch=${batchId}&semester=${semesterNumber}`
         );
 
         setSavedData(res.data || []);
@@ -52,7 +54,7 @@ const CQI: React.FC<Props> = ({
 
     fetchCQI();
 
-  }, [courseId, batchId, semesterId]);
+  }, [courseId, batchId, semesterNumber]);
 
   // ================= INPUT =================
   const handleChange = (clo: string, field: string, value: string) => {

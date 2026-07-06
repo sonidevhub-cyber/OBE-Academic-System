@@ -88,12 +88,31 @@ def _build_login_response_for_user(user):
     # Student extra info
     if user.role in ["student", "alumni"]:
         student = Student.objects.filter(user=user).first()
+
         if student:
             payload.update({
-                "student_id": student.student_id,
+                "student_id": str(student.student_id),
                 "registration_number": student.registration_number,
-                "batch": getattr(user.batch, "name", None) if getattr(user, "batch", None) else None,
+
+                "batch_id": str(user.batch.id) if user.batch else None,
+                "batch_name": user.batch.name if user.batch else None,
+
+                "program_id": (
+                    str(user.batch.program.id)
+                    if user.batch and user.batch.program else None
+                ),
+
+                "program_name": (
+                    user.batch.program.name
+                    if user.batch and user.batch.program else None
+                ),
+
+                "program_code": (
+                    user.batch.program.code
+                    if user.batch and user.batch.program else None
+                ),
             })
+        
 
     # Coordinator programs
     if "coordinator" in roles:

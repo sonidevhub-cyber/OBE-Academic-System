@@ -329,14 +329,27 @@ const Batches: React.FC<BatchesProps> = ({ onManagePromotion }) => {
                               )
                             )}
                           {program && b.current_semester === program.total_semesters && (
-                            <button 
-                              onClick={() => setGraduatingBatch(b)}
-                              title="Graduate Batch"
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
-                            >
-                              <GraduationCap className="w-3.5 h-3.5" />
-                              <span>Graduate</span>
-                            </button>
+                            <>
+                              {!b.exit_survey_enabled || b.pending_exit_survey_count > 0 || !b.is_program_end_ready ? (
+                                <button 
+                                  disabled
+                                  title={`Graduation not available: ${!b.exit_survey_enabled ? "Exit survey not enabled" : b.pending_exit_survey_count > 0 ? `${b.pending_exit_survey_count} students need to submit exit survey` : "Not all courses completed"}`}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs font-bold"
+                                >
+                                  <GraduationCap className="w-3.5 h-3.5" />
+                                  <span>Graduate</span>
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => setGraduatingBatch(b)}
+                                  title="Graduate Batch"
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
+                                >
+                                  <GraduationCap className="w-3.5 h-3.5" />
+                                  <span>Graduate</span>
+                                </button>
+                              )}
+                            </>
                           )}
                           <button 
                             onClick={() => handleDeleteBatch(b)}

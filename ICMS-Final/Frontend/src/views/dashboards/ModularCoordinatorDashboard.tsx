@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CoordinatorCQIReport from '../pages/CoordinatorCQIReport';
 import { 
-  LayoutDashboard, 
+  LayoutDashboard,
+  MessageSquare, 
   BookOpen, 
   Users, 
   User,
@@ -10,7 +11,6 @@ import {
   Settings,
   CheckCircle,
   LogOut,
-  LayoutGrid,
   FileBarChart,
   Award,
   FileSpreadsheet,
@@ -25,7 +25,6 @@ import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import CurriculumVersionListPage from '../modules/curriculum/CurriculumVersionListPage';
 import CurriculumVersionDetailPage from '../modules/curriculum/CurriculumVersionDetailPage';
 import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationBulkModule';
-import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 import TeacherManagement from '../pages/TeacherManagement';
 import SacProgramSetup from '../pages/SacProgramSetup';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
@@ -34,8 +33,9 @@ import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
 import CoordinatorExitSurveySetup from '../modules/coordinator/CoordinatorExitSurveySetup';
 
 import { api } from '../../api/api';
+import CoordinatorFeedbackView from "../pages/CoordinatorFeedbackView";
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'obe-mapping' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'obe-report' | 'exit-survey';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'obe-report' | 'peo-report' | 'student-obe' | 'feedback';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -151,13 +151,12 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
-    { id: 'obe-mapping', label: 'OBE Mapping', icon: LayoutGrid },
     { id: 'clo-reports', label: 'CLO Reports', icon: FileBarChart },
     { id: 'ga-reports', label: 'GA Reports', icon: Award },
     { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
-    { id: 'exit-survey', label: 'Exit Survey Setup', icon: ClipboardList },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
+    { id: "feedback", label: "Feedback", icon: MessageSquare }
   ];
 
   const renderContent = () => {
@@ -211,20 +210,18 @@ const ModularCoordinatorDashboard: React.FC = () => {
         );
       case 'course-allocations':
         return <CourseAllocationBulkModule />;
-      case 'obe-mapping':
-        return <CoordinatorOBEMappingModule />;
       case 'clo-reports':
         return <CoordinatorCLOReportModule />;
       case 'ga-reports':
         return <CoordinatorGAReportModule />;
       case 'obe-report':
         return <OBEReportDashboard />;
-      case 'exit-survey':
-        return <CoordinatorExitSurveySetup />;
       case 'instructors':
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
         return <SacProgramSetup onManagePromotion={() => {}} />;
+        case 'feedback':
+  return <CoordinatorFeedbackView />;
       default:
         return null;
     }

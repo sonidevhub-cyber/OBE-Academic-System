@@ -10,7 +10,7 @@ interface AllocationContextType {
   updateAllocation: (id: number, updates: Partial<CourseAllocation>) => void;
   getProposedAllocations: () => CourseAllocation[];
   getApprovedAllocations: () => CourseAllocation[];
-  getInstructorAllocations: (instructorId: number) => CourseAllocation[];
+  getInstructorAllocations: (instructorId: string | number) => CourseAllocation[];
   getAllocationsByBatch: (batchId: string) => CourseAllocation[];
 }
 
@@ -71,10 +71,10 @@ export const AllocationProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const getProposedAllocations = () => allocations.filter(a => a.status === 'proposed');
   const getApprovedAllocations = () => allocations.filter(a => a.status === 'approved' || a.status === 'active');
-  const getInstructorAllocations = (instructorId: number) =>
+  const getInstructorAllocations = (instructorId: string | number) =>
     allocations.filter(
       a =>
-      (Number(a.instructor) === instructorId || Number(a.teacher) === instructorId) &&
+      (String(a.instructor) === String(instructorId) || String(a.teacher) === String(instructorId)) &&
       (a.status === 'active' || a.status === 'approved') &&
       (a as any).batch_status !== 'graduated' &&
       a.semester_no === (a as any).batch_current_semester

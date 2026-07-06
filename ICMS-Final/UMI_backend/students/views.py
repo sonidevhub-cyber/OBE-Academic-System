@@ -1,17 +1,38 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 from .models import Student
 from .serializers import StudentSerializer
 from core.permissions import IsSAC
 from core.responses import api_response
 
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 class StudentViewSet(viewsets.ModelViewSet):
-    queryset = Student.objects.all().select_related('user', 'department')
     serializer_class = StudentSerializer
+    pagination_class = StandardResultsSetPagination
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        from django.db.models import Prefetch
+        from curriculum.models import CurriculumVersionCourse
+        
+        queryset = Student.objects.all().select_related(
+            'user', 
+            'user__batch', 
+            'user__batch__program', 
+            'user__batch__curriculum_version',
+            'department'
+        ).prefetch_related(
+            Prefetch(
+                'user__batch__curriculum_version__version_courses',
+                queryset=CurriculumVersionCourse.objects.select_related('course').all()
+            )
+        )
+        
         batch_id = self.request.query_params.get('batch')
         role = self.request.query_params.get('role')
         
@@ -37,7 +58,15 @@ class StudentViewSet(viewsets.ModelViewSet):
         data = UserListSerializer(user, context={'request': request}).data
 
         try:
-            student = Student.objects.get(user=user)
+            student = Student.objects.select_related(
+                'user', 
+                'user__batch', 
+                'user__batch__program', 
+                'user__batch__curriculum_version',
+                'department'
+            ).prefetch_related(
+                'user__batch__curriculum_version__version_courses__course'
+            ).get(user=user)
             serializer = StudentSerializer(student, context={'request': request})
             student_data = serializer.data
 

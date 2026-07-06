@@ -1,6 +1,6 @@
 from rest_framework import generics, permissions, viewsets
 from rest_framework.permissions import AllowAny
-from .models import Program, Batch
+from core.models import Program, Batch
 from .serializers import ProgramSerializer, BatchSerializer
 
 class ProgramViewSet(viewsets.ModelViewSet):

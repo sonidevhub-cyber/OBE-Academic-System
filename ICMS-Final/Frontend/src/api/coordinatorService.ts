@@ -81,12 +81,14 @@ export const coordinatorService = {
   getCurriculumVersions: (params?: any) => 
     api.get('curriculum-versions/', { params }),
   
-  getVersion: (id: number) => {
+  getVersion: (id: number, batchId?: string) => {
     if (isNaN(id)) {
       console.warn('coordinatorService.getVersion called with NaN');
       return Promise.reject(new Error('Invalid ID'));
     }
-    return api.get(`curriculum-versions/${id}/`);
+    const params = batchId ? { batch: batchId } : undefined;
+    console.log(`[coordinatorService.getVersion] Fetching version ${id}, batchId=${batchId}, params=`, params);
+    return api.get(`curriculum-versions/${id}/`, { params });
   },
   
   createVersion: (data: any) => 

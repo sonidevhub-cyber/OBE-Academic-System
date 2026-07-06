@@ -3,15 +3,20 @@ import { api } from './api';
 export interface Batch { 
     id: string;
     name: string; 
-    program: string; 
+    program: any; 
     start_year: number; 
     end_year: number; 
     current_semester: number; 
     student_count: number; 
     is_active: boolean; 
     status: 'active' | 'graduated';
+    curriculum_version_id?: number;
     curriculum_version_no?: string;
     graduated_at: string | null;
+    exit_survey_enabled: boolean;
+    pending_exit_survey_count: number;
+    is_program_end_ready: boolean;
+    graduation_status: 'not_graduating' | 'in_progress' | 'graduated_partial' | 'graduated_complete';
 } 
 
 export interface BatchCreateData { 

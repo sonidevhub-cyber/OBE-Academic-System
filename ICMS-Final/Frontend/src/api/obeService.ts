@@ -26,6 +26,20 @@ export interface PEO {
   kpi_threshold: number;
   is_active: boolean;
   created_at: string;
+  alumni_survey_question_text?: string | null;
+}
+
+export interface AlumniSurveyQuestion {
+  id: string;
+  peo: string | PEO;
+  peo_id?: string;
+  peo_title?: string;
+  peo_description?: string;
+  question_text: string;
+  is_locked: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GA {
@@ -87,7 +101,8 @@ export interface GACQIResubmissionHistory {
 export interface GAReportContributingCourse {
   course_code: string;
   course_name?: string;
-  course_ga_score: number;
+  course_ga_score: number; // Direct score
+  course_feedback_score?: number | null; // Indirect (CF) score
   enrolled_students?: number;
   semester?: number | null;
   credits?: number;
@@ -99,6 +114,10 @@ export interface GAReportItem {
   ga_title: string;
   direct_score: number | null;
   indirect_score: number | null;
+  course_feedback_score?: number | null;
+  course_feedback_coverage?: number | null;
+  exit_survey_score?: number | null;
+  exit_survey_coverage?: number | null;
   ga_attainment: number | null;
   ga_kpi_threshold: number;
   kpi_threshold?: number;
@@ -219,7 +238,9 @@ export interface CLOReportResponse {
 export interface AlumniDashboardResponse {
   name: string;
   roll_no: string;
+  batch_id?: string | null;
   batch: string;
+  program_id?: string | null;
   program: string;
   graduation_year: string;
   cgpa: number;
@@ -243,9 +264,12 @@ export interface AlumniDashboardResponse {
 // --- Exit Survey Interfaces ---
 export interface ExitSurveyQuestion {
   id: string;
-  ga: GA;
+  ga: string | GA;
+  ga_id?: string;
   ga_title: string;
   ga_description: string;
+  ga_order_number?: number;
+  ga_code?: string;
   question_text: string;
   is_locked: boolean;
   is_active: boolean;
@@ -279,7 +303,23 @@ export interface BatchPendingExitSurvey {
 export interface Batch {
   id: string;
   name: string;
+  custom_id: string;
   program: any;
+  current_semester: number;
+  exit_survey_enabled: boolean;
+  exit_survey_enabled_at: string | null;
+  graduated_at?: string | null;
+  alumni_feedback_enabled: boolean;
+  alumni_feedback_enabled_at: string | null;
+  is_graduating_eligible: boolean;
+  is_alumni_feedback_eligible: boolean;
+  pending_exit_survey_count: number;
+  graduation_status: 'not_graduating' | 'in_progress' | 'graduated_partial' | 'graduated_complete';
+  alumni_feedback_cycle_status?: 'DRAFT' | 'ACTIVE' | 'CLOSED' | null;
+  alumni_feedback_due_at?: string | null;
+  alumni_feedback_response_rate?: number;
+  alumni_feedback_response_count?: number;
+  alumni_feedback_total_alumni?: number;
 }
 
 class OBEService {
@@ -316,7 +356,7 @@ class OBEService {
   }
 
   // Get Semester GA Summary
-  async getSemesterGASummary(batchId: string, semesterId?: string): Promise<any[]> {
+  async getSemesterGASummary(batchId: string, semesterId?: string): Promise<any> {
     const params = semesterId ? { semester_id: semesterId } : {};
     const response = await api.get(`/obe/batches/${batchId}/semester-ga-summary/`, { params });
     return response.data;
@@ -388,8 +428,14 @@ class OBEService {
   }
 
   // Get All Batches
-  async getAllBatches(): Promise<Batch[]> {
-    const response = await api.get('/batches/all/');
+  async getAllBatches(params?: { alumni_feedback?: boolean | 'all'; program?: string }): Promise<Batch[]> {
+    const response = await api.get('/batches/all/', { params });
+    return response.data;
+  }
+
+  async getAlumniFeedbackBatches(programId?: string): Promise<Batch[]> {
+    const params = { alumni_feedback: 'all' as const, ...(programId ? { program: programId } : {}) };
+    const response = await api.get('/batches/all/', { params });
     return response.data;
   }
 
@@ -411,6 +457,11 @@ class OBEService {
     return response.data;
   }
 
+  async getProgramPEOs(programId: string): Promise<PEO[]> {
+    const response = await api.get(`/obe/programs/${programId}/peos/`);
+    return response.data;
+  }
+
   // --- Exit Survey Methods ---
   async getExitSurveyQuestions(gaId?: string): Promise<ExitSurveyQuestion[]> {
     const params = gaId ? { ga_id: gaId } : {};
@@ -423,16 +474,48 @@ class OBEService {
     return response.data;
   }
 
-  async lockExitSurveyTemplate(): Promise<ExitSurveyQuestion[]> {
-    const response = await api.post('/obe/exit-survey/template/lock/');
-    return response.data;
-  }
-
   async toggleExitSurveyForBatch(batchId: string): Promise<{
     exit_survey_enabled: boolean;
     exit_survey_enabled_at: string | null;
+    graduation_status: string;
   }> {
     const response = await api.patch(`/obe/batches/${batchId}/toggle-exit-survey/`);
+    return response.data;
+  }
+
+  async toggleAlumniFeedbackForBatch(batchId: string, data?: {
+    due_at?: string;
+    duration_days?: number;
+  }): Promise<{
+    alumni_feedback_enabled: boolean;
+    alumni_feedback_enabled_at: string | null;
+    cycle?: any;
+  }> {
+    const response = await api.patch(`/obe/batches/${batchId}/toggle-alumni-feedback/`, data || {});
+    return response.data;
+  }
+
+  async getAlumniSurveyCycles(batchId: string): Promise<any[]> {
+    const response = await api.get(`/obe/batches/${batchId}/alumni-survey-cycles/`);
+    return response.data;
+  }
+
+  async getAlumniSurveyQuestions(cycleId: string): Promise<AlumniSurveyQuestion[]> {
+    const response = await api.get(`/obe/alumni-survey/${cycleId}/`);
+    return response.data;
+  }
+
+  async getPEOAlumniSurveyQuestions(peoId: string): Promise<AlumniSurveyQuestion[]> {
+    const response = await api.get(`/obe/peo/${peoId}/alumni-survey-questions/`);
+    return response.data;
+  }
+
+  async submitAlumniSurvey(
+    cycleId: string,
+    studentId: string,
+    data: { responses: Array<{ question: string; score: number }> }
+  ): Promise<{ success: boolean }> {
+    const response = await api.post(`/obe/alumni-survey/${cycleId}/student/${studentId}/`, data);
     return response.data;
   }
 

@@ -2,6 +2,7 @@ import uuid
 from django.db import models 
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
+from django.utils import timezone
 from decimal import Decimal
 
 
@@ -35,6 +36,7 @@ class PEO(models.Model):
         return f"PEO-{self.order_number}: {self.title}"
     
     def save(self, *args, **kwargs):
+        skip_alumni_survey = kwargs.pop('skip_alumni_survey', False)
         is_new = self._state.adding
         original_description = None
         if not is_new:
@@ -44,17 +46,20 @@ class PEO(models.Model):
         
         super().save(*args, **kwargs)
         
+        if skip_alumni_survey:
+            return
+
         if is_new or (original_description and original_description != self.description):
             AlumniSurveyQuestion.objects.filter(
                 peo=self,
                 is_active=True
             ).update(is_active=False)
             
-            question_text = f"Aap apne current professional role mein is objective ko kis hadd tak achieve kar rahe hain: {self.description}"
+            question_text = f"To what extent are you achieving this objective in your current professional role: {self.description}"
             AlumniSurveyQuestion.objects.create(
                 peo=self,
                 question_text=question_text,
-                is_locked=False,
+                is_locked=True,
                 is_active=True
             )
 
@@ -87,6 +92,7 @@ class AlumniSurveyCycle(models.Model):
     SURVEY_WINDOW_CHOICES = [
         ('6_MONTHS', '6 Months Post Graduation'),
         ('1.5_YEARS', '1.5 Years Post Graduation'),
+        ('2_YEARS', '2 Years Post Graduation'),
         ('3_YEARS', '3 Years Post Graduation'),
     ]
     STATUS_CHOICES = [
@@ -106,6 +112,10 @@ class AlumniSurveyCycle(models.Model):
     )
     survey_window = models.CharField(max_length=20, choices=SURVEY_WINDOW_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+    due_at = models.DateTimeField(null=True, blank=True)
+    response_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('50.00'))
+    auto_extension_days = models.PositiveIntegerField(default=5)
+    auto_extension_count = models.PositiveIntegerField(default=0)
     activated_by = models.ForeignKey(
         'core.CustomUser',
         on_delete=models.SET_NULL,
@@ -220,6 +230,7 @@ class GA(models.Model):
         return f"GA-{self.order_number}: {self.title}"
 
     def save(self, *args, **kwargs):
+        skip_exit_survey = kwargs.pop('skip_exit_survey', False)
         is_new = self._state.adding
         # Get original description if updating
         original_description = None
@@ -230,34 +241,22 @@ class GA(models.Model):
         
         super().save(*args, **kwargs)
         
-        # Generate exit survey question if new or description changed
-        if is_new or (original_description and original_description != self.description):
+        # Generate exit survey question if new or description changed (unless skipped)
+        if not skip_exit_survey and (is_new or (original_description and original_description != self.description)):
             # Deactivate previous active questions for this GA
             ExitSurveyQuestion.objects.filter(
                 ga=self,
                 is_active=True
             ).update(is_active=False)
             
-            # Create new question
-            question_text = f"Main is Graduate Attribute mein confident hoon: {self.description}"
+            # Create new question with prefix
+            question_text = f"I am confident in {self.description}"
             ExitSurveyQuestion.objects.create(
                 ga=self,
                 question_text=question_text,
-                is_locked=False,
+                is_locked=True,  # Lock the question by default
                 is_active=True
             )
-            
-            # Unlock the exit survey template
-            from django.utils import timezone
-            templates = ExitSurveyTemplate.objects.filter(is_locked=True)
-            for template in templates:
-                template.is_locked = False
-                template.version += 1
-                template.locked_at = None
-                template.save()
-                
-            # Also unlock all active questions
-            ExitSurveyQuestion.objects.filter(is_active=True).update(is_locked=False)
 
 
 class GAPEOMapping(models.Model): 
@@ -344,10 +343,10 @@ class CLOGAMapping(models.Model):
         default=uuid.uuid4, 
         editable=False 
     ) 
-    clo = models.ForeignKey( 
+    clo = models.OneToOneField( 
         CLO, 
         on_delete=models.CASCADE, 
-        related_name='ga_mappings' 
+        related_name='ga_mapping'
     ) 
     ga = models.ForeignKey( 
         GA, 
@@ -361,7 +360,7 @@ class CLOGAMapping(models.Model):
     ) 
 
     class Meta: 
-        unique_together = ('clo', 'ga') 
+        pass
 
     def __str__(self): 
         return f"{self.clo} -> {self.ga} ({self.weight})" 
@@ -400,6 +399,7 @@ class CourseSession(models.Model):
         null=True, blank=True
     ) 
     assessment_done = models.BooleanField(default=False)
+    allow_result_editing = models.BooleanField(default=False)
     locked_at = models.DateTimeField(null=True, blank=True)
     unlocked_by = models.ForeignKey(
         'core.CustomUser', 
@@ -472,9 +472,10 @@ class GACQIRecord(models.Model):
     batch = models.ForeignKey(
         'core.Batch',
         on_delete=models.CASCADE,
-        related_name='ga_cqi_records'
+        related_name='ga_cqi_records',
+        null=True, blank=True
     )
-    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES)
+    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES,default='SEMESTER')
     semester = models.IntegerField(null=True, blank=True)
     attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
@@ -705,33 +706,133 @@ class GAReport(models.Model):
         return f"GA Report for {self.ga} - {self.batch}: {self.final_score}"
 
 
+class CourseFeedbackGAScore(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    course = models.ForeignKey(
+        'core.Course',
+        on_delete=models.CASCADE,
+        related_name='cf_ga_scores'
+    )
+    ga = models.ForeignKey(
+        GA,
+        on_delete=models.CASCADE,
+        related_name='cf_scores'
+    )
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='cf_ga_scores'
+    )
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    coverage_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    respondent_count = models.IntegerField(default=0)
+    total_eligible = models.IntegerField(default=0)
+    is_locked = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    calculated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('course', 'ga', 'batch')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"CF GA Score: {self.course} - {self.ga} - {self.batch}: {self.score}"
+
+
+class ExitSurveyGAScore(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    ga = models.ForeignKey(
+        GA,
+        on_delete=models.CASCADE,
+        related_name='exit_survey_scores'
+    )
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='exit_survey_ga_scores'
+    )
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    coverage_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    respondent_count = models.IntegerField(default=0)
+    total_eligible = models.IntegerField(default=0)
+    is_locked = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    calculated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('ga', 'batch')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Exit Survey GA Score: {self.ga} - {self.batch}: {self.score}"
+
+
+# Weight constants
+W_DIRECT = Decimal('0.80')
+W_CF = Decimal('0.15')
+W_EXIT = Decimal('0.05')
+
+
 def get_ga_indirect_score(ga_id, batch_id):
     """
     Returns indirect assessment scores for a given GA and batch.
-    Currently only Exit Survey is a source.
-    Course Feedback module (Sadia's module) will be added as a second indirect source here later —
-    append to source list, do not rewrite this function's structure.
+    Sources:
+    - Course Feedback
+    - Exit Survey
     """
     sources = []
     
-    # Source 1: Exit Survey
-    exit_responses = ExitSurveyResponse.objects.filter(
-        question__ga_id=ga_id,
-        student__batch_id=batch_id,
-        question__is_active=True
+    # Source 1: Course Feedback
+    cf_scores = CourseFeedbackGAScore.objects.filter(
+        ga_id=ga_id,
+        batch_id=batch_id,
+        is_active=True,
+        score__isnull=False
     )
-    if exit_responses.exists():
-        avg_score = exit_responses.aggregate(avg=models.Avg('rating_value'))['avg']
-        normalized_score = (avg_score / 5) * 100 if avg_score else 0
+    if cf_scores.exists():
+        cf_aggregate = cf_scores.aggregate(
+            avg_score=models.Avg('score'),
+            avg_coverage=models.Avg('coverage_percent'),
+            total_respondents=models.Sum('respondent_count')
+        )
         sources.append({
-            'source': 'Exit Survey',
-            'score': normalized_score,
-            'response_count': exit_responses.count()
+            'source': 'Course Feedback',
+            'score': float(cf_aggregate['avg_score']) if cf_aggregate['avg_score'] is not None else None,
+            'coverage': float(cf_aggregate['avg_coverage']) if cf_aggregate['avg_coverage'] is not None else None,
+            'response_count': cf_aggregate['total_respondents'] or 0
         })
     
-    # TODO: Source 2: Course Feedback (Sadia's module) - add here later
-    # course_feedback_scores = ...
-    # sources.append(...)
+    # Source 2: Exit Survey
+    exit_score = ExitSurveyGAScore.objects.filter(
+        ga_id=ga_id,
+        batch_id=batch_id,
+        is_active=True,
+        score__isnull=False
+    )
+    if exit_score.exists():
+        exit_aggregate = exit_score.aggregate(
+            avg_score=models.Avg('score'),
+            avg_coverage=models.Avg('coverage_percent'),
+            total_respondents=models.Sum('respondent_count')
+        )
+        sources.append({
+            'source': 'Exit Survey',
+            'score': float(exit_aggregate['avg_score']) if exit_aggregate['avg_score'] is not None else None,
+            'coverage': float(exit_aggregate['avg_coverage']) if exit_aggregate['avg_coverage'] is not None else None,
+            'response_count': exit_aggregate['total_respondents'] or 0
+        })
     
     # Calculate overall average if multiple sources
     overall = None

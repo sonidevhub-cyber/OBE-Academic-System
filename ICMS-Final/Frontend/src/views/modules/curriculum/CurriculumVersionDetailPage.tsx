@@ -56,7 +56,6 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   const [batches, setBatches] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     program: '',
-    batch: '',
     cloned_from: '',
   });
   
@@ -180,8 +179,8 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
 
   const handleCreateVersion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.program || !formData.batch) {
-      toast.error('Please select program and batch');
+    if (!formData.program) {
+      toast.error('Please select a program');
       return;
     }
 
@@ -331,6 +330,27 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     await ensureEditable(action);
   };
 
+  const handleRemoveCourse = async (versionCourseId: any) => {
+    if (!window.confirm('Are you sure you want to remove this course?')) return;
+
+    const action = async () => {
+      if (!version) return;
+      
+      try {
+        setSubmitting(true);
+        await curriculumService.removeCourse(version.id, versionCourseId);
+        toast.success('Course removed successfully');
+        fetchVersion();
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Failed to remove course');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    await ensureEditable(action);
+  };
+
   const handleDeleteClo = async (cloId: any) => {
     if (!window.confirm('Are you sure you want to delete this CLO?')) return;
     
@@ -442,6 +462,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
         setShowAddCourseModal(false);
         setNewCourse({ semester_no: 1 });
         fetchVersion();
+        loadAllCourses();
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Failed to add course.');
       } finally {
@@ -490,35 +511,10 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
               </select>
             </div>
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">Select Batch</label>
-              <select
-                value={formData.batch}
-                onChange={(e) => setFormData({ ...formData, batch: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                required
-              >
-                <option value="">Choose a batch...</option>
-                {batches
-                  .filter(
-                    (b) =>
-                      (!formData.program ||
-                      b.program === formData.program ||
-                      b.program_id === formData.program) &&
-                      !b.has_curriculum
-                  )
-                  .map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
             <div className="bg-blue-50 p-4 rounded-lg flex items-start space-x-3">
               <Info className="w-5 h-5 text-blue-600 mt-0.5" />
               <p className="text-sm text-blue-700">
-                A new version will be created in <b>Draft</b> status. You can then add courses and later activate it for teacher allocations.
+                A new version will be created in <b>Draft</b> status. You can then add courses and later assign batches to it.
               </p>
             </div>
 
@@ -799,16 +795,33 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                       >
                         <option value="">Select Theory Course...</option>
-                        {allCourses
-                          .filter(c => 
-                            c.course_type === 'LECTURE' && 
-                            c.semester_number === newCourse.semester_no &&
-                            !allCourses.some(lab => lab.parent_course === c.id || lab.parent_course_id === c.id)
-                          )
-                          .map(c => (
-                            <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
-                          ))
-                        }
+                        {(() => {
+                          // Get all version courses in a flat list
+                          const versionCourses = version?.courses_by_semester 
+                            ? Object.values(version.courses_by_semester).flat() 
+                            : [];
+                          
+                          // Get course IDs already in the version
+                          const versionCourseIds = new Set(versionCourses.map((vc: any) => vc.course));
+                          
+                          // Get lab course IDs already in the version to check for existing parent usage
+                          const versionLabParentIds = new Set(
+                            versionCourses
+                              .filter((vc: any) => vc.course_type === 'LAB')
+                              .map((vc: any) => vc.parent_course)
+                          );
+                          
+                          return allCourses
+                            .filter(c => 
+                              c.course_type === 'LECTURE' && 
+                              c.semester_number === newCourse.semester_no &&
+                              versionCourseIds.has(c.id) && // Only show courses that are in this version
+                              !versionLabParentIds.has(c.id) // And don't already have a lab in this version
+                            )
+                            .map(c => (
+                              <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                            ))
+                        })()}
                       </select>
                     </div>
                   )}
@@ -861,8 +874,8 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                     const max = version.program_total_semesters || 8;
                     const finalVal = val > max ? max : val;
                     setNewCourse({ ...newCourse, semester_no: finalVal });
-                    // Reset parent course selection as semester changed
-                    setNewCourseData(prev => ({ ...prev, parent_course_id: '', name: '', code: '' }));
+                    // Only reset parent_course_id (if lab) when semester changes, keep other fields
+                    setNewCourseData(prev => ({ ...prev, parent_course_id: '' }));
                   }}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 />
@@ -938,6 +951,20 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                           key={vc.id || vc.course || `vc-${index}`}
                           className="p-4 border border-gray-100 rounded-lg bg-gray-50 hover:shadow-md transition-shadow group relative"
                         >
+                          {version.status === 'draft' && !isSAC && (
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveCourse(vc.id);
+                                }}
+                                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                title="Remove Course"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
                           {vc.course_code && vc.course_name ? (
                             <>
                               <div className="flex justify-between items-start mb-2">

@@ -80,6 +80,11 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalCount, setTotalCount] = useState<number>(0);
+
   const fetchProgramsAndBatches = useCallback(async () => {
     try {
       const progRes = await academicStructureService.getPrograms();
@@ -92,26 +97,44 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
     }
   }, []);
 
-  const fetchStudents = useCallback(async () => {
+  const fetchStudents = useCallback(async (page: number = 1) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await studentService.getAllStudents();
-      setStudents(Array.isArray(response.data) ? response.data : []);
+      const filters: any = { page, page_size: 20 };
+      if (selectedBatchId) filters.batch = selectedBatchId;
+      
+      const response = await studentService.getAllStudents(filters);
+      
+      // Handle paginated response or regular array
+      if (response.data && response.data.results) {
+        setStudents(response.data.results);
+        // Check if DRF provides num_pages or total_pages
+        setTotalPages(response.data.total_pages || response.data.num_pages || 1);
+        setTotalCount(response.data.count || 0);
+      } else if (Array.isArray(response.data)) {
+        setStudents(response.data);
+        setTotalPages(1);
+        setTotalCount(response.data.length);
+      } else {
+        setStudents([]);
+        setTotalPages(1);
+        setTotalCount(0);
+      }
     } catch (error: any) {
       setError(error.message || 'Failed to fetch students');
       setStudents([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedBatchId]);
 
   useEffect(() => {
     if (activeTab === 'students') {
-      fetchStudents();
+      fetchStudents(currentPage);
       fetchProgramsAndBatches();
     }
-  }, [activeTab, fetchStudents, fetchProgramsAndBatches]);
+  }, [activeTab, currentPage, fetchStudents, fetchProgramsAndBatches]);
 
   const handleDeleteStudent = useCallback(async (id: string | number) => {
     if (window.confirm('Are you sure you want to delete this student?')) {
@@ -183,7 +206,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           >
             <option value="">All Batches</option>
             {batches
-              .filter(b => !selectedProgramId || (b as any).program === selectedProgramId)
+              .filter(b => !selectedProgramId || (b as any).program_id === selectedProgramId)
               .map(b => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))
@@ -213,7 +236,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           <div className="flex items-center justify-between">
             <div>
             <p className="text-sm font-medium text-indigo-600 mb-1">Total Students</p>
-            <p className="text-3xl font-bold text-indigo-900">{filteredStudents.length}</p>
+            <p className="text-3xl font-bold text-indigo-900">{totalCount}</p>
           </div>
             <div className="p-3 bg-indigo-500 rounded-full shadow-lg">
               <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -365,6 +388,59 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        {totalPages > 1 && (
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Showing {((currentPage - 1) * 20) + 1} to {Math.min(currentPage * 20, totalCount)} of {totalCount} students
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <div className="flex items-center space-x-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  // Show first page, last page, and around current page
+                  let pageNum: number;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-4 py-2 rounded-md text-sm font-medium ${
+                        pageNum === currentPage
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
 

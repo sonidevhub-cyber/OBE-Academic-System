@@ -77,6 +77,18 @@ const StudentExitSurvey: React.FC<StudentExitSurveyProps> = ({ onSubmitSuccess }
     );
   }
 
+  if (questions.length === 0) {
+    return (
+      <div className="p-6">
+        <h2 className="text-2xl font-bold text-gray-800 mb-6">Exit Survey</h2>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6 mb-8">
+          <h3 className="text-xl font-bold text-yellow-800 mb-2">Survey Not Ready</h3>
+          <p className="text-yellow-700">The exit survey questions haven't been set up yet. Please contact your coordinator for assistance.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -99,29 +111,31 @@ const StudentExitSurvey: React.FC<StudentExitSurveyProps> = ({ onSubmitSuccess }
               </div>
               <div className="flex-1">
                 <h4 className="text-lg font-bold text-gray-800 mb-1">
-                  GA-{question.ga.order_number}: {question.ga.title}
+                  {question.ga_code || (question.ga_order_number ? `GA-${question.ga_order_number}` : 'GA')}: {question.ga_title || (typeof question.ga === 'object' ? question.ga.title : '')}
                 </h4>
                 <p className="text-gray-700">{question.question_text}</p>
               </div>
             </div>
-            <div className="flex gap-4 justify-center">
-              {[1, 2, 3, 4, 5].map(rating => (
+            <div className="flex gap-2 justify-center">
+              {[
+                { value: 1, label: 'Poor' },
+                { value: 2, label: 'Fair' },
+                { value: 3, label: 'Average' },
+                { value: 4, label: 'Good' },
+                { value: 5, label: 'Excellent' }
+              ].map(rating => (
                 <button
-                  key={rating}
-                  onClick={() => handleRatingChange(question.id, rating)}
-                  className={`w-16 h-16 rounded-2xl border-2 flex items-center justify-center text-xl font-bold transition-all ${
-                    responses[question.id] === rating
+                  key={rating.value}
+                  onClick={() => handleRatingChange(question.id, rating.value)}
+                  className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
+                    responses[question.id] === rating.value
                       ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-indigo-600 shadow-lg'
                       : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
                   }`}
                 >
-                  {rating}
+                  {rating.label}
                 </button>
               ))}
-            </div>
-            <div className="flex justify-between mt-3 px-2 text-sm text-gray-500">
-              <span>Strongly Disagree</span>
-              <span>Strongly Agree</span>
             </div>
           </div>
         ))}

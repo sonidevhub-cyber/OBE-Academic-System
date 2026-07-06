@@ -19,9 +19,17 @@ class CourseSessionListView(APIView):
         except Batch.DoesNotExist:
             return Response({'error': 'Batch not found'}, status=404)
         
+        # Get the curriculum version's courses
+        allowed_course_ids = []
+        if batch.curriculum_version:
+            allowed_course_ids = batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        
         sessions = CourseSession.objects.filter(
             batch_id=batch_id,
-            is_active=True
+            is_active=True,
+            course_id__in=allowed_course_ids  # Only courses in current curriculum
         ).select_related(
             'course', 'batch', 'instructor', 'semester'
         )
@@ -38,7 +46,8 @@ class CourseSessionListView(APIView):
                 # Re-fetch sessions!
                 sessions = CourseSession.objects.filter(
                     batch_id=batch_id,
-                    is_active=True
+                    is_active=True,
+                    course_id__in=allowed_course_ids  # Again filter by allowed courses
                 ).select_related(
                     'course', 'batch', 'instructor', 'semester'
                 )

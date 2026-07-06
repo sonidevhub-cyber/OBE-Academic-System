@@ -1,100 +1,238 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Star, 
-  Send, 
-  CheckCircle,
-  ClipboardList,
-  Info
+import { motion } from 'framer-motion';
+import {
+  Award,
+  CheckCircle2,
+  Lock,
+  Send,
 } from 'lucide-react';
+import { toast, Toaster } from 'react-hot-toast';
 
-// --- Dummy Data ---
-const dummySurvey = { 
-  round: "2025", 
-  closeDate: "December 31, 2025", 
-  questions: [ 
-    { 
-      id: "q1", 
-      peo: "PEO 1", 
-      peoTitle: "Industry Practice", 
-      questionText: "How well did the program prepare you to apply CS fundamentals in industry?", 
-      type: "rating", 
-    }, 
-    { 
-      id: "q2", 
-      peo: "PEO 2", 
-      peoTitle: "Higher Education", 
-      questionText: "How well did the program prepare you to pursue higher education or research?", 
-      type: "rating", 
-    }, 
-    { 
-      id: "q3", 
-      peo: "PEO 3", 
-      peoTitle: "Leadership & Ethics", 
-      questionText: "How well did the program prepare you to demonstrate professional ethics?", 
-      type: "rating", 
-    }, 
-    { 
-      id: "q4", 
-      peo: "PEO 4", 
-      peoTitle: "Lifelong Learning", 
-      questionText: "How well did the program prepare you for lifelong learning?", 
-      type: "rating", 
-    }, 
-    { 
-      id: "q5", 
-      peo: null, 
-      peoTitle: null, 
-      questionText: "Any suggestions to improve the program?", 
-      type: "open_ended", 
-    }, 
-  ], 
+import { useAuth } from '../../context/AuthContext';
+import obeService, {
+  AlumniDashboardResponse,
+  AlumniSurveyQuestion,
+  PEO,
+} from '../../api/obeService';
+
+type SurveyCycle = {
+  id: string;
+  survey_window: string;
+  status: string;
+  due_at?: string | null;
+  batch: string;
+  batch_name?: string;
 };
+
+const storageKey = (cycleId: string, studentId: string) =>
+  `alumni_survey_submitted:${cycleId}:${studentId}`;
+
+const resolveAlumniStudentIdentifier = (user: any, alumni: AlumniDashboardResponse | null) =>
+  user?.student_id ||
+  user?.studentId ||
+  user?.custom_id ||
+  user?.registration_number ||
+  user?.student_profile?.student_id ||
+  user?.student_profile?.custom_id ||
+  alumni?.roll_no ||
+  user?.id ||
+  null;
+
+const ratingLabels = [
+  { value: 1, label: 'Poor' },
+  { value: 2, label: 'Fair' },
+  { value: 3, label: 'Average' },
+  { value: 4, label: 'Good' },
+  { value: 5, label: 'Excellent' },
+];
 
 const AlumniSurvey: React.FC = () => {
   const navigate = useNavigate();
-  const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const { currentUser } = useAuth();
 
-  // --- Helpers ---
-  const handleRating = (id: string, rating: number) => {
-    setAnswers(prev => ({ ...prev, [id]: rating }));
+  const [alumniData, setAlumniData] = useState<AlumniDashboardResponse | null>(null);
+  const [activeCycle, setActiveCycle] = useState<SurveyCycle | null>(null);
+  const [questions, setQuestions] = useState<AlumniSurveyQuestion[]>([]);
+  const [questionsSource, setQuestionsSource] = useState<'cycle' | 'peo' | null>(null);
+  const [responses, setResponses] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  const batchId =
+    currentUser?.batch_id ||
+    currentUser?.batch?.id ||
+    currentUser?.batchId ||
+    currentUser?.original_batch?.id ||
+    null;
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSurvey = async () => {
+      try {
+        setLoading(true);
+        const dashboard = await obeService.getAlumniDashboard().catch(() => null);
+
+        if (cancelled) return;
+        if (dashboard) {
+          setAlumniData(dashboard);
+        }
+
+        const effectiveBatchId = batchId || dashboard?.batch_id || null;
+        const effectiveProgramId = dashboard?.program_id || currentUser?.program_id || null;
+        const cycles = effectiveBatchId
+          ? await obeService.getAlumniSurveyCycles(String(effectiveBatchId)).catch(() => [])
+          : [];
+
+        if (cancelled) return;
+
+        const cycle = cycles.find((item: SurveyCycle) => item.status === 'ACTIVE') || null;
+        setActiveCycle(cycle);
+
+        const studentId = resolveAlumniStudentIdentifier(currentUser, dashboard);
+        setHasSubmitted(
+          cycle ? localStorage.getItem(storageKey(cycle.id, String(studentId || 'guest'))) === 'true' : false
+        );
+
+        const loadCycleQuestions = async () => {
+          if (!cycle) return [];
+          try {
+            const questionData = await obeService.getAlumniSurveyQuestions(cycle.id);
+            return Array.isArray(questionData) ? questionData : [];
+          } catch (error) {
+            return [];
+          }
+        };
+
+        const loadPeoQuestions = async () => {
+          if (!effectiveProgramId) return [];
+
+          const peos: PEO[] = await obeService.getProgramPEOs(String(effectiveProgramId)).catch(() => []);
+          const questionGroups = await Promise.all(
+            peos.map((peo) => obeService.getPEOAlumniSurveyQuestions(peo.id).catch(() => []))
+          );
+          return questionGroups.flat();
+        };
+
+        const cycleQuestions = await loadCycleQuestions();
+        if (cancelled) return;
+
+        if (cycleQuestions.length > 0) {
+          setQuestionsSource('cycle');
+          setQuestions(cycleQuestions);
+          const initialResponses: Record<string, number> = {};
+          cycleQuestions.forEach((question) => {
+            initialResponses[question.id] = 0;
+          });
+          setResponses(initialResponses);
+          return;
+        }
+
+        const peoQuestions = await loadPeoQuestions();
+        if (cancelled) return;
+
+        setQuestionsSource(peoQuestions.length > 0 ? 'peo' : null);
+        setQuestions(peoQuestions);
+        const initialResponses: Record<string, number> = {};
+        peoQuestions.forEach((question) => {
+          initialResponses[question.id] = 0;
+        });
+        setResponses(initialResponses);
+      } catch (error) {
+        console.error('Failed to load alumni survey:', error);
+        toast.error('Failed to load alumni survey');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadSurvey();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [batchId, currentUser?.program_id]);
+
+  const answeredCount = useMemo(
+    () => questions.filter((question) => (responses[question.id] || 0) > 0).length,
+    [questions, responses]
+  );
+  const progressPercent = questions.length ? Math.round((answeredCount / questions.length) * 100) : 0;
+  const isComplete = questions.length > 0 && questions.every((question) => (responses[question.id] || 0) > 0);
+
+  const handleRating = (questionId: string, rating: number) => {
+    setResponses((prev) => ({
+      ...prev,
+      [questionId]: rating,
+    }));
   };
 
-  const handleOpenEnded = (id: string, text: string) => {
-    setAnswers(prev => ({ ...prev, [id]: text }));
-  };
+  const handleSubmit = async () => {
+    if (!activeCycle) {
+      toast.error('Survey is not activated yet. The questions are visible, but submission is locked.');
+      return;
+    }
 
-  const ratingQuestions = dummySurvey.questions.filter(q => q.type === 'rating');
-  const answeredCount = ratingQuestions.filter(q => answers[q.id]).length;
-  const progressPercent = (answeredCount / ratingQuestions.length) * 100;
-  const isComplete = answeredCount === ratingQuestions.length;
+    const studentId = resolveAlumniStudentIdentifier(currentUser, alumniData);
+    if (!studentId) {
+      toast.error('Your alumni profile was not found. Please sign in again.');
+      return;
+    }
 
-  const handleSubmit = () => {
-    if (isComplete) {
-      setIsSubmitted(true);
-      // In a real app, API call would go here
+    if (!isComplete) {
+      toast.error('Please answer all survey questions.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await obeService.submitAlumniSurvey(String(activeCycle.id), String(studentId), {
+        responses: questions.map((question) => ({
+          question: question.id,
+          score: responses[question.id],
+        })),
+      });
+
+      localStorage.setItem(storageKey(activeCycle.id, String(studentId)), 'true');
+      setHasSubmitted(true);
+      toast.success('Thank you. Your survey is now locked.');
+    } catch (error) {
+      console.error('Failed to submit alumni survey:', error);
+      toast.error('Failed to submit survey');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  if (isSubmitted) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#0A192F] flex items-center justify-center p-6">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
+        <Toaster position="top-right" />
+        <div className="text-[#E6F1FF] font-bold">Loading survey...</div>
+      </div>
+    );
+  }
+
+  if (hasSubmitted) {
+    return (
+      <div className="min-h-screen bg-[#0A192F] flex items-center justify-center p-6">
+        <Toaster position="top-right" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="bg-[#112240] rounded-[40px] p-12 text-center max-w-xl border border-[#233554] shadow-2xl"
+          className="max-w-xl w-full bg-[#112240] rounded-[40px] p-10 text-center border border-[#233554] shadow-2xl"
         >
           <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/30">
-            <CheckCircle className="w-12 h-12 text-emerald-500" />
+            <CheckCircle2 className="w-12 h-12 text-emerald-500" />
           </div>
           <h2 className="text-3xl font-black text-white mb-4">Jazakallah!</h2>
           <p className="text-[#8892B0] text-lg leading-relaxed mb-10 font-medium">
-            Your feedback has been recorded. It will be used to improve the <span className="text-[#F7C948]">BS CS program</span> for future generations.
+            Your alumni PEO survey has been recorded. These responses will support program improvement and CQI review.
           </p>
-          <button 
+          <button
             onClick={() => navigate('/alumni')}
             className="w-full bg-[#F7C948] text-[#0A192F] py-4 rounded-2xl font-black text-lg hover:bg-[#F7C948]/90 transition-all shadow-xl shadow-yellow-500/10"
           >
@@ -105,160 +243,157 @@ const AlumniSurvey: React.FC = () => {
     );
   }
 
+  if (questions.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#E8EFF8] text-slate-900 font-sans">
+        <Toaster position="top-right" />
+        <main className="max-w-5xl mx-auto p-6 py-10">
+          <section className="bg-white rounded-[32px] p-8 border border-gray-100 shadow-xl">
+            <div className="flex flex-col md:flex-row justify-between gap-6 items-start md:items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 text-slate-500 text-xs font-black uppercase tracking-widest mb-4">
+                  Alumni PEO Survey
+                </div>
+                <h1 className="text-3xl md:text-5xl font-black text-gray-900">100% Complete</h1>
+                <p className="text-gray-500 font-medium mt-3 max-w-3xl">
+                  {questionsSource === 'peo'
+                    ? 'The locked PEO questions are loaded from the program definition. A live cycle is still required to submit responses.'
+                    : 'Complete the alumni PEO survey to unlock the rest of your alumni portal.'}
+                </p>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-[220px]">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">{questionsSource === 'peo' ? 'Preview' : 'Locked'}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-white rounded-[28px] p-6 border border-gray-100 shadow-sm mt-8">
+            <p className="text-sm text-gray-600 font-medium">
+              {questionsSource === 'peo'
+                ? 'The locked PEO questions are available now. Activate the cycle to enable submission.'
+                : 'The coordinator has enabled alumni feedback, but the PEO question set is still syncing. Please refresh in a moment.'}
+            </p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0A192F] text-[#E6F1FF] font-sans pb-20">
-      {/* --- Header --- */}
-      <header className="bg-[#112240] border-b border-[#233554] sticky top-0 z-50 px-6 py-6 shadow-xl">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <button 
-              onClick={() => navigate('/alumni')}
-              className="flex items-center gap-2 text-[#8892B0] hover:text-[#F7C948] transition-colors font-bold group"
+      <Toaster position="top-right" />
+
+      <main className="max-w-5xl mx-auto p-6 mt-8 space-y-8">
+        <section className="bg-white rounded-[32px] p-8 shadow-lg border border-gray-100">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-slate-500 text-xs font-black uppercase tracking-widest">
+                Alumni PEO Survey
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-[#F7C948]/10 border border-[#F7C948]/20 px-4 py-2 text-[#F7C948] text-xs font-black uppercase tracking-widest">
+                <Lock className="w-4 h-4" />
+                {hasSubmitted ? 'Survey Submitted' : 'Locked'}
+              </div>
+            </div>
+            <div className="flex items-end justify-between gap-6 flex-wrap">
+              <div>
+                <h2 className="text-3xl md:text-4xl font-black text-gray-900">{progressPercent}% Complete</h2>
+                <p className="text-gray-500 font-medium mt-1">
+                  {questionsSource === 'peo'
+                    ? 'Loaded from the locked PEO definition.'
+                    : `Locked PEO survey cycle ${activeCycle?.survey_window || ''}`.trim()}
+                </p>
+              </div>
+              <div className="w-full md:w-72 space-y-2">
+                <div className="flex justify-between text-xs font-black uppercase tracking-tight">
+                  <span className="text-gray-400">Completion Progress</span>
+                  <span className="text-indigo-600">{progressPercent}%</span>
+                </div>
+                <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progressPercent}%` }}
+                    className="h-full bg-gradient-to-r from-pink-500 to-indigo-500 rounded-full"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="space-y-6">
+          {questions.map((question, index) => (
+            <motion.section
+              key={question.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.06 }}
+              className="bg-[#112240] rounded-[32px] p-8 border border-[#233554] shadow-xl relative overflow-hidden group hover:border-[#F7C948]/30 transition-all"
             >
-              <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-              Back to Dashboard
-            </button>
-            <div className="bg-[#F7C948]/10 px-4 py-1.5 rounded-full border border-[#F7C948]/20">
-              <span className="text-[#F7C948] text-xs font-black uppercase tracking-widest">Alumni Relations</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-end gap-6">
-            <div>
-              <h1 className="text-3xl font-black text-white">PEO Survey {dummySurvey.round}</h1>
-              <p className="text-[#8892B0] font-medium mt-1 flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4" /> Closes: {dummySurvey.closeDate}
-              </p>
-            </div>
-            
-            <div className="w-full md:w-64 space-y-2">
-              <div className="flex justify-between text-xs font-black uppercase tracking-tighter">
-                <span className="text-[#8892B0]">Completion Progress</span>
-                <span className="text-[#F7C948]">{Math.round(progressPercent)}%</span>
-              </div>
-              <div className="h-3 w-full bg-[#0A192F] rounded-full overflow-hidden border border-[#233554]">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progressPercent}%` }}
-                  className="h-full bg-[#F7C948] rounded-full shadow-[0_0_15px_rgba(247,201,72,0.3)]"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* --- Survey Questions --- */}
-      <main className="max-w-4xl mx-auto p-6 mt-8 space-y-8">
-        <div className="bg-blue-500/10 border border-blue-500/20 p-6 rounded-3xl flex gap-4 items-start">
-          <div className="p-2 bg-blue-500/20 rounded-xl">
-            <Info className="w-6 h-6 text-blue-400" />
-          </div>
-          <p className="text-sm text-blue-100/80 font-medium leading-relaxed">
-            Program Educational Objectives (PEOs) describe the career and professional accomplishments that the program is preparing graduates to achieve. Your honest feedback is crucial for our continuous quality improvement process.
-          </p>
-        </div>
-
-        {dummySurvey.questions.map((q, idx) => (
-          <motion.section 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.1 }}
-            key={q.id}
-            className="bg-[#112240] rounded-[32px] p-8 border border-[#233554] shadow-xl relative overflow-hidden group hover:border-[#F7C948]/30 transition-all"
-          >
-            {q.peo && (
-              <div className="mb-6 flex">
-                <span className="bg-[#F7C948]/10 text-[#F7C948] px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-[#F7C948]/20 flex items-center gap-2">
-                  <AwardIcon className="w-3 h-3" /> {q.peo} — {q.peoTitle}
-                </span>
-              </div>
-            )}
-
-            <h3 className="text-xl font-bold text-white mb-8 leading-tight">
-              {q.questionText}
-            </h3>
-
-            {q.type === 'rating' ? (
-              <div className="flex flex-wrap items-center gap-4">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    onClick={() => handleRating(q.id, star)}
-                    className="flex flex-col items-center gap-2 group/star"
-                  >
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 ${
-                      answers[q.id] >= star 
-                        ? 'bg-[#F7C948] shadow-[0_0_20px_rgba(247,201,72,0.2)]' 
-                        : 'bg-[#0A192F] border border-[#233554] hover:border-[#F7C948]/50'
-                    }`}>
-                      <Star 
-                        className={`w-6 h-6 transition-colors ${
-                          answers[q.id] >= star ? 'text-[#0A192F] fill-[#0A192F]' : 'text-[#8892B0] group-hover/star:text-[#F7C948]'
-                        }`} 
-                      />
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-[#F7C948] text-[#0A192F] flex items-center justify-center font-black text-lg shadow-lg">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="bg-[#F7C948]/10 text-[#F7C948] px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-[#F7C948]/20 flex items-center gap-2">
+                        <Award className="w-3 h-3" />
+                        {question.peo_title || 'PEO'}
+                      </span>
+                      <span className="bg-emerald-500/10 text-emerald-300 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-emerald-500/20 flex items-center gap-2">
+                        <Lock className="w-3 h-3" />
+                        Locked
+                      </span>
                     </div>
-                    <span className={`text-[10px] font-black uppercase tracking-tighter ${
-                      answers[q.id] === star ? 'text-[#F7C948]' : 'text-[#8892B0]'
-                    }`}>
-                      {star === 1 ? 'Poor' : star === 5 ? 'Excellent' : star}
-                    </span>
+                    <h3 className="text-xl font-bold text-white leading-tight">
+                      {question.question_text}
+                    </h3>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-center flex-wrap">
+                {ratingLabels.map((rating) => (
+                  <button
+                    key={rating.value}
+                    onClick={() => handleRating(question.id, rating.value)}
+                    className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
+                      responses[question.id] === rating.value
+                        ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-indigo-600 shadow-lg'
+                        : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
+                    }`}
+                  >
+                    {rating.label}
                   </button>
                 ))}
               </div>
-            ) : (
-              <textarea
-                value={answers[q.id] || ''}
-                onChange={(e) => handleOpenEnded(q.id, e.target.value)}
-                placeholder="Type your suggestions here..."
-                className="w-full bg-[#0A192F] border border-[#233554] rounded-2xl p-6 text-[#E6F1FF] placeholder:text-[#3B4C66] focus:outline-none focus:ring-2 focus:ring-[#F7C948]/50 focus:border-[#F7C948] transition-all min-h-[150px] font-medium"
-              />
-            )}
-          </motion.section>
-        ))}
+            </motion.section>
+          ))}
+        </div>
 
-        {/* --- Footer / Submit --- */}
         <div className="pt-8 flex flex-col items-center gap-6">
-          {!isComplete && (
-            <div className="flex items-center gap-2 text-amber-500/80 bg-amber-500/5 px-6 py-3 rounded-full border border-amber-500/10">
-              <Info className="w-4 h-4" />
-              <span className="text-xs font-bold uppercase tracking-widest">Please answer all rating questions to submit</span>
-            </div>
-          )}
-          
           <button
             onClick={handleSubmit}
-            disabled={!isComplete}
+            disabled={!activeCycle || !isComplete || isSubmitting}
             className={`w-full max-w-md py-5 rounded-[24px] font-black text-xl transition-all flex items-center justify-center gap-3 shadow-2xl ${
-              isComplete 
-                ? 'bg-[#F7C948] text-[#0A192F] hover:bg-[#F7C948]/90 active:scale-95 shadow-yellow-500/20' 
+              activeCycle && isComplete && !isSubmitting
+                ? 'bg-[#F7C948] text-[#0A192F] hover:bg-[#F7C948]/90 active:scale-95 shadow-yellow-500/20'
                 : 'bg-[#112240] text-[#3B4C66] cursor-not-allowed border border-[#233554]'
             }`}
           >
             <Send className="w-6 h-6" />
-            Submit Survey
+            {isSubmitting ? 'Submitting...' : activeCycle ? 'Submit Survey' : 'Activation Required'}
           </button>
-          
+
           <p className="text-[#3B4C66] text-xs font-bold uppercase tracking-widest">
-            Confidentiality Guaranteed • Educational Excellence
+            Locked PEO Definitions • Educational Excellence
           </p>
         </div>
       </main>
     </div>
   );
 };
-
-// --- Icons ---
-const CalendarIcon = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-  </svg>
-);
-
-const AwardIcon = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
 
 export default AlumniSurvey;

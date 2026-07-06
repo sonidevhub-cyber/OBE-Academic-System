@@ -2,7 +2,7 @@ import { api } from './api';
 
 // ==================== STUDENT MODULE ====================
 export const studentService = {
-  getAll: (filters?: { department?: number; semester?: number; batch?: string; role?: string; search?: string; ordering?: string }) => {
+  getAll: (filters?: { department?: number; semester?: number; batch?: string; role?: string; search?: string; ordering?: string; page?: number; page_size?: number }) => {
     const params = new URLSearchParams();
     if (filters?.department) params.append('department', filters.department.toString());
     if (filters?.semester) params.append('semester', filters.semester.toString());
@@ -10,6 +10,8 @@ export const studentService = {
     if (filters?.role) params.append('role', filters.role);
     if (filters?.search) params.append('search', filters.search);
     if (filters?.ordering) params.append('ordering', filters.ordering);
+    if (filters?.page) params.append('page', filters.page.toString());
+    if (filters?.page_size) params.append('page_size', filters.page_size.toString());
     return api.get(`students/${params.toString() ? '?' + params.toString() : ''}`);
   },
   getById: (id: string | number) => api.get(`students/${id}/`),

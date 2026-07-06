@@ -36,10 +36,20 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         if program_id:
             queryset = queryset.filter(program_id=program_id)
         if batch_id:
-            # Check both the old batch field and the new assigned_batches relation
-            queryset = queryset.filter(
-                models.Q(batch_id=batch_id) | models.Q(assigned_batches__id=batch_id)
-            ).distinct()
+            # Prefer the batch's direct curriculum version so consumers do not
+            # accidentally pick a shared/source version that has no allocations.
+            from core.models.batch import Batch
+
+            direct_version_id = Batch.objects.filter(
+                pk=batch_id,
+                curriculum_version__isnull=False
+            ).values_list('curriculum_version_id', flat=True).first()
+
+            if direct_version_id:
+                queryset = queryset.filter(pk=direct_version_id)
+            else:
+                # Fall back to the legacy relation for older records.
+                queryset = queryset.filter(assigned_batches__id=batch_id).distinct()
         if status_filter:
             queryset = queryset.filter(status=status_filter)
             
@@ -49,10 +59,25 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         context = super().get_serializer_context()
         if self.action == 'retrieve':
             context['view_type'] = 'detail'
+        batch_id = self.request.query_params.get('batch')
+        if batch_id:
+            context['batch_id'] = batch_id
         return context
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
+
+        batch_id = request.query_params.get('batch')
+        if batch_id:
+            from core.models.batch import Batch
+
+            try:
+                batch = Batch.objects.get(pk=batch_id)
+                if batch.curriculum_version_id and batch.curriculum_version_id != instance.id:
+                    instance = self.get_queryset().get(pk=batch.curriculum_version_id)
+            except Batch.DoesNotExist:
+                pass
+
         serializer = self.get_serializer(instance)
         return api_response(
             data=serializer.data,
@@ -64,12 +89,11 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
         # Auto-generate version_no logic
         program = serializer.validated_data.get('program')
         existing_count = CurriculumVersion.objects.filter(program=program).count()
+        # Create empty version without auto-syncing courses
         version = serializer.save(
             created_by=self.request.user,
             version_no=f"v{existing_count + 1}.0"
         )
-        # Option A: Auto-Sync Program Courses
-        sync_courses_from_program(version)
 
     def perform_update(self, serializer):
         instance = self.get_object()

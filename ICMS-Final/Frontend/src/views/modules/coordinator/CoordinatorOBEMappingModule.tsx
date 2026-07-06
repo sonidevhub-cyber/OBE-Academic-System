@@ -13,7 +13,7 @@ import {
   LayoutGrid,
   Check
 } from 'lucide-react';
-import obeService, { PEO, GA, GAPEOMatrix } from '../../../api/obeService';
+import obeService, { PEO, GA, GAPEOMatrix, ExitSurveyQuestion } from '../../../api/obeService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
 import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../../api/curriculumService';
 import { useAuth } from '../../../context/AuthContext';
@@ -41,6 +41,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   // PEO/GA/CLO States
   const [peos, setPeos] = useState<PEO[]>([]);
   const [gas, setGas] = useState<GA[]>([]);
+  const [exitSurveyQuestions, setExitSurveyQuestions] = useState<ExitSurveyQuestion[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'peo' | 'ga' | 'clo'>('peo');
   const [editingItem, setEditingItem] = useState<any>(null);
@@ -50,13 +51,18 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     order_number: 1, 
     kpi_target: 60,
     bloom_level: 'K2',
-    performance_indicators: [] as any[]
+    performance_indicators: [] as any[],
+    alumni_survey_question_text: '',
+    exit_survey_question_text: ''
   });
 
   // Matrix States
   const [gaPeoMatrix, setGaPeoMatrix] = useState<GAPEOMatrix | null>(null);
   const [cloPiMatrix, setCloPiMatrix] = useState<any>(null);
   const [matrixChanges, setMatrixChanges] = useState<Set<string>>(new Set());
+
+  const getExitSurveyGaId = (question: ExitSurveyQuestion) =>
+    typeof question.ga === 'string' ? question.ga : question.ga.id;
 
   const fetchInitialData = useCallback(async () => {
     try {
@@ -137,16 +143,19 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const loadPeosAndGas = async (programId: string) => {
     if (!programId) return;
     try {
-      const [peoRes, gaRes] = await Promise.all([
+      const [peoRes, gaRes, questionsRes] = await Promise.all([
         obeService.getPEOs(programId),
-        obeService.getGAs(programId)
+        obeService.getGAs(programId),
+        obeService.getExitSurveyQuestions()
       ]);
       setPeos(Array.isArray(peoRes) ? peoRes : (peoRes as any).data || []);
       setGas(Array.isArray(gaRes) ? gaRes : (gaRes as any).data || []);
+      setExitSurveyQuestions(Array.isArray(questionsRes) ? questionsRes : (questionsRes as any).data || []);
     } catch (error) {
       console.error('Failed to load PEOs/GAs:', error);
       setPeos([]);
       setGas([]);
+      setExitSurveyQuestions([]);
     }
   };
 
@@ -207,6 +216,27 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const handleOpenModal = (type: 'peo' | 'ga' | 'clo', item?: any) => {
     setModalType(type);
     setEditingItem(item || null);
+    
+    let alumniSurveyQuestion = '';
+    let exitSurveyQuestion = '';
+    if (type === 'peo' && item) {
+      alumniSurveyQuestion = item.alumni_survey_question_text || (
+        item.description
+          ? `To what extent are you achieving this objective in your current professional role: ${item.description}`
+          : ''
+      );
+    }
+
+    if (type === 'ga' && item) {
+      const question = exitSurveyQuestions.find(q => getExitSurveyGaId(q) === item.id || q.ga_id === item.id);
+      if (question) {
+        exitSurveyQuestion = question.question_text;
+      } else {
+        exitSurveyQuestion = `I am confident in ${item.description}`;
+      }
+    } else if (type === 'ga') {
+      exitSurveyQuestion = '';
+    }
 
     setFormData(item ? { 
       title: item.title, 
@@ -214,14 +244,18 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       order_number: item.order_number,
       kpi_target: item.kpi_target || item.kpi_threshold || 60,
       bloom_level: item.bloom_level || 'K2',
-      performance_indicators: []
+      performance_indicators: [],
+      alumni_survey_question_text: alumniSurveyQuestion,
+      exit_survey_question_text: exitSurveyQuestion
     } : { 
       title: '', 
       description: '', 
       order_number: (type === 'peo' ? peos.length : type === 'ga' ? gas.length : clos.length) + 1,
       kpi_target: 60,
       bloom_level: 'K2',
-      performance_indicators: []
+      performance_indicators: [],
+      alumni_survey_question_text: '',
+      exit_survey_question_text: ''
     });
     setIsModalOpen(true);
   };
@@ -235,7 +269,8 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         // Prepare data with kpi_threshold instead of kpi_target for PEO
         const peoData = {
           ...formData,
-          kpi_threshold: formData.kpi_target
+          kpi_threshold: formData.kpi_target,
+          alumni_survey_question_text: formData.alumni_survey_question_text || (formData.description ? `To what extent are you achieving this objective in your current professional role: ${formData.description}` : '')
         };
         if (editingItem) {
           await obeService.updatePEO(editingItem.id, peoData);
@@ -246,11 +281,17 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         }
         loadPeosAndGas(selectedProgram.id);
       } else if (modalType === 'ga') {
+        // Prepare data with kpi_threshold and exit survey question
+        const gaData = {
+          ...formData,
+          kpi_threshold: formData.kpi_target,
+          exit_survey_question_text: formData.exit_survey_question_text || (formData.description ? `I am confident in ${formData.description}` : '')
+        };
         if (editingItem) {
-          await obeService.updateGA(editingItem.id, formData);
+          await obeService.updateGA(editingItem.id, gaData);
           toast.success('GA updated');
         } else {
-          await obeService.createGA(selectedProgram.id, formData);
+          await obeService.createGA(selectedProgram.id, gaData);
           toast.success('GA created');
         }
         loadPeosAndGas(selectedProgram.id);
@@ -501,29 +542,68 @@ const CoordinatorOBEMappingModule: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {(activeSubTab === 'peo' ? peos : gas).map((item) => (
-                  <div key={item.id} className="group p-6 bg-gray-50 rounded-2xl border border-transparent hover:border-indigo-200 hover:bg-white hover:shadow-xl transition-all duration-300">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex items-center gap-3">
-                        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-600 text-white font-black">
-                          {item.order_number}
-                        </span>
-                        <h4 className="font-bold text-gray-900 text-lg">{item.title}</h4>
+                {(activeSubTab === 'peo' ? peos : gas).map((item) => {
+                  const question = activeSubTab === 'ga' 
+                    ? exitSurveyQuestions.find(q => getExitSurveyGaId(q) === item.id || q.ga_id === item.id)
+                    : null;
+                  const alumniQuestionText = activeSubTab === 'peo'
+                    ? ((item as PEO).alumni_survey_question_text || (
+                        item.description
+                          ? `To what extent are you achieving this objective in your current professional role: ${item.description}`
+                          : ''
+                      ))
+                    : null;
+                     
+                  return (
+                    <div key={item.id} className="group p-6 bg-gray-50 rounded-2xl border border-transparent hover:border-indigo-200 hover:bg-white hover:shadow-xl transition-all duration-300">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-600 text-white font-black">
+                            {item.order_number}
+                          </span>
+                          <h4 className="font-bold text-gray-900 text-lg">{item.title}</h4>
+                        </div>
+                        {isHOD && (
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => handleOpenModal(activeSubTab, item)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg">
+                              <Settings size={18} />
+                            </button>
+                            <button onClick={() => handleDeleteItem(activeSubTab, item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      {isHOD && (
-                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => handleOpenModal(activeSubTab, item)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg">
-                            <Settings size={18} />
-                          </button>
-                          <button onClick={() => handleDeleteItem(activeSubTab, item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
-                            <Trash2 size={18} />
-                          </button>
+                      <p className="text-gray-600 text-sm leading-relaxed mb-4">{item.description}</p>
+                      
+                      {activeSubTab === 'peo' && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Alumni Survey Question</label>
+                          <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-xl border border-gray-200">
+                            <div className="px-2 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                              Locked
+                            </div>
+                            <p className="text-sm text-gray-700 font-medium flex-1">
+                              {alumniQuestionText || 'No alumni survey question available'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {activeSubTab === 'ga' && question && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Exit Survey Question</label>
+                          <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-xl border border-gray-200">
+                            <div className={`px-2 py-1 rounded-full text-xs font-bold ${question.is_locked ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {question.is_locked ? 'Locked' : 'Unlocked'}
+                            </div>
+                            <p className="text-sm text-gray-700 font-medium flex-1">{question.question_text}</p>
+                          </div>
                         </div>
                       )}
                     </div>
-                    <p className="text-gray-600 text-sm leading-relaxed">{item.description}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -798,15 +878,58 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                   )}
                 </div>
                 <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
-                  <textarea
-                    required
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    placeholder="Provide a detailed description..."
-                    className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-                  />
-                </div>
+          <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
+          <textarea
+            required
+            value={formData.description}
+            onChange={(e) => {
+              const newDescription = e.target.value;
+              // Auto-update survey questions when the user is still using the defaults
+              const alumniAutoQuestion = `To what extent are you achieving this objective in your current professional role: ${newDescription}`;
+              const exitAutoQuestion = `I am confident in ${newDescription}`;
+              setFormData({
+                ...formData, 
+                description: newDescription, 
+                alumni_survey_question_text: formData.alumni_survey_question_text === '' || formData.alumni_survey_question_text.startsWith('To what extent are you achieving this objective in your current professional role')
+                  ? alumniAutoQuestion
+                  : formData.alumni_survey_question_text,
+                exit_survey_question_text: formData.exit_survey_question_text === '' || formData.exit_survey_question_text.startsWith('I am confident in ') 
+                  ? exitAutoQuestion 
+                  : formData.exit_survey_question_text
+              });
+            }}
+            placeholder="Provide a detailed description..."
+            className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+          />
+        </div>
+
+        {modalType === 'peo' && (
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Alumni Survey Question</label>
+            <textarea
+              required
+              value={formData.alumni_survey_question_text}
+              onChange={(e) => setFormData({...formData, alumni_survey_question_text: e.target.value})}
+              placeholder="Enter the alumni survey question for this PEO..."
+              className="w-full h-24 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+            />
+            <p className="text-xs text-gray-500 mt-2">This question will be shown to alumni during alumni survey.</p>
+          </div>
+        )}
+        
+        {modalType === 'ga' && (
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Exit Survey Question</label>
+            <textarea
+              required
+              value={formData.exit_survey_question_text}
+              onChange={(e) => setFormData({...formData, exit_survey_question_text: e.target.value})}
+              placeholder="Enter the exit survey question for this GA..."
+              className="w-full h-24 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+            />
+            <p className="text-xs text-gray-500 mt-2">This question will be shown to students during exit survey.</p>
+          </div>
+        )}
                 <div className="flex gap-4 pt-4">
                   <button
                     type="button"

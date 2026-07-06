@@ -237,6 +237,8 @@ const GAReport: React.FC = () => {
       'Type',
       'GA Code',
       'GA Title',
+      'Direct Score',
+      'Indirect Score',
       'GA Attainment',
       'KPI Threshold',
       'Status',
@@ -244,7 +246,8 @@ const GAReport: React.FC = () => {
       'Course Name',
       'Semester',
       'Credits',
-      'Course GA Score',
+      'Course Direct Score',
+      'Course Indirect Score',
       'Enrolled Students'
     ]);
     
@@ -256,6 +259,8 @@ const GAReport: React.FC = () => {
         'GA Summary',
         ga.ga_code,
         ga.ga_title,
+        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
+        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
         ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
         (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
         ga.status,
@@ -271,8 +276,10 @@ const GAReport: React.FC = () => {
       (ga.contributing_courses || []).forEach((course) => {
         summaryData.push([
           'Contributing Course',
-          ga.ga_code,
-          ga.ga_title,
+          '', // Empty GA code for contributing course rows (so it doesn't repeat)
+          '', // Empty GA title for contributing course rows
+          '',
+          '',
           '',
           '',
           '',
@@ -281,6 +288,7 @@ const GAReport: React.FC = () => {
           course.semester || '',
           course.credits || '',
           course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
+          course.course_feedback_score ? course.course_feedback_score.toFixed(1) + '%' : '—',
           course.enrolled_students || ''
         ]);
       });
@@ -293,11 +301,11 @@ const GAReport: React.FC = () => {
     
     // Style Summary Sheet
     const summaryMerges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, // Program name
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } }, // Department
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } }, // Batch
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 11 } }, // Report title
-      { s: { r: 4, c: 0 }, e: { r: 4, c: 11 } }  // Date
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 13 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 13 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 13 } },
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 13 } }
     ];
     
     summaryWs['!merges'] = summaryMerges;
@@ -305,7 +313,7 @@ const GAReport: React.FC = () => {
     const summaryRange = XLSX.utils.decode_range(summaryWs['!ref'] || 'A1');
     
     for (let R = 0; R <= summaryRange.e.r; ++R) {
-      for (let C = 0; C <= 11; ++C) {
+      for (let C = 0; C <= 13; ++C) {
         const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
         if (!summaryWs[cell_address]) continue;
         
@@ -348,6 +356,8 @@ const GAReport: React.FC = () => {
       { wch: 20 },
       { wch: 15 },
       { wch: 30 },
+      { wch: 15 }, // Direct Score
+      { wch: 15 }, // Indirect Score
       { wch: 15 },
       { wch: 15 },
       { wch: 15 },
@@ -355,7 +365,8 @@ const GAReport: React.FC = () => {
       { wch: 30 },
       { wch: 10 },
       { wch: 10 },
-      { wch: 18 },
+      { wch: 18 }, // Course Direct Score
+      { wch: 18 }, // Course Indirect Score
       { wch: 18 }
     ];
     
@@ -387,6 +398,8 @@ const GAReport: React.FC = () => {
         'GA Summary',
         ga.ga_code,
         ga.ga_title,
+        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
+        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
         ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
         (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
         ga.status
@@ -400,6 +413,8 @@ const GAReport: React.FC = () => {
         '',
         '',
         '',
+        '',
+        '',
         ''
       ]);
       wsData.push([
@@ -408,7 +423,9 @@ const GAReport: React.FC = () => {
         'Semester',
         'Credits',
         'Course GA Score',
-        'Enrolled Students'
+        'Enrolled Students',
+        '',
+        ''
       ]);
       
       // Add contributing courses
@@ -419,7 +436,9 @@ const GAReport: React.FC = () => {
           course.semester || '',
           course.credits || '',
           course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
-          course.enrolled_students || ''
+          course.enrolled_students || '',
+          '',
+          ''
         ]);
       });
       
@@ -432,11 +451,11 @@ const GAReport: React.FC = () => {
     
     // Style header (blue, bold, merged)
     const merges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Program name
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }, // Department
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }, // Batch
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } }, // Report title
-      { s: { r: 4, c: 0 }, e: { r: 4, c: 5 } }  // Date
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 7 } },
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 7 } }
     ];
     
     ws['!merges'] = merges;
@@ -446,7 +465,7 @@ const GAReport: React.FC = () => {
     
     // Apply styles
     for (let R = 0; R <= range.e.r; ++R) {
-      for (let C = 0; C <= 5; ++C) {
+      for (let C = 0; C <= 7; ++C) {
         const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
         if (!ws[cell_address]) continue;
         
@@ -492,8 +511,10 @@ const GAReport: React.FC = () => {
     ws['!cols'] = [
       { wch: 20 },
       { wch: 40 },
-      { wch: 10 },
-      { wch: 10 },
+      { wch: 15 }, // Direct Score
+      { wch: 15 }, // Indirect Score
+      { wch: 15 },
+      { wch: 15 },
       { wch: 20 },
       { wch: 20 }
     ];
@@ -649,18 +670,37 @@ const GAReport: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div className="bg-slate-50 p-3 rounded-lg">
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
                         <div className="text-xs font-bold text-slate-400 uppercase mb-1">Direct Score</div>
                         <div className="text-xl font-bold text-slate-700">
                           {ga.direct_score !== null ? `${ga.direct_score.toFixed(1)}%` : 'N/A'}
                         </div>
                       </div>
-                      <div className="bg-slate-50 p-3 rounded-lg">
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Course Feedback</div>
+                        <div className="text-xl font-bold text-fuchsia-600">
+                          {ga.course_feedback_score !== null && ga.course_feedback_score !== undefined ? `${ga.course_feedback_score.toFixed(1)}%` : 'N/A'}
+                        </div>
+                        <div className="text-[11px] font-semibold text-slate-400 mt-1">
+                          Coverage: {ga.course_feedback_coverage !== null && ga.course_feedback_coverage !== undefined ? `${ga.course_feedback_coverage.toFixed(1)}%` : 'N/A'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Exit Survey</div>
+                        <div className="text-xl font-bold text-rose-500">
+                          {ga.exit_survey_score !== null && ga.exit_survey_score !== undefined ? `${ga.exit_survey_score.toFixed(1)}%` : 'N/A'}
+                        </div>
+                        <div className="text-[11px] font-semibold text-slate-400 mt-1">
+                          Coverage: {ga.exit_survey_coverage !== null && ga.exit_survey_coverage !== undefined ? `${ga.exit_survey_coverage.toFixed(1)}%` : 'N/A'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
                         <div className="text-xs font-bold text-slate-400 uppercase mb-1">Indirect Score</div>
                         <div className="text-xl font-bold text-slate-700">
                           {ga.indirect_score !== null ? `${ga.indirect_score.toFixed(1)}%` : 'N/A'}
                         </div>
+                        <div className="text-[11px] font-semibold text-slate-400 mt-1">Combined CF + Exit</div>
                       </div>
                     </div>
                     <div className="relative pt-2 pb-1">
@@ -726,7 +766,10 @@ const GAReport: React.FC = () => {
                                 Credits
                               </th>
                               <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                GA Score
+                                Direct Score
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                Indirect Score
                               </th>
                               <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
                                 Enrolled Students
@@ -760,6 +803,9 @@ const GAReport: React.FC = () => {
                                     >
                                       {course.course_ga_score.toFixed(1)}%
                                     </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-sm font-black text-indigo-600">
+                                    {course.course_feedback_score?.toFixed(1) ?? '—'}%
                                   </td>
                                   <td className="px-4 py-3 text-center text-sm text-slate-600">
                                     {course.enrolled_students}

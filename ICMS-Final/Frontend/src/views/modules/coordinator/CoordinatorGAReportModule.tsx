@@ -12,6 +12,7 @@ const CoordinatorGAReportModule: React.FC = () => {
   const [batches, setBatches] = useState<any[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [reportData, setReportData] = useState<GAReportItem[] | ReadinessResponse | BatchGAReportResponse | null>(null);
+  const [previousSemesterReport, setPreviousSemesterReport] = useState<{ semester: { id: string | null; number: number | null; name: string | null }; ga_reports: any[] } | null>(null);
   const [isProgramEndReady, setIsProgramEndReady] = useState<boolean>(false);
   const [expandedGAs, setExpandedGAs] = useState<string[]>([]);
   const [expandedCqiForm, setExpandedCqiForm] = useState<string | null>(null);
@@ -53,6 +54,7 @@ const CoordinatorGAReportModule: React.FC = () => {
       if (!selectedBatchId) {
         setReportData(null);
         setIsProgramEndReady(false);
+        setPreviousSemesterReport(null);
         return;
       }
 
@@ -67,9 +69,17 @@ const CoordinatorGAReportModule: React.FC = () => {
         } else {
           setIsProgramEndReady(false);
         }
+
+        if (data && 'ready' in data && !data.ready) {
+          const previous = await obeService.getSemesterGASummary(selectedBatchId);
+          setPreviousSemesterReport(previous);
+        } else {
+          setPreviousSemesterReport(null);
+        }
       } catch (error) {
         console.error("Error fetching report:", error);
         toast.error('Failed to fetch GA report');
+        setPreviousSemesterReport(null);
       } finally {
         setLoading(false);
       }
@@ -282,6 +292,8 @@ const CoordinatorGAReportModule: React.FC = () => {
       'Type',
       'GA Code',
       'GA Title',
+      'Direct Score',
+      'Indirect Score',
       'GA Attainment',
       'KPI Threshold',
       'Status',
@@ -289,7 +301,8 @@ const CoordinatorGAReportModule: React.FC = () => {
       'Course Name',
       'Semester',
       'Credits',
-      'Course GA Score',
+      'Course Direct Score',
+      'Course Indirect Score',
       'Enrolled Students'
     ]);
     
@@ -301,6 +314,8 @@ const CoordinatorGAReportModule: React.FC = () => {
         'GA Summary',
         ga.ga_code,
         ga.ga_title,
+        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
+        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
         ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
         (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
         ga.status,
@@ -316,8 +331,10 @@ const CoordinatorGAReportModule: React.FC = () => {
       (ga.contributing_courses || []).forEach((course) => {
         summaryData.push([
           'Contributing Course',
-          ga.ga_code,
-          ga.ga_title,
+          '', // Empty GA code for contributing course rows (so it doesn't repeat)
+          '', // Empty GA title for contributing course rows
+          '',
+          '',
           '',
           '',
           '',
@@ -326,6 +343,7 @@ const CoordinatorGAReportModule: React.FC = () => {
           course.semester || '',
           course.credits || '',
           course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
+          course.course_feedback_score ? course.course_feedback_score.toFixed(1) + '%' : '—',
           course.enrolled_students || ''
         ]);
       });
@@ -338,9 +356,9 @@ const CoordinatorGAReportModule: React.FC = () => {
     
     // Style Summary Sheet
     const summaryMerges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, // Program name
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } }, // Report title
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } }  // Date
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 13 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 13 } }
     ];
     
     summaryWs['!merges'] = summaryMerges;
@@ -349,7 +367,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     const columnHeaderRow = 3;
     
     for (let R = 0; R <= summaryRange.e.r; ++R) {
-      for (let C = 0; C <= 11; ++C) {
+      for (let C = 0; C <= 13; ++C) {
         const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
         if (!summaryWs[cell_address]) continue;
         
@@ -392,6 +410,8 @@ const CoordinatorGAReportModule: React.FC = () => {
       { wch: 20 },
       { wch: 15 },
       { wch: 30 },
+      { wch: 15 }, // Direct Score
+      { wch: 15 }, // Indirect Score
       { wch: 15 },
       { wch: 15 },
       { wch: 15 },
@@ -399,7 +419,8 @@ const CoordinatorGAReportModule: React.FC = () => {
       { wch: 30 },
       { wch: 10 },
       { wch: 10 },
-      { wch: 18 },
+      { wch: 18 }, // Course Direct Score
+      { wch: 18 }, // Course Indirect Score
       { wch: 18 }
     ];
     
@@ -428,6 +449,8 @@ const CoordinatorGAReportModule: React.FC = () => {
         'GA Summary',
         ga.ga_code,
         ga.ga_title,
+        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
+        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
         ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
         (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
         ga.status
@@ -437,6 +460,8 @@ const CoordinatorGAReportModule: React.FC = () => {
       // Add contributing courses header
       wsData.push([
         'Contributing Courses',
+        '',
+        '',
         '',
         '',
         '',
@@ -451,7 +476,9 @@ const CoordinatorGAReportModule: React.FC = () => {
         'Semester',
         'Credits',
         'Course GA Score',
-        'Enrolled Students'
+        'Enrolled Students',
+        '',
+        ''
       ]);
       
       // Add contributing courses
@@ -462,7 +489,9 @@ const CoordinatorGAReportModule: React.FC = () => {
           course.semester || '',
           course.credits || '',
           course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
-          course.enrolled_students || ''
+          course.enrolled_students || '',
+          '',
+          ''
         ]);
       });
       
@@ -475,9 +504,9 @@ const CoordinatorGAReportModule: React.FC = () => {
     
     // Style header (blue, bold, merged)
     const merges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Program name
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }, // Report title
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } }  // Date
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } }
     ];
     
     ws['!merges'] = merges;
@@ -487,7 +516,7 @@ const CoordinatorGAReportModule: React.FC = () => {
     
     // Apply styles
     for (let R = 0; R <= range.e.r; ++R) {
-      for (let C = 0; C <= 5; ++C) {
+      for (let C = 0; C <= 7; ++C) {
         const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
         if (!ws[cell_address]) continue;
         
@@ -533,8 +562,10 @@ const CoordinatorGAReportModule: React.FC = () => {
     ws['!cols'] = [
       { wch: 20 },
       { wch: 40 },
-      { wch: 10 },
-      { wch: 10 },
+      { wch: 15 }, // Direct Score
+      { wch: 15 }, // Indirect Score
+      { wch: 15 },
+      { wch: 15 },
       { wch: 20 },
       { wch: 20 }
     ];
@@ -722,6 +753,210 @@ const CoordinatorGAReportModule: React.FC = () => {
               )}
             </ul>
           </div>
+
+          {previousSemesterReport?.ga_reports?.length ? (
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xl font-black text-gray-900">Previous Finalized Semester Report</h3>
+                  <p className="text-sm text-gray-500 font-semibold mt-1">
+                    {previousSemesterReport.semester?.name
+                      ? `${previousSemesterReport.semester.name}`
+                      : previousSemesterReport.semester?.number
+                        ? `Semester ${previousSemesterReport.semester.number}`
+                        : 'Latest finalized semester'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {previousSemesterReport.ga_reports.map((ga: GAReportItem) => {
+                  const isExpanded = expandedGAs.includes(ga.ga_code);
+
+                  return (
+                    <motion.div
+                      key={ga.ga_id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+                    >
+                      <div
+                        className="p-6 flex items-center justify-between cursor-pointer"
+                        onClick={() => toggleGAExpansion(ga.ga_code)}
+                      >
+                        <div className="flex items-center gap-4">
+                          {isExpanded ? <ChevronDown size={20} className="text-gray-500" /> : <ChevronRight size={20} className="text-gray-500" />}
+                          <div>
+                            <div className="flex items-center gap-3 mb-1">
+                              <h4 className="text-xl font-bold text-gray-800">{ga.ga_code}</h4>
+                              <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(ga.status)}`}>
+                                {getStatusIcon(ga.status)}
+                                {ga.status}
+                              </span>
+                            </div>
+                            <p className="text-gray-600 font-medium">{ga.ga_title}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                          <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Direct Score</p>
+                            <p className="text-xl font-bold text-indigo-600">{ga.direct_score?.toFixed(1) ?? '—'}%</p>
+                          </div>
+
+                          <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Course Feedback</p>
+                            <p className="text-xl font-bold text-fuchsia-500">{ga.course_feedback_score?.toFixed(1) ?? '—'}%</p>
+                            <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                              Coverage: {ga.course_feedback_coverage?.toFixed(1) ?? '—'}%
+                            </p>
+                          </div>
+
+                          <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Exit Survey</p>
+                            <p className="text-xl font-bold text-rose-500">{ga.exit_survey_score?.toFixed(1) ?? '—'}%</p>
+                            <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                              Coverage: {ga.exit_survey_coverage?.toFixed(1) ?? '—'}%
+                            </p>
+                          </div>
+
+                          <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Indirect Score</p>
+                            <p className="text-xl font-bold text-pink-500">{ga.indirect_score?.toFixed(1) ?? '—'}%</p>
+                            <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                              Combined CF + Exit
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl bg-gray-50 p-4 border border-gray-100 text-center">
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Final Score</p>
+                          <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
+                          <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="border-t border-gray-100 bg-gray-50 p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <h5 className="text-sm font-black text-gray-400 uppercase tracking-widest">Contributing Courses</h5>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-bold text-gray-500">Sort by:</label>
+                              <select
+                                className="bg-white border border-gray-200 rounded-lg px-3 py-1 text-sm font-bold text-gray-700"
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                              >
+                                <option value="course_code">Course Code</option>
+                                <option value="course_ga_score">GA Score</option>
+                                <option value="semester">Semester</option>
+                                <option value="credits">Credits</option>
+                              </select>
+                              <button
+                                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                                className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1 text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all"
+                              >
+                                {sortOrder === 'asc' ? 'Asc' : 'Desc'}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white mb-6">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="bg-gray-50">
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Course</th>
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Semester</th>
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Credits</th>
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Direct Score</th>
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Indirect Score</th>
+                                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Enrolled Students</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {getSortedFilteredCourses(ga.contributing_courses ?? [], ga.ga_kpi_threshold).map((course: any, idx: number) => {
+                                  const isBelowTarget = course.course_ga_score < ga.ga_kpi_threshold;
+                                  return (
+                                    <tr key={idx} className={`border-t border-gray-100 hover:bg-gray-50 transition-colors ${isBelowTarget ? 'bg-red-50' : ''}`}>
+                                      <td className="px-4 py-3">
+                                        <div className="font-bold text-gray-700">
+                                          {course.course_code ?? 'N/A'}
+                                        </div>
+                                        <div className="text-sm text-gray-600">
+                                          {course.course_name ?? 'N/A'}
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-center font-bold text-gray-700">
+                                        {course.semester ?? 'N/A'}
+                                      </td>
+                                      <td className="px-4 py-3 text-center font-bold text-gray-700">
+                                        {course.credits ?? 'N/A'}
+                                      </td>
+                                      <td className="px-4 py-3 text-center font-bold">
+                                        <span className={isBelowTarget ? 'text-red-600' : 'text-emerald-600'}>
+                                          {course.course_ga_score?.toFixed(1) ?? '0.0'}%
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-center font-bold text-indigo-600">
+                                        {course.course_feedback_score?.toFixed(1) ?? '—'}%
+                                      </td>
+                                      <td className="px-4 py-3 text-center font-bold text-gray-700">{course.enrolled_students ?? '0'}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {ga.ga_cqi_records && ga.ga_cqi_records.length > 0 && (
+                            <div>
+                              <h5 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">GA CQI Records</h5>
+                              <div className="space-y-4">
+                                {ga.ga_cqi_records.map((cqi: any) => (
+                                  <div key={cqi.id ?? `cqi-${Math.random()}`} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                                    <div
+                                      className="p-4 flex items-center justify-between cursor-pointer bg-gray-50"
+                                      onClick={() => toggleCqiForm(cqi.id ?? '')}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        {expandedCqiForm === cqi.id ? <ChevronDown size={18} className="text-gray-500" /> : <ChevronRight size={18} className="text-gray-500" />}
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(cqi.status ?? '')}`}>
+                                              {getStatusIcon(cqi.status ?? '')}
+                                              {cqi.status ?? 'N/A'}
+                                            </span>
+                                            <span className="text-sm font-bold text-gray-700">
+                                              {cqi.cqi_level === 'SEMESTER' ? 'Semester End CQI' : cqi.cqi_level === 'CUMULATIVE' ? 'Program End CQI' : cqi.cqi_level ?? 'N/A'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleHistory(cqi.id ?? '');
+                                          }}
+                                          className="flex items-center gap-1 text-gray-500 hover:text-indigo-600 font-medium text-sm"
+                                        >
+                                          <History size={16} />
+                                          History
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -816,25 +1051,41 @@ const CoordinatorGAReportModule: React.FC = () => {
                     </div>
 
                     {/* GA Scores */}
-                    <div className="flex items-center gap-6">
-                      {/* Direct Score */}
-                      <div className="text-center">
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                      <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
                         <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Direct Score</p>
-                        <p className="text-xl font-bold text-indigo-600">{ga.direct_score?.toFixed(1) ?? '0.0'}%</p>
+                        <p className="text-xl font-bold text-indigo-600">{ga.direct_score?.toFixed(1) ?? '—'}%</p>
                       </div>
-                      
-                      {/* Indirect Score */}
-                      <div className="text-center">
+
+                      <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Course Feedback</p>
+                        <p className="text-xl font-bold text-fuchsia-500">{ga.course_feedback_score?.toFixed(1) ?? '—'}%</p>
+                        <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                          Coverage: {ga.course_feedback_coverage?.toFixed(1) ?? '—'}%
+                        </p>
+                      </div>
+
+                      <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Exit Survey</p>
+                        <p className="text-xl font-bold text-rose-500">{ga.exit_survey_score?.toFixed(1) ?? '—'}%</p>
+                        <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                          Coverage: {ga.exit_survey_coverage?.toFixed(1) ?? '—'}%
+                        </p>
+                      </div>
+
+                      <div className="text-center rounded-2xl bg-gray-50 p-4 border border-gray-100">
                         <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Indirect Score</p>
                         <p className="text-xl font-bold text-pink-500">{ga.indirect_score?.toFixed(1) ?? '—'}%</p>
+                        <p className="text-[11px] font-semibold text-gray-400 mt-1">
+                          Combined CF + Exit
+                        </p>
                       </div>
-                      
-                      {/* GA Attainment (Final Score) */}
-                      <div className="text-center">
-                        <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Final Score</p>
-                        <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
-                        <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
-                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl bg-gray-50 p-4 border border-gray-100 text-center">
+                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Final Score</p>
+                      <p className="text-2xl font-black text-gray-900">{ga.ga_attainment?.toFixed(1) ?? '0.0'}%</p>
+                      <p className="text-xs text-gray-500">KPI: {ga.ga_kpi_threshold?.toFixed(1) ?? '0.0'}%</p>
                     </div>
                   </div>
 
@@ -870,7 +1121,8 @@ const CoordinatorGAReportModule: React.FC = () => {
                               <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Course</th>
                               <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Semester</th>
                               <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Credits</th>
-                              <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Course GA Score</th>
+                              <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Direct Score</th>
+                              <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Indirect Score</th>
                               <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Enrolled Students</th>
                             </tr>
                           </thead>
@@ -897,6 +1149,9 @@ const CoordinatorGAReportModule: React.FC = () => {
                                     <span className={isBelowTarget ? 'text-red-600' : 'text-emerald-600'}>
                                       {course.course_ga_score?.toFixed(1) ?? '0.0'}%
                                     </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center font-bold text-indigo-600">
+                                    {course.course_feedback_score?.toFixed(1) ?? '—'}%
                                   </td>
                                   <td className="px-4 py-3 text-center font-bold text-gray-700">{course.enrolled_students ?? '0'}</td>
                                 </tr>

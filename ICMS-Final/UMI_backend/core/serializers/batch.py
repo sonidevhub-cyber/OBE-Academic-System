@@ -54,10 +54,34 @@ class BatchCreateSerializer(serializers.ModelSerializer):
         return new_batch
 
 
+from core.models.program import Program
+
+class ProgramSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Program
+        fields = "__all__"
+        
 class BatchListSerializer(serializers.ModelSerializer):
     program_name = serializers.CharField(source='program.name', read_only=True)
+    program_id = serializers.CharField(source='program.id', read_only=True)
+    curriculum_version_id = serializers.IntegerField(source='curriculum_version.id', read_only=True, allow_null=True)
     curriculum_version_no = serializers.CharField(source='curriculum_version.version_no', read_only=True)
     student_count = serializers.SerializerMethodField()
+    program = ProgramSerializer(read_only=True)
+    is_graduating_eligible = serializers.BooleanField(read_only=True)
+    pending_exit_survey_count = serializers.IntegerField(read_only=True)
+    exit_survey_enabled = serializers.BooleanField(read_only=True)
+    exit_survey_enabled_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    alumni_feedback_enabled = serializers.BooleanField(read_only=True)
+    alumni_feedback_enabled_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    graduation_status = serializers.CharField(read_only=True)
+    is_program_end_ready = serializers.BooleanField(read_only=True)
+    is_alumni_feedback_eligible = serializers.BooleanField(read_only=True)
+    alumni_feedback_cycle_status = serializers.SerializerMethodField()
+    alumni_feedback_due_at = serializers.SerializerMethodField()
+    alumni_feedback_response_rate = serializers.SerializerMethodField()
+    alumni_feedback_response_count = serializers.SerializerMethodField()
+    alumni_feedback_total_alumni = serializers.SerializerMethodField()
 
     class Meta:
         model = Batch
@@ -66,15 +90,32 @@ class BatchListSerializer(serializers.ModelSerializer):
             'custom_id',
             'name',
             'program_name',
+            'program_id',
             'session_type',
             'start_year',
             'end_year',
             'current_semester',
             'status',
+            'curriculum_version_id',
             'curriculum_version_no',
             'graduated_at',
             'is_active',
             'student_count',
+            'program',
+            'is_graduating_eligible',
+            'pending_exit_survey_count',
+            'exit_survey_enabled',
+            'exit_survey_enabled_at',
+            'alumni_feedback_enabled',
+            'alumni_feedback_enabled_at',
+            'graduation_status',
+            'is_program_end_ready',
+            'is_alumni_feedback_eligible',
+            'alumni_feedback_cycle_status',
+            'alumni_feedback_due_at',
+            'alumni_feedback_response_rate',
+            'alumni_feedback_response_count',
+            'alumni_feedback_total_alumni',
         ]
 
     def get_student_count(self, obj):
@@ -90,3 +131,39 @@ class BatchListSerializer(serializers.ModelSerializer):
         ).filter(
             Q(role__iexact='student') | Q(role__iexact='alumni')
         ).count()
+
+    def _get_alumni_cycle(self, obj):
+        return obj.alumni_survey_cycles.filter(
+            survey_window='2_YEARS',
+            is_active=True
+        ).order_by('-created_at').first()
+
+    def get_alumni_feedback_cycle_status(self, obj):
+        cycle = self._get_alumni_cycle(obj)
+        return cycle.status if cycle else None
+
+    def get_alumni_feedback_due_at(self, obj):
+        cycle = self._get_alumni_cycle(obj)
+        return cycle.due_at if cycle else None
+
+    def get_alumni_feedback_response_count(self, obj):
+        cycle = self._get_alumni_cycle(obj)
+        if not cycle:
+            return 0
+        return cycle.responses.filter(is_active=True).values('student').distinct().count()
+
+    def get_alumni_feedback_total_alumni(self, obj):
+        from django.contrib.auth import get_user_model
+        user_model = get_user_model()
+        return user_model.objects.filter(
+            batch=obj,
+            role__iexact='alumni',
+            is_active=True
+        ).count()
+
+    def get_alumni_feedback_response_rate(self, obj):
+        total = self.get_alumni_feedback_total_alumni(obj)
+        if not total:
+            return 0
+        responses = self.get_alumni_feedback_response_count(obj)
+        return round((responses / total) * 100, 2)

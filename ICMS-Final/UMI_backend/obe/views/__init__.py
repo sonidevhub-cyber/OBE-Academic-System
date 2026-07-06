@@ -10,6 +10,7 @@ from .peo_views import (
     AlumniSurveyCycleActivateView,
     AlumniSurveyCycleCloseView,
     AlumniSurveyResponseView,
+    BatchToggleAlumniFeedbackView,
     PEOIndirectScoreView
 )
 from .ga_views import (
@@ -41,14 +42,13 @@ from .ga_views import (
     ExitSurveyQuestionListView,
     ExitSurveyQuestionGenerateView,
     ExitSurveyTemplateStatusView,
-    ExitSurveyTemplateLockView,
-    ExitSurveyTemplateUnlockView,
     BatchToggleExitSurveyView,
     BatchInitiateGraduationView,
     BatchPendingExitSurveyView,
     ExitSurveyMyQuestionsView,
     ExitSurveySubmitView,
-    StudentPortalStatusView
+    StudentPortalStatusView,
+    EnableResultEditingView,
 )
 from .clo_views import (
     CLOListCreateView,
@@ -117,9 +117,8 @@ __all__ = [
     'ExitSurveyQuestionListView',
     'ExitSurveyQuestionGenerateView',
     'ExitSurveyTemplateStatusView',
-    'ExitSurveyTemplateLockView',
-    'ExitSurveyTemplateUnlockView',
     'BatchToggleExitSurveyView',
+    'BatchToggleAlumniFeedbackView',
     'BatchInitiateGraduationView',
     'BatchPendingExitSurveyView',
     'ExitSurveyMyQuestionsView',
@@ -133,6 +132,7 @@ __all__ = [
     'AlumniSurveyCycleActivateView',
     'AlumniSurveyCycleCloseView',
     'AlumniSurveyResponseView',
-    'PEOIndirectScoreView'
+    'PEOIndirectScoreView',
+    'EnableResultEditingView'
 ]
 

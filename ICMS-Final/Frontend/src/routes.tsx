@@ -23,8 +23,7 @@ import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVe
 import GAReport from './pages/GAReport';
 import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
-import AlumniDashboard from './pages/alumni/AlumniDashboard';
-import AlumniSurvey from './pages/alumni/AlumniSurvey';
+import { AlumniDashboard, AlumniSurvey } from './pages/alumni';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';

@@ -62,21 +62,44 @@ class CurriculumVersionSerializer(serializers.ModelSerializer):
         if self.context.get('view_type') == 'detail':
             from coordinators.models import TeacherAllocation
             from coordinators.serializers import TeacherAllocationSerializer
+            from core.models.batch import Batch
             courses = instance.version_courses.filter(is_active=True)
             grouped_courses = {}
+            
+            batch_id = self.context.get('batch_id')
+            print(f"[CurriculumVersionSerializer] Batch ID from context: {batch_id}")
+            batch = None
+            if batch_id:
+                try:
+                    batch = Batch.objects.get(pk=batch_id)
+                    print(f"[CurriculumVersionSerializer] Found batch: {batch}")
+                except Batch.DoesNotExist:
+                    print(f"[CurriculumVersionSerializer] Batch {batch_id} does not exist!")
+            
             for vc in courses:
                 sem_key = f"semester_{vc.semester_no}"
                 if sem_key not in grouped_courses:
                     grouped_courses[sem_key] = []
                 
-                # In a real scenario, we'd add allocation info here from Module 2
                 course_data = CurriculumVersionCourseSerializer(vc).data
-                # Try to get allocation (Module 2)
-                allocation = TeacherAllocation.objects.filter(
+                print(f"[CurriculumVersionSerializer] Processing course: {vc.course.code} (id={vc.course.id}), semester: {vc.semester_no}")
+                
+                # Try to get allocation
+                allocation_query = TeacherAllocation.objects.filter(
                     curriculum_version=instance, 
                     course=vc.course, 
                     status='active'
-                ).first()
+                )
+                print(f"[CurriculumVersionSerializer] Allocation query (without batch): {allocation_query.query}")
+                print(f"[CurriculumVersionSerializer] Allocations found (without batch): {allocation_query.count()}")
+                if batch:
+                    allocation_query = allocation_query.filter(batch=batch)
+                    print(f"[CurriculumVersionSerializer] Allocation query (with batch): {allocation_query.query}")
+                    print(f"[CurriculumVersionSerializer] Allocations found (with batch): {allocation_query.count()}")
+                
+                allocation = allocation_query.first()
+                print(f"[CurriculumVersionSerializer] Final allocation for {vc.course.code}: {allocation}")
+                
                 course_data['allocation'] = TeacherAllocationSerializer(allocation).data if allocation else None
                 
                 grouped_courses[sem_key].append(course_data)

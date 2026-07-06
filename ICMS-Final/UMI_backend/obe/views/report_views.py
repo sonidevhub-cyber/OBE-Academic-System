@@ -34,8 +34,9 @@ class AlumniDashboardView(APIView):
         except Student.DoesNotExist:
             return Response({"error": "Student profile not found"}, status=status.HTTP_404_NOT_FOUND)
         
-        # Get batch info
-        batch = student.batch
+        # Prefer the student profile batch, but fall back to the auth user's batch/original_batch
+        # for alumni records that were moved or partially migrated.
+        batch = student.batch or getattr(user, 'batch', None) or getattr(user, 'original_batch', None)
         program = batch.program if batch else None
         
         # Get all course sessions for the student's batch (current and past semesters)
@@ -133,7 +134,9 @@ class AlumniDashboardView(APIView):
         return Response({
             "name": student.name,
             "roll_no": student.registration_number,
+            "batch_id": str(batch.id) if batch else None,
             "batch": batch.name if batch else "N/A",
+            "program_id": str(program.id) if program else None,
             "program": program.name if program else "N/A",
             "graduation_year": "",  # To be added when available
             "cgpa": cgpa,
@@ -180,17 +183,22 @@ class CourseCLOReportView(APIView):
         for a in assessments:
             print(f"DEBUG: Assessment {a.id} ({a.title}): course={a.course.id if a.course else None}, batch={a.batch.id if a.batch else None}, semester={a.semester.id if a.semester else None}")
         
-        # Get CLOs that are either:
-        # 1. Linked to any question in these assessments, OR
-        # 2. Associated with the session's curriculum version (if any)
+        # Get CLOs that are:
+        # - From the batch's curriculum version, or (if no version) from questions
         clos_query = Q()
         if version:
+            # Only take CLOs from this curriculum version
             clos_query |= Q(is_active=True, course=course, curriculum_version=version)
-        # Also include CLOs that are used in any of the assessment questions
-        question_clos = Question.objects.filter(assessment__in=assessments).values_list('clo_id', flat=True)
-        clos_query |= Q(id__in=question_clos)
+        else:
+            # Fallback: take CLOs linked to questions and those associated with any active version
+            question_clos = Question.objects.filter(assessment__in=assessments).values_list('clo_id', flat=True)
+            clos_query |= Q(id__in=question_clos)
+            clos_query |= Q(is_active=True, course=course, curriculum_version__isnull=True)
         
         clos = CLO.objects.filter(clos_query).distinct()
+        
+        # Map order number to our current CLO for remapping
+        order_number_to_clo = {clo.order_number: clo for clo in clos}
         
         print(f"DEBUG: Found {len(assessments)} assessments")
         for a in assessments:
@@ -202,6 +210,13 @@ class CourseCLOReportView(APIView):
             Question.objects.filter(assessment__in=assessments)
             .select_related('assessment', 'clo')
         )
+        
+        # Remap any question's CLO to our current version's CLO if order number matches
+        for q in questions:
+            if q.clo and q.clo.order_number in order_number_to_clo:
+                remapped_clo = order_number_to_clo[q.clo.order_number]
+                q.clo = remapped_clo
+                q.clo_id = remapped_clo.id  # Critical: also update the ID field!
         all_marks = list(
             StudentQuestionMark.objects.filter(
                 student__in=students,
@@ -306,12 +321,18 @@ class CourseCLOReportView(APIView):
                     avg_attainment = round(float((total_obtained_all / total_possible_all) * 100), 2)
                     print(f"DEBUG: total_obtained_all: {total_obtained_all}, total_possible_all: {total_possible_all}, avg_attainment: {avg_attainment}")
             
-            # Get mapped CLOs
+            # Get mapped CLOs (remapped to current curriculum version if possible)
             mapped_clos = set()
             for q in assessment_questions:
                 if q.clo:
-                    clo_code = q.clo.code if hasattr(q.clo, 'code') else f'CLO-{q.clo.order_number}'
-                    mapped_clos.add(clo_code)
+                    remapped_clo = order_number_to_clo.get(q.clo.order_number)
+                    if remapped_clo:
+                        clo_code = remapped_clo.code if hasattr(remapped_clo, 'code') else f'CLO-{remapped_clo.order_number}'
+                        mapped_clos.add(clo_code)
+                    else:
+                        # Fallback to original if no matching order number
+                        clo_code = q.clo.code if hasattr(q.clo, 'code') else f'CLO-{q.clo.order_number}'
+                        mapped_clos.add(clo_code)
             
             effectiveness = {
                 'assessment': {

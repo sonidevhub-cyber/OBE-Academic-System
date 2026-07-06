@@ -5,7 +5,6 @@ import { toast } from 'react-hot-toast';
 const CoordinatorExitSurveySetup: React.FC = () => {
   const [questions, setQuestions] = useState<ExitSurveyQuestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [templateLocked, setTemplateLocked] = useState(false);
 
   useEffect(() => {
     loadQuestions();
@@ -16,9 +15,6 @@ const CoordinatorExitSurveySetup: React.FC = () => {
       setIsLoading(true);
       const data = await obeService.getExitSurveyQuestions();
       setQuestions(data);
-      // Check if any question is locked to determine template status
-      const anyLocked = data.some(q => q.is_locked);
-      setTemplateLocked(anyLocked);
     } catch (error) {
       toast.error('Failed to load questions');
     } finally {
@@ -33,19 +29,6 @@ const CoordinatorExitSurveySetup: React.FC = () => {
       loadQuestions();
     } catch (error) {
       toast.error('Failed to generate questions');
-    }
-  };
-
-  const handleLockTemplate = async () => {
-    if (!window.confirm('Are you sure you want to lock the template? Once locked, questions cannot be edited until a GA statement changes.')) {
-      return;
-    }
-    try {
-      await obeService.lockExitSurveyTemplate();
-      toast.success('Template locked successfully');
-      loadQuestions();
-    } catch (error) {
-      toast.error('Failed to lock template');
     }
   };
 
@@ -69,25 +52,11 @@ const CoordinatorExitSurveySetup: React.FC = () => {
       <div className="flex gap-4 mb-6">
         <button
           onClick={handleGenerateQuestions}
-          disabled={templateLocked}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
         >
           Generate Questions
         </button>
-        <button
-          onClick={handleLockTemplate}
-          disabled={templateLocked || questions.length === 0}
-          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
-        >
-          Lock Template
-        </button>
       </div>
-
-      {templateLocked && (
-        <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded">
-          <span className="text-yellow-800 font-medium">Template is locked</span>
-        </div>
-      )}
 
       <div className="space-y-4">
         {questions.length === 0 ? (
@@ -99,8 +68,10 @@ const CoordinatorExitSurveySetup: React.FC = () => {
             <div key={question.id} className="p-4 border rounded-lg shadow-sm">
               <div className="flex justify-between items-start mb-2">
                 <div>
-                  <span className="font-semibold">GA-{question.ga.order_number}: {question.ga.title}</span>
-                  <p className="text-sm text-gray-500 mt-1">{question.ga.description}</p>
+                  <span className="font-semibold">
+                    {question.ga_code || (question.ga_order_number ? `GA-${question.ga_order_number}` : 'GA')}: {question.ga_title}
+                  </span>
+                  <p className="text-sm text-gray-500 mt-1">{question.ga_description}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 text-xs rounded ${question.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -111,7 +82,6 @@ const CoordinatorExitSurveySetup: React.FC = () => {
               <textarea
                 value={question.question_text}
                 onChange={(e) => handleQuestionChange(question.id, 'question_text', e.target.value)}
-                disabled={templateLocked}
                 className="w-full p-2 border rounded mt-2 disabled:bg-gray-100"
                 rows={2}
               />

@@ -19,6 +19,11 @@ import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-hot-toast';
+import HODFeedbackControl from "../pages/HODFeedbackControl";
+import EnableResultEditing from "../pages/EnableResultEditing";
+import HODExitSurveyControl from "../pages/HODExitSurveyControl";
+import HODAlumniFeedbackControl from "../pages/HODAlumniFeedbackControl";
+
 import {
   LayoutDashboard,
   ClipboardCheck,
@@ -30,7 +35,8 @@ import {
   Users,
   BookOpen,
   Settings,
-  FileSpreadsheet
+  FileSpreadsheet,
+  GraduationCap
 } from 'lucide-react';
 
 interface Department {
@@ -68,7 +74,7 @@ interface Student {
   email: string;
 }
 
-type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "obe-report" | "notice" | "feedback" | "obe-management";
+type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "obe-report" | "notice" | "feedback" | "obe-management" | "peo-report" | "student-obe" | "result-editing" | "exit-survey" | "alumni-feedback";
 
 const ModularHODDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -100,6 +106,9 @@ const ModularHODDashboard: React.FC = () => {
     { id: "obe-report", label: "OBE Report", icon: FileSpreadsheet },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "feedback", label: "Feedback", icon: MessageSquare },
+    { id: "exit-survey", label: "Exit Survey", icon: GraduationCap },
+    { id: "alumni-feedback", label: "Alumni Feedback", icon: Users },
+    { id: "result-editing",label: "Result lock",icon: Settings,},
   ];
 
   useEffect(() => {
@@ -271,18 +280,18 @@ const ModularHODDashboard: React.FC = () => {
       case 'feedback':
         return (
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-4">Feedback Management</h3>
-              <p className="text-gray-600 mb-4">
-                View feedback from students and give feedback to students.
-              </p>
-            </div>
-            <SimpleFeedbackModule 
-              token={token || ''} 
-              userType="hod"
-            />
+            <HODFeedbackControl />
           </div>
         );
+
+      case 'exit-survey':
+        return <HODExitSurveyControl />;
+
+      case 'alumni-feedback':
+        return <HODAlumniFeedbackControl />;
+
+      case "result-editing":
+        return <EnableResultEditing />;
 
       default:
         return <div>Content for {activeTab}</div>;

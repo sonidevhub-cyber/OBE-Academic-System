@@ -47,6 +47,9 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
         # Global Rule: Coordinator aur HOD sirf apne programs ka data access kar sakte hain
         if user.role.lower() in ['coordinator', 'hod']:
             queryset = queryset.filter(curriculum_version__program__in=user.programs.all())
+        # Instructors can see only their own allocations
+        elif user.role.lower() in ['instructor', 'teacher']:
+            queryset = queryset.filter(teacher=user)
         
         # Filters
         version_id = self.request.query_params.get('version')
@@ -76,8 +79,13 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             try:
+                # Check if version is draft
+                version = serializer.validated_data['curriculum_version']
+                if version.status == 'draft':
+                    raise ValidationError("Curriculum version is in draft. Please finalize the version first before managing allocations.")
+                
                 allocation = allocate_teacher(
-                    curriculum_version=serializer.validated_data['curriculum_version'],
+                    curriculum_version=version,
                     course=serializer.validated_data['course'],
                     teacher=serializer.validated_data['teacher'],
                     batch=serializer.validated_data['batch'],
@@ -139,6 +147,10 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
             try:
                 version = CurriculumVersion.objects.get(pk=version_id)
                 print("Got curriculum version:", version.id, version.version_no, version.program.name)
+                
+                # Check if version is draft
+                if version.status == 'draft':
+                    raise ValidationError("Curriculum version is in draft. Please finalize the version first before managing allocations.")
                 
                 from core.models.batch import Batch
                 batch = Batch.objects.get(pk=batch_id)
