@@ -16,7 +16,8 @@ class TeacherGAContextView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id):
-        context = get_teacher_ga_context(course_id)
+        batch_id = request.query_params.get('batch_id')
+        context = get_teacher_ga_context(course_id, batch_id=batch_id)
         if 'error' in context:
             return Response(context, status=status.HTTP_404_NOT_FOUND)
         return Response(context)

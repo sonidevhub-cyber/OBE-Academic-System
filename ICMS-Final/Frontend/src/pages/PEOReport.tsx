@@ -1,320 +1,315 @@
-import React, { useState } from 'react';
-import { 
-  Award, 
-  Users, 
-  Info, 
-  AlertTriangle, 
-  CheckCircle, 
-  XCircle,
-  Download,
-  FileText
-} from 'lucide-react';
-
-// --- Interfaces ---
-interface PEO {
-  id: string;
-  title: string;
-  statement: string;
-  mappedGAs: string[];
-  directAttainment: number;
-  indirectAttainment: number;
-  finalAttainment: number;
-  kpi: number;
-}
-
-interface PEOReportData {
-  batch: string;
-  program: string;
-  alumniSurveyStatus: "pending" | "partial" | "complete";
-  alumniResponded: number;
-  alumniTotal: number;
-  peos: PEO[];
-}
-
-// --- Dummy Data ---
-const availableBatches = [
-  "Batch 2021-2025",
-  "Batch 2020-2024",
-  "Batch 2019-2023",
-];
-
-const dummyPEOReport: PEOReportData = { 
-  batch: "Batch 2021-2025", 
-  program: "BS Computer Science", 
-  alumniSurveyStatus: "partial", 
-  alumniResponded: 67, 
-  alumniTotal: 120, 
-  peos: [ 
-    { 
-      id: "PEO1", 
-      title: "Industry Practice", 
-      statement: "Graduates will apply CS fundamentals in professional environments", 
-      mappedGAs: ["GA1", "GA2"], 
-      directAttainment: 68,
-      indirectAttainment: 74,
-      finalAttainment: 69.2,
-      kpi: 60, 
-    }, 
-    { 
-      id: "PEO2", 
-      title: "Higher Education", 
-      statement: "Graduates will pursue advanced studies or research", 
-      mappedGAs: ["GA3", "GA4"], 
-      directAttainment: 72, 
-      indirectAttainment: 68, 
-      finalAttainment: 71.2, 
-      kpi: 60, 
-    }, 
-    { 
-      id: "PEO3", 
-      title: "Leadership & Ethics", 
-      statement: "Graduates will demonstrate ethical and professional conduct", 
-      mappedGAs: ["GA8", "GA9"], 
-      directAttainment: 55, 
-      indirectAttainment: 61, 
-      finalAttainment: 56.2, 
-      kpi: 60, 
-    }, 
-    { 
-      id: "PEO4", 
-      title: "Lifelong Learning", 
-      statement: "Graduates will engage in continuous professional development", 
-      mappedGAs: ["GA11", "GA12"], 
-      directAttainment: 78, 
-      indirectAttainment: 82, 
-      finalAttainment: 78.8, 
-      kpi: 60, 
-    }, 
-  ], 
-};
+import React, { useState, useEffect, useMemo } from 'react';
+import obeService, { Batch } from '../api/obeService';
+import peoService, { PEOReportItem } from '../api/peoService';
+import { toast } from 'react-hot-toast';
+import * as XLSX from 'xlsx-js-style';
 
 const PEOReport: React.FC = () => {
-  const [selectedBatch, setSelectedBatch] = useState<string>(availableBatches[0]);
-  const failedPEOs = dummyPEOReport.peos.filter(p => p.finalAttainment < p.kpi);
-  const responseRate = Math.round((dummyPEOReport.alumniResponded / dummyPEOReport.alumniTotal) * 100);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [selectedBatch, setSelectedBatch] = useState<string>('');
+  const [report, setReport] = useState<PEOReportItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [expandedPEO, setExpandedPEO] = useState<string | null>(null);
+
+  const graduatedBatches = useMemo(() => {
+    return batches.filter((batch) => {
+      const graduationStatus = batch.graduation_status;
+      return (
+        graduationStatus === 'graduated_complete' ||
+        Boolean(batch.graduated_at) ||
+        batch.is_alumni_feedback_eligible
+      );
+    });
+  }, [batches]);
+
+  useEffect(() => {
+    const fetchBatches = async () => {
+      try {
+        const data = await obeService.getAlumniFeedbackBatches();
+        setBatches(data);
+      } catch (error) {
+        console.error('Failed to fetch batches:', error);
+      }
+    };
+    fetchBatches();
+  }, []);
+
+  useEffect(() => {
+    if (graduatedBatches.length === 0) {
+      setSelectedBatch('');
+      return;
+    }
+
+    const stillAvailable = graduatedBatches.some((batch) => batch.id === selectedBatch);
+    if (!stillAvailable) {
+      setSelectedBatch(graduatedBatches[0].id);
+    }
+  }, [graduatedBatches, selectedBatch]);
+
+  useEffect(() => {
+    if (!selectedBatch) return;
+    const fetchReport = async () => {
+      setLoading(true);
+      try {
+        const data = await peoService.getPEOReports(selectedBatch);
+        setReport(data);
+      } catch (error) {
+        console.error('Failed to fetch PEO report:', error);
+        toast.error('Failed to load PEO report');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReport();
+  }, [selectedBatch]);
+
+  const getStatus = (score: number | null, kpi: number) => {
+    if (score === null) return 'NOT_ASSESSED';
+    return score >= kpi ? 'ACHIEVED' : 'BELOW_TARGET';
+  };
+
+  const handleExport = () => {
+    if (report.length === 0) {
+      toast.error('No report data to export');
+      return;
+    }
+    const selectedBatchObj = batches.find(b => b.id === selectedBatch);
+    const wb = XLSX.utils.book_new();
+
+    // --- Summary Sheet ---
+    const summaryHeaderRows: any[][] = [
+      [selectedBatchObj?.program?.name || 'Program Name'],
+      ['Department: ' + (selectedBatchObj?.program?.department || 'Computer Science')],
+      ['Batch: ' + (selectedBatchObj?.name || 'Selected Batch')],
+      ['PEO Attainment Summary Report'],
+      ['Date: ' + new Date().toLocaleDateString()],
+      [],
+      []
+    ];
+
+    const summaryData: any[] = [...summaryHeaderRows];
+    summaryData.push([
+      'PEO Code',
+      'PEO Title',
+      'Direct Score',
+      'Indirect Score',
+      'Final Score',
+      'KPI Threshold',
+      'Status'
+    ]);
+
+    const statusIndices: number[] = [];
+    report.forEach(peo => {
+      statusIndices.push(summaryData.length);
+      summaryData.push([
+        peo.peo_code,
+        peo.peo_title,
+        peo.direct_score !== null ? `${peo.direct_score.toFixed(1)}%` : '—',
+        peo.indirect_score !== null ? `${peo.indirect_score.toFixed(1)}%` : '—',
+        peo.final_score !== null ? `${peo.final_score.toFixed(1)}%` : '0.0%',
+        (selectedBatchObj?.program?.peos?.find((p: any) => p.order_number.toString() === peo.peo_code.replace('PEO-', ''))?.kpi_threshold ?? 0).toFixed(1) + '%',
+        getStatus(peo.final_score, 60)
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(summaryData);
+    const merges = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } },
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 6 } }
+    ];
+    ws['!merges'] = merges;
+    XLSX.utils.book_append_sheet(wb, ws, 'PEO Summary');
+
+    const filename = `PEO_Report_${selectedBatchObj?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    toast.success('Report exported successfully');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
-      {/* --- Header --- */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-6">
-          <div>
-            <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3">
-              <Award className="w-8 h-8 text-indigo-600" />
-              PEO Attainment Report
-            </h1>
-            <p className="text-slate-500 font-bold mt-1">
-              {selectedBatch} • {dummyPEOReport.program}
-            </p>
-          </div>
-
-          {/* Batch Selector */}
-          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm">
-            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Select Batch:</span>
-            <select 
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-extrabold text-slate-900">PEO Attainment Report</h1>
+          <p className="text-slate-500 font-medium mt-1">
+            {graduatedBatches.find(b => b.id === selectedBatch)?.name || 'Select a graduated batch'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExport}
+            disabled={!report.length}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2z" />
+            </svg>
+            Export Report
+          </button>
+          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
+            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Batch:</span>
+            <select
               value={selectedBatch}
               onChange={(e) => setSelectedBatch(e.target.value)}
               className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
             >
-              {availableBatches.map(batch => (
-                <option key={batch} value={batch}>{batch}</option>
-              ))}
+              {graduatedBatches.length === 0 ? (
+                <option value="" disabled>No graduated batches available</option>
+              ) : (
+                graduatedBatches.map(batch => (
+                  <option key={batch.id} value={batch.id}>{batch.name}</option>
+                ))
+              )}
             </select>
           </div>
         </div>
-        
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-sm flex items-center gap-3">
-            <div className="p-2 bg-indigo-50 rounded-lg">
-              <Users className="w-5 h-5 text-indigo-600" />
-            </div>
-            <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Alumni Responses</p>
-              <p className="text-sm font-black text-slate-700">{dummyPEOReport.alumniResponded}/{dummyPEOReport.alumniTotal} ({responseRate}%)</p>
-            </div>
-          </div>
-          <button 
-            disabled 
-            className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-bold opacity-50 cursor-not-allowed shadow-lg shadow-indigo-200 flex items-center gap-2"
-          >
-            <Download className="w-5 h-5" /> Export PDF
-          </button>
+      </div>
+
+      {!loading && graduatedBatches.length === 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
+          No graduated or alumni batches found yet.
         </div>
-      </div>
+      )}
 
-      {/* --- Status Banners --- */}
-      <div className="mb-8">
-        {dummyPEOReport.alumniSurveyStatus === "partial" && (
-          <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-2xl flex gap-3 items-center shadow-sm">
-            <Info className="w-5 h-5 text-blue-500 shrink-0" />
-            <p className="text-sm text-blue-700 font-bold">
-              Alumni survey is still open. Final PEO attainment will update as more responses come in.
-            </p>
-          </div>
-        )}
-        {dummyPEOReport.alumniSurveyStatus === "pending" && (
-          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-2xl flex gap-3 items-center shadow-sm">
-            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
-            <p className="text-sm text-amber-700 font-bold">
-              Alumni survey not yet conducted. Showing direct attainment only.
-            </p>
-          </div>
-        )}
-      </div>
+      {loading && (
+        <div className="flex items-center justify-center p-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      )}
 
-      <div className="space-y-6">
-        {/* --- PEO Cards --- */}
-        {dummyPEOReport.peos.map((peo) => {
-          const isMet = peo.finalAttainment >= peo.kpi;
-          return (
-            <div key={peo.id} className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex flex-col lg:flex-row justify-between gap-8">
-                <div className="flex-1 space-y-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-xl font-black text-slate-800">{peo.id} — {peo.title}</h3>
-                      <p className="text-slate-500 font-medium mt-1 leading-relaxed">{peo.statement}</p>
-                    </div>
-                    <div className={`px-4 py-1.5 rounded-full flex items-center gap-2 text-xs font-black uppercase tracking-widest ${
-                      isMet ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                    }`}>
-                      {isMet ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      {isMet ? 'Met' : 'Not Met'}
-                    </div>
-                  </div>
+      {!loading && report.length > 0 && (
+        <div className="space-y-8">
+          {/* PEO Cards Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {report.map(peo => {
+              const isExpanded = expandedPEO === peo.peo_id;
+              const kpi = 60;
+              const status = getStatus(peo.final_score, kpi);
 
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest self-center mr-2">Mapped GAs:</span>
-                    {peo.mappedGAs.map(ga => (
-                      <span key={ga} className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black border border-slate-200">
-                        {ga}
+              return (
+                <div
+                  key={peo.peo_id}
+                  className={`bg-white rounded-[24px] shadow-sm border transition-all duration-300 ${isExpanded ? 'ring-2 ring-indigo-500 border-transparent shadow-xl' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'}`}
+                >
+                  <div
+                    className="p-6 cursor-pointer"
+                    onClick={() => setExpandedPEO(isExpanded ? null : peo.peo_id)}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-slate-800">
+                        {peo.peo_code} — {peo.peo_title}
+                      </h3>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${status === 'ACHIEVED'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-rose-100 text-rose-700'}`}
+                      >
+                        {status === 'ACHIEVED' ? 'Achieved ✅' : 'Below Target ❌'}
                       </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="lg:w-96 space-y-6">
-                  {/* Progress Bars */}
-                  <div className="space-y-4">
-                    {/* Direct */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[10px] font-black uppercase tracking-tighter text-slate-400">
-                        <span>Direct Attainment (80% Weight)</span>
-                        <span className="text-blue-600">{peo.directAttainment}%</span>
-                      </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${peo.directAttainment}%` }} />
-                      </div>
                     </div>
 
-                    {/* Indirect */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[10px] font-black uppercase tracking-tighter text-slate-400">
-                        <span>Indirect Attainment (20% Weight)</span>
-                        <span className="text-amber-600">{peo.indirectAttainment}%</span>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Direct Score</div>
+                        <div className="text-xl font-bold text-slate-700">
+                          {peo.direct_score !== null ? `${peo.direct_score.toFixed(1)}%` : 'N/A'}
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500 rounded-full" style={{ width: `${peo.indirectAttainment}%` }} />
+                      <div className="bg-slate-50 p-3 rounded-lg text-center">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Indirect Score</div>
+                        <div className="text-xl font-bold text-slate-700">
+                          {peo.indirect_score !== null ? `${peo.indirect_score.toFixed(1)}%` : 'N/A'}
+                        </div>
                       </div>
                     </div>
-
-                    {/* Final */}
-                    <div className="space-y-1 pt-2">
-                      <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-700">
-                        <span>Final PEO Attainment</span>
-                        <span className="font-black text-indigo-900">{peo.finalAttainment}%</span>
+                    <div className="relative pt-2 pb-1">
+                      <div className="flex justify-between text-xs font-bold mb-1">
+                        <span className="text-slate-400">
+                          Final Attainment: {peo.final_score !== null ? `${peo.final_score.toFixed(1)}%` : 'N/A'}
+                        </span>
+                        <span className="text-indigo-600">KPI: {kpi}%</span>
                       </div>
-                      <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden relative border border-slate-200">
-                        <div className="h-full bg-indigo-900 rounded-full" style={{ width: `${peo.finalAttainment}%` }} />
-                        {/* KPI Marker */}
-                        <div 
-                          className="absolute top-0 bottom-0 w-0.5 border-r-2 border-dashed border-indigo-400 z-10"
-                          style={{ left: `${peo.kpi}%` }}
-                          title={`KPI: ${peo.kpi}%`}
+                      <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden relative">
+                        {peo.final_score !== null && (
+                          <div
+                            className={`h-full transition-all duration-1000 ease-out rounded-full ${status === 'ACHIEVED' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                            style={{ width: `${Math.min(peo.final_score, 100)}%` }}
+                          />
+                        )}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-indigo-600 z-10"
+                          style={{ left: `${kpi}%` }}
+                          title={`KPI: ${kpi}%`}
                         />
                       </div>
-                      <div className="flex justify-between text-[8px] font-black text-slate-400 uppercase mt-1">
-                        <span>0%</span>
-                        <span style={{ marginLeft: `${peo.kpi}%`, transform: 'translateX(-50%)' }} className="text-indigo-600">KPI: {peo.kpi}%</span>
-                        <span>100%</span>
-                      </div>
+                    </div>
+                    <div className="mt-3">
+                      {peo.formula_applied === 'direct_only' && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                          100% Direct (Indirect Pending)
+                        </span>
+                      )}
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
 
-        {/* --- Summary Table --- */}
-        <div className="bg-white rounded-[32px] overflow-hidden border border-slate-200 shadow-sm mt-12">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-indigo-600" />
-              PEO Attainment Summary
-            </h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200">
-                  <th className="px-8 py-4">PEO Identifier</th>
-                  <th className="px-8 py-4 text-center">Direct (80%)</th>
-                  <th className="px-8 py-4 text-center">Indirect (20%)</th>
-                  <th className="px-8 py-4 text-center">Final Attainment</th>
-                  <th className="px-8 py-4 text-center">KPI</th>
-                  <th className="px-8 py-4 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {dummyPEOReport.peos.map((peo) => {
-                  const isMet = peo.finalAttainment >= peo.kpi;
-                  return (
-                    <tr key={peo.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-8 py-4">
-                        <div className="font-black text-slate-800">{peo.id}</div>
-                        <div className="text-xs text-slate-500 font-medium">{peo.title}</div>
-                      </td>
-                      <td className="px-8 py-4 text-center font-bold text-blue-600">{peo.directAttainment}%</td>
-                      <td className="px-8 py-4 text-center font-bold text-amber-600">{peo.indirectAttainment}%</td>
-                      <td className="px-8 py-4 text-center">
-                        <span className="px-3 py-1 bg-indigo-50 text-indigo-900 rounded-lg font-black">{peo.finalAttainment}%</span>
-                      </td>
-                      <td className="px-8 py-4 text-center font-bold text-slate-400">{peo.kpi}%</td>
-                      <td className="px-8 py-4 text-right">
-                        <span className={`px-3 py-1 rounded-md text-[10px] font-black uppercase ${
-                          isMet ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                        }`}>
-                          {isMet ? 'PASSED' : 'NOT MET'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  {isExpanded && (
+                    <div className="border-t border-slate-100 p-6 bg-slate-50/50 rounded-b-[24px]">
+                      <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4">
+                        Contributing GAs
+                      </h4>
+                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200">
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">
+                                GA Code
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                GA Title
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                GA Score
+                              </th>
+                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
+                                Weight
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {peo.contributing_gas.map(ga => (
+                              <tr key={ga.ga_id} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="px-4 py-3 font-bold text-slate-700">
+                                  {ga.ga_code}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">
+                                  {ga.ga_title}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="text-sm font-black text-indigo-600">
+                                    {ga.ga_score.toFixed(1)}%
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="text-sm font-bold text-slate-700">
+                                    {ga.weight.toFixed(1)}%
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-
-        {/* --- CQI Note --- */}
-        {failedPEOs.length > 0 && (
-          <div className="mt-8 bg-amber-50 border border-amber-200 rounded-3xl p-6 flex gap-4 items-start shadow-sm">
-            <div className="p-3 bg-amber-100 rounded-2xl">
-              <AlertTriangle className="w-6 h-6 text-amber-600" />
-            </div>
-            <div>
-              <h4 className="font-black text-amber-900 uppercase tracking-tight">CQI Action Recommendation</h4>
-              <p className="text-sm text-amber-800 font-medium mt-1 leading-relaxed">
-                {failedPEOs.map(p => p.id).join(', ')} not met. Consider curriculum review and pedagogical adjustments in the next accreditation cycle. PEO-level CQI requires manual coordinator evaluation and institutional decision-making.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <footer className="mt-16 text-center text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] pb-8">
-        EduOBE Academic Analytics • Engineering Excellence
-      </footer>
+      )}
     </div>
   );
 };

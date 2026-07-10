@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
-import { Calendar, CheckCircle2, Clock3, GraduationCap, Users, XCircle } from 'lucide-react';
+import { Calendar, CheckCircle2, Clock3, GraduationCap, Users, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import obeService, { Batch } from '../../api/obeService';
 
 const addDays = (base: Date, days: number) => new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
@@ -47,11 +48,32 @@ const formatDuration = (fromDate?: string | null) => {
   return parts.join(' ');
 };
 
+const EMPLOYMENT_STATUS_LABELS: Record<string, string> = {
+  'EMPLOYED': 'Employed',
+  'SELF_EMPLOYED': 'Self-Employed',
+  'HIGHER_STUDIES': 'Higher Studies',
+  'UNEMPLOYED': 'Unemployed',
+  'HOUSEWIFE': 'Housewife'
+};
+
+const EMPLOYMENT_STATUS_COLORS: Record<string, string> = {
+  'EMPLOYED': '#10b981',
+  'SELF_EMPLOYED': '#3b82f6',
+  'HIGHER_STUDIES': '#8b5cf6',
+  'UNEMPLOYED': '#f59e0b',
+  'HOUSEWIFE': '#ec4899'
+};
+
 const HODAlumniFeedbackControl: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
   const [dueDates, setDueDates] = useState<Record<string, string>>({});
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [employmentStats, setEmploymentStats] = useState<Record<string, {
+    employment_distribution: Record<string, number>;
+    top_employers: Array<{ name: string; count: number }>;
+  }>>({});
 
   const defaultDueDate = useMemo(() => toDateTimeLocalValue(addDays(new Date(), 15).toISOString()), []);
 
@@ -106,6 +128,29 @@ const HODAlumniFeedbackControl: React.FC = () => {
       setToggling(null);
     }
   };
+
+  const loadEmploymentStats = useCallback(async (batchId: string) => {
+    if (employmentStats[batchId]) return;
+    try {
+      const stats = await obeService.getAlumniEmploymentStats(batchId);
+      setEmploymentStats(prev => ({ ...prev, [batchId]: stats }));
+    } catch (error) {
+      console.error('Failed to load employment stats:', error);
+    }
+  }, [employmentStats]);
+
+  const toggleExpand = useCallback((batchId: string) => {
+    setExpandedBatches(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(batchId)) {
+        newSet.delete(batchId);
+      } else {
+        newSet.add(batchId);
+        loadEmploymentStats(batchId);
+      }
+      return newSet;
+    });
+  }, [loadEmploymentStats]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -176,6 +221,16 @@ const HODAlumniFeedbackControl: React.FC = () => {
                           {batch.alumni_feedback_cycle_status}
                         </span>
                       )}
+                      <button
+                        onClick={() => toggleExpand(batch.id)}
+                        className="ml-auto p-2 hover:bg-gray-100 rounded-full transition-colors"
+                      >
+                        {expandedBatches.has(batch.id) ? (
+                          <ChevronUp className="w-5 h-5 text-gray-500" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-gray-500" />
+                        )}
+                      </button>
                     </div>
 
                     <div className="flex flex-wrap gap-6 text-sm text-gray-600">
@@ -239,10 +294,10 @@ const HODAlumniFeedbackControl: React.FC = () => {
                     ) : (
                       <button
                         onClick={() => toggleAlumniFeedback(batch)}
-                        disabled={toggling === batch.id || !readyForFeedback}
+                        disabled={toggling === batch.id || !readyForFeedback || batch.alumni_feedback_cycle_status === 'CLOSED'}
                         className="px-6 py-3 rounded-xl font-semibold transition-all duration-200 bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg disabled:opacity-50"
                       >
-                        {toggling === batch.id ? 'Processing...' : 'Enable Feedback'}
+                        {toggling === batch.id ? 'Processing...' : batch.alumni_feedback_cycle_status === 'CLOSED' ? 'Feedback Closed' : 'Enable Feedback'}
                       </button>
                     )}
 
@@ -261,6 +316,72 @@ const HODAlumniFeedbackControl: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {expandedBatches.has(batch.id) && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="mt-6 pt-6 border-t border-gray-100"
+                  >
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Employment Rate Chart */}
+                      <div className="bg-gray-50 rounded-2xl p-6">
+                        <h4 className="text-lg font-bold text-gray-800 mb-4">Employment Status</h4>
+                        {employmentStats[batch.id] ? (
+                          <ResponsiveContainer width="100%" height={300}>
+                            <BarChart
+                              data={Object.entries(employmentStats[batch.id].employment_distribution).map(([key, value]) => ({
+                                status: EMPLOYMENT_STATUS_LABELS[key] || key,
+                                count: value,
+                              }))}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="status" />
+                              <YAxis />
+                              <Tooltip />
+                              <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex justify-center items-center h-64">
+                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-indigo-500"></div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Top Employers */}
+                      <div className="bg-gray-50 rounded-2xl p-6">
+                        <h4 className="text-lg font-bold text-gray-800 mb-4">Top Employers</h4>
+                        {employmentStats[batch.id] ? (
+                          employmentStats[batch.id].top_employers.length > 0 ? (
+                            <div className="space-y-3">
+                              {employmentStats[batch.id].top_employers.map((employer, i) => (
+                                <div key={i} className="flex items-center justify-between bg-white px-4 py-3 rounded-xl shadow-sm">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                                      {i + 1}
+                                    </div>
+                                    <span className="font-semibold text-gray-700">{employer.name}</span>
+                                  </div>
+                                  <span className="text-indigo-600 font-bold">{employer.count} Alumni</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-500 py-8">
+                              No employer data available yet.
+                            </div>
+                          )
+                        ) : (
+                          <div className="flex justify-center items-center h-64">
+                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-indigo-500"></div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
               </motion.div>
             );
           })}

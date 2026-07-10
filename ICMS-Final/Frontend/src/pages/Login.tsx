@@ -18,7 +18,7 @@ const Login = () => {
   // Role display mapping
   const roleDisplayNames: { [key: string]: string } = {
     admin: "Admin",
-    faculty: "Faculty",
+    allumini: "Allumini",
     coordinator: "Coordinator",
     instructor: "Instructor",
     hod: "HOD",

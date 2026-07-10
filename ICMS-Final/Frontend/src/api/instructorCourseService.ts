@@ -19,6 +19,7 @@ export interface InstructorCourse {
   status?: string;
   batch_id?: number | string;
   batch_name?: string;
+  last_completed_semester?: number;
   [key: string]: any; // For extra properties we might not know about
 }
 

@@ -50,6 +50,12 @@ const GACQIForm: React.FC = () => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         history: [],
+        issue_statement: null,
+        hod_action_plan: null,
+        triggered_at: null,
+        saved_by_hod: null,
+        saved_at: null,
+        is_active: true,
       });
       setRootCause('');
       setRemedialPlan('');

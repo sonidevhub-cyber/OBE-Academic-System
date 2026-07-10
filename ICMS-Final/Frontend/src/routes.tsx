@@ -21,6 +21,7 @@ import Users from './pages/sac/Users';
 import TeacherManagement from './views/pages/TeacherManagement';
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
 import GAReport from './pages/GAReport';
+import PEOReport from './pages/PEOReport';
 import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
 import { AlumniDashboard, AlumniSurvey } from './pages/alumni';
@@ -28,6 +29,7 @@ import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
+import HODPEOCQI from './views/pages/HODPEOCQI';
 
 // Import new exit survey components
 import CoordinatorExitSurveySetup from './views/modules/coordinator/CoordinatorExitSurveySetup';
@@ -126,9 +128,11 @@ const AppRoutes: React.FC = () => {
         <Route path="/sac/users" element={<Users />} />
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
         <Route path="/reports/ga-attainment" element={<GAReport />} />
+        <Route path="/reports/peo-attainment" element={<PEOReport />} />
         <Route path="/reports/student-obe" element={<StudentOBEList />} />
         <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
         <Route path="/sac/batches/:batchId/exit-survey-status" element={<SACExitSurveyDashboard />} />
+        <Route path="/hod/peo-cqi" element={<HODPEOCQI />} />
       </Route>
 
       {/* Fallback route */}

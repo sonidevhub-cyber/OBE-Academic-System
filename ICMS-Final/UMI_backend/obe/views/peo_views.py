@@ -10,13 +10,43 @@ from datetime import timedelta
 from decimal import Decimal
 from core.models import Batch
 from students.models import Student
-from ..models import PEO, GAPEOMapping, GA, AlumniSurveyQuestion, AlumniSurveyCycle, AlumniSurveyResponse, get_peo_indirect_score
-from ..serializers import PEOSerializer, GAPEOMappingSerializer, GASerializer, AlumniSurveyQuestionSerializer, AlumniSurveyCycleSerializer, AlumniSurveyResponseSerializer
+from ..models import PEO, GAPEOMapping, GA, AlumniSurveyQuestion, AlumniSurveyCycle, AlumniSurveyResponse, get_peo_indirect_score, PEOCQIRecord, PEOCQISubmissionHistory
+from ..serializers import PEOSerializer, GAPEOMappingSerializer, GASerializer, AlumniSurveyQuestionSerializer, AlumniSurveyCycleSerializer, AlumniSurveyResponseSerializer, PEOCQIRecordSerializer, PEOCQISubmissionHistorySerializer
+from ..services import calculate_all_peo_reports, calculate_peo_report
 
 User = get_user_model()
 ALUMNI_FEEDBACK_THRESHOLD = Decimal('50.00')
 ALUMNI_FEEDBACK_DEFAULT_DAYS = 15
 ALUMNI_FEEDBACK_EXTENSION_DAYS = 5
+
+
+def _get_alumni_employment_distribution(batch):
+    # Get distinct students' employment status from the latest cycle
+    cycle = AlumniSurveyCycle.objects.filter(batch=batch, is_active=True).order_by('-created_at').first()
+    if not cycle:
+        return {}
+    # Get distinct (student_id, employment_status) pairs
+    responses = cycle.responses.filter(is_active=True, employment_status__isnull=False).values('student_id', 'employment_status').distinct()
+    distribution = {}
+    for resp in responses:
+        status = resp['employment_status']
+        distribution[status] = distribution.get(status, 0) + 1
+    return distribution
+
+
+def _get_top_employers(batch, limit=10):
+    # Get distinct students' organization names
+    cycle = AlumniSurveyCycle.objects.filter(batch=batch, is_active=True).order_by('-created_at').first()
+    if not cycle:
+        return []
+    responses = cycle.responses.filter(is_active=True, organization_name__isnull=False, organization_name__gt='').values('student_id', 'organization_name').distinct()
+    employer_counts = {}
+    for resp in responses:
+        employer = resp['organization_name']
+        employer_counts[employer] = employer_counts.get(employer, 0) + 1
+    # Sort by count descending, take top 'limit'
+    sorted_employers = sorted(employer_counts.items(), key=lambda x: (-x[1], x[0]))
+    return [{'name': name, 'count': count} for name, count in sorted_employers[:limit]]
 
 
 def _add_years(value, years):
@@ -59,14 +89,25 @@ def _refresh_alumni_feedback_cycle(cycle):
         cycle.is_active = True
         cycle.save(update_fields=['status', 'closed_at', 'is_active'])
         cycle.batch.alumni_feedback_enabled = False
-        cycle.batch.alumni_feedback_enabled_at = None
-        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_enabled_at'])
+        cycle.batch.alumni_feedback_due_at = cycle.due_at
+        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_due_at'])
         return cycle
 
-    if cycle.due_at and now >= cycle.due_at:
+    if cycle.due_at and now >= cycle.due_at and cycle.auto_extension_count < 1:
         cycle.due_at = cycle.due_at + timedelta(days=cycle.auto_extension_days or ALUMNI_FEEDBACK_EXTENSION_DAYS)
         cycle.auto_extension_count += 1
         cycle.save(update_fields=['due_at', 'auto_extension_count'])
+        cycle.batch.alumni_feedback_due_at = cycle.due_at
+        cycle.batch.save(update_fields=['alumni_feedback_due_at'])
+    elif cycle.due_at and now >= cycle.due_at:
+        # No more extensions allowed, close the survey
+        cycle.status = 'CLOSED'
+        cycle.closed_at = now
+        cycle.is_active = True
+        cycle.save(update_fields=['status', 'closed_at', 'is_active'])
+        cycle.batch.alumni_feedback_enabled = False
+        cycle.batch.alumni_feedback_due_at = cycle.due_at
+        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_due_at'])
 
     return cycle
 
@@ -294,7 +335,7 @@ class GAPEOMatrixView(APIView):
         
         if not is_hod:
             return Response({'error': 'Only HODs can update GA-PEO mappings'}, status=status.HTTP_403_FORBIDDEN)
-            
+        
         # Delete existing mappings
         GAPEOMapping.objects.filter(
             ga__program_id=program_id
@@ -307,7 +348,8 @@ class GAPEOMatrixView(APIView):
         for m in mappings_data:
             mapping = GAPEOMapping.objects.create(
                 ga_id=m['ga_id'],
-                peo_id=m['peo_id']
+                peo_id=m['peo_id'],
+                weight=m.get('weight', Decimal('0.00'))
             )
             created.append(mapping)
 
@@ -435,6 +477,8 @@ class AlumniSurveyCycleCreateView(APIView):
             status='DRAFT',
             due_at=due_at
         )
+        batch.alumni_feedback_due_at = due_at
+        batch.save(update_fields=['alumni_feedback_due_at'])
         
         return Response(AlumniSurveyCycleSerializer(cycle).data, status=status.HTTP_201_CREATED)
 
@@ -481,6 +525,8 @@ class AlumniSurveyCycleActivateView(APIView):
         cycle.activated_by = request.user
         cycle.activated_at = timezone.now()
         cycle.save()
+        cycle.batch.alumni_feedback_due_at = cycle.due_at
+        cycle.batch.save(update_fields=['alumni_feedback_due_at'])
         
         return Response(AlumniSurveyCycleSerializer(cycle).data)
 
@@ -514,8 +560,8 @@ class AlumniSurveyCycleCloseView(APIView):
         cycle.closed_at = timezone.now()
         cycle.save()
         cycle.batch.alumni_feedback_enabled = False
-        cycle.batch.alumni_feedback_enabled_at = None
-        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_enabled_at'])
+        cycle.batch.alumni_feedback_due_at = cycle.due_at
+        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_due_at'])
         
         return Response(AlumniSurveyCycleSerializer(cycle).data)
 
@@ -562,13 +608,27 @@ class BatchToggleAlumniFeedbackView(APIView):
                 active_cycle.save(update_fields=['status', 'closed_at'])
 
             batch.alumni_feedback_enabled = False
-            batch.alumni_feedback_enabled_at = None
-            batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_enabled_at'])
+            if active_cycle and active_cycle.due_at:
+                batch.alumni_feedback_due_at = active_cycle.due_at
+            batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_due_at'])
             return Response({
                 'alumni_feedback_enabled': False,
-                'alumni_feedback_enabled_at': None,
+                'alumni_feedback_enabled_at': batch.alumni_feedback_enabled_at,
                 'cycle': AlumniSurveyCycleSerializer(active_cycle).data if active_cycle else None,
             })
+
+        # Check if there's already a closed cycle for this survey window
+        closed_cycle = AlumniSurveyCycle.objects.filter(
+            batch=batch,
+            survey_window='2_YEARS',
+            status='CLOSED',
+            is_active=True
+        ).order_by('-created_at').first()
+        if closed_cycle:
+            return Response(
+                {'error': 'Alumni survey for this window has already been closed and cannot be re-enabled.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         due_at = _resolve_due_at(request.data)
 
@@ -595,7 +655,8 @@ class BatchToggleAlumniFeedbackView(APIView):
 
         batch.alumni_feedback_enabled = True
         batch.alumni_feedback_enabled_at = timezone.now()
-        batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_enabled_at'])
+        batch.alumni_feedback_due_at = due_at
+        batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_enabled_at', 'alumni_feedback_due_at'])
 
         return Response({
             'alumni_feedback_enabled': True,
@@ -643,8 +704,22 @@ class AlumniSurveyResponseView(APIView):
         _refresh_alumni_feedback_cycle(cycle)
         if cycle.status != 'ACTIVE':
             return Response({'error': 'Alumni feedback is closed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_submission = AlumniSurveyResponse.objects.filter(
+            cycle=cycle,
+            student=student,
+            is_active=True
+        ).exists()
+        if existing_submission:
+            return Response({'error': 'Alumni survey already submitted'}, status=status.HTTP_400_BAD_REQUEST)
             
         responses_data = request.data.get('responses', [])
+        employment_status = request.data.get('employment_status')
+        organization_name = request.data.get('organization_name')
+        current_designation = request.data.get('current_designation')
+        
+        # Save employment status on the first response to keep it consistent
+        first_response_saved = False
         for resp_data in responses_data:
             question_id = resp_data.get('question')
             score = resp_data.get('score')
@@ -654,15 +729,95 @@ class AlumniSurveyResponseView(APIView):
             except AlumniSurveyQuestion.DoesNotExist:
                 continue
                 
+            update_dict = {'score': score}
+            if not first_response_saved:
+                if employment_status:
+                    update_dict['employment_status'] = employment_status
+                if organization_name:
+                    update_dict['organization_name'] = organization_name
+                if current_designation:
+                    update_dict['current_designation'] = current_designation
+                first_response_saved = True
+                
             AlumniSurveyResponse.objects.update_or_create(
                 cycle=cycle,
                 student=student,
                 question=question,
-                defaults={'score': score}
+                defaults=update_dict
             )
 
         _refresh_alumni_feedback_cycle(cycle)
         return Response({'success': True})
+
+
+class AlumniSurveyStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'enabled': False, 'submitted': False}, status=status.HTTP_404_NOT_FOUND)
+
+        cycle = AlumniSurveyCycle.objects.filter(
+            batch=batch,
+            survey_window='2_YEARS',
+            is_active=True
+        ).order_by('-created_at').first()
+
+        if cycle:
+            _refresh_alumni_feedback_cycle(cycle)
+            if cycle.status != 'ACTIVE':
+                cycle = None
+
+        student = (
+            getattr(request.user, 'student_profile', None)
+            or Student.objects.filter(user=request.user).first()
+        )
+        if not student:
+            student_ref = request.query_params.get('student_id')
+            if student_ref:
+                student = (
+                    Student.objects.filter(student_id=student_ref).first()
+                    or Student.objects.filter(custom_id=student_ref).first()
+                    or Student.objects.filter(registration_number=student_ref).first()
+                    or Student.objects.filter(user_id=student_ref).first()
+                )
+
+        submitted = False
+        if cycle and student:
+            submitted = AlumniSurveyResponse.objects.filter(
+                cycle=cycle,
+                student=student,
+                is_active=True
+            ).exists()
+
+        return Response({
+            'enabled': bool(batch.alumni_feedback_enabled),
+            'submitted': submitted,
+            'cycle_id': str(cycle.id) if cycle else None,
+            'response_count': _get_alumni_feedback_response_count(cycle) if cycle else 0,
+            'eligible_alumni_count': _get_alumni_feedback_eligible_count(batch),
+            'response_rate': float(_get_alumni_feedback_response_rate(cycle)) if cycle else 0,
+        })
+
+
+class AlumniEmploymentStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        employment_distribution = _get_alumni_employment_distribution(batch)
+        top_employers = _get_top_employers(batch)
+        
+        return Response({
+            'employment_distribution': employment_distribution,
+            'top_employers': top_employers
+        })
 
 
 class PEOIndirectScoreView(APIView):
@@ -678,4 +833,187 @@ class PEOIndirectScoreView(APIView):
         survey_window = request.query_params.get('survey_window')
         indirect_score_data = get_peo_indirect_score(peo_id, batch_id, survey_window)
         return Response(indirect_score_data)
+
+
+class PEOReportView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, batch_id):
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        peo_reports = calculate_all_peo_reports(batch)
+        return Response(peo_reports)
+
+
+class PEOCQIListView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can view PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get batch_id from query params if provided
+        batch_id = request.query_params.get('batch_id')
+        if batch_id:
+            cqi_records = PEOCQIRecord.objects.filter(batch_id=batch_id)
+        else:
+            cqi_records = PEOCQIRecord.objects.all()
+        
+        return Response(PEOCQIRecordSerializer(cqi_records, many=True).data)
+
+
+class PEOCQIDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, cqi_id):
+        try:
+            cqi = PEOCQIRecord.objects.get(id=cqi_id)
+        except PEOCQIRecord.DoesNotExist:
+            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(PEOCQIRecordSerializer(cqi).data)
+    
+    @transaction.atomic
+    def patch(self, request, cqi_id):
+        try:
+            cqi = PEOCQIRecord.objects.get(id=cqi_id)
+        except PEOCQIRecord.DoesNotExist:
+            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can update PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if cqi.is_locked:
+            return Response({'error': 'This PEO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Save history if there are changes to root_cause or remedial_plan
+        if 'root_cause' in request.data or 'remedial_plan' in request.data:
+            PEOCQISubmissionHistory.objects.create(
+                cqi_record=cqi,
+                root_cause_snapshot=cqi.root_cause,
+                remedial_plan_snapshot=cqi.remedial_plan,
+                status_at_time=cqi.status
+            )
+        
+        serializer = PEOCQIRecordSerializer(cqi, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PEOCQISubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request, cqi_id):
+        try:
+            cqi = PEOCQIRecord.objects.get(id=cqi_id)
+        except PEOCQIRecord.DoesNotExist:
+            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can submit PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if cqi.is_locked:
+            return Response({'error': 'This PEO CQI record is locked and cannot be submitted'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Save history
+        PEOCQISubmissionHistory.objects.create(
+            cqi_record=cqi,
+            root_cause_snapshot=cqi.root_cause,
+            remedial_plan_snapshot=cqi.remedial_plan,
+            status_at_time=cqi.status
+        )
+        
+        cqi.status = 'APPROVED'
+        cqi.submitted_by = request.user
+        cqi.is_locked = True
+        cqi.save()
+        
+        return Response(PEOCQIRecordSerializer(cqi).data)
+
+
+class PEOCQICreateView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        
+        if not is_hod:
+            return Response({'error': 'Only HODs can create PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+        
+        peo_id = request.data.get('peo')
+        batch_id = request.data.get('batch')
+        
+        try:
+            peo = PEO.objects.get(id=peo_id)
+            batch = Batch.objects.get(id=batch_id)
+        except (PEO.DoesNotExist, Batch.DoesNotExist):
+            return Response({'error': 'PEO or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if program end ready
+        if not batch.is_program_end_ready:
+            return Response({'error': 'Program not yet complete — PEO CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get or create existing record
+        cqi, created = PEOCQIRecord.objects.get_or_create(
+            peo=peo,
+            batch=batch
+        )
+        
+        if not created and cqi.is_locked:
+            return Response({'error': 'This PEO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if not created:
+            # Save history
+            PEOCQISubmissionHistory.objects.create(
+                cqi_record=cqi,
+                root_cause_snapshot=cqi.root_cause,
+                remedial_plan_snapshot=cqi.remedial_plan,
+                status_at_time=cqi.status
+            )
+        
+        # Calculate attainment value if not provided
+        if 'attainment_value' not in request.data:
+            peo_result = calculate_peo_report(peo, batch)
+            if peo_result and peo_result['final_score'] is not None:
+                request.data['attainment_value'] = peo_result['final_score']
+        
+        if 'kpi_threshold_at_trigger' not in request.data:
+            request.data['kpi_threshold_at_trigger'] = peo.kpi_threshold
+        
+        serializer = PEOCQIRecordSerializer(cqi, data=request.data, partial=not created)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(PEOCQIRecordSerializer(cqi).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PEOCQIHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, cqi_id):
+        try:
+            cqi = PEOCQIRecord.objects.get(id=cqi_id)
+        except PEOCQIRecord.DoesNotExist:
+            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(PEOCQISubmissionHistorySerializer(cqi.history.all(), many=True).data)
 

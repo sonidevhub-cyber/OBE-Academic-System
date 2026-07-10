@@ -114,7 +114,7 @@ class AlumniSurveyCycle(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     due_at = models.DateTimeField(null=True, blank=True)
     response_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('50.00'))
-    auto_extension_days = models.PositiveIntegerField(default=5)
+    auto_extension_days = models.PositiveIntegerField(default=2)  # Changed from 5 to 2
     auto_extension_count = models.PositiveIntegerField(default=0)
     activated_by = models.ForeignKey(
         'core.CustomUser',
@@ -136,6 +136,13 @@ class AlumniSurveyCycle(models.Model):
 
 
 class AlumniSurveyResponse(models.Model):
+    EMPLOYMENT_STATUS_CHOICES = [
+        ('EMPLOYED', 'Employed'),
+        ('SELF_EMPLOYED', 'Self-Employed / Entrepreneur'),
+        ('HIGHER_STUDIES', 'Higher Studies'),
+        ('UNEMPLOYED', 'Unemployed / Looking for job'),
+        ('HOUSEWIFE', 'Housewife / Homemaker'),
+    ]
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -151,6 +158,16 @@ class AlumniSurveyResponse(models.Model):
         on_delete=models.CASCADE,
         related_name='alumni_survey_responses'
     )
+    # Employment status fields (once per student per cycle)
+    employment_status = models.CharField(
+        max_length=20,
+        choices=EMPLOYMENT_STATUS_CHOICES,
+        null=True,
+        blank=True
+    )
+    organization_name = models.CharField(max_length=255, null=True, blank=True)
+    current_designation = models.CharField(max_length=255, null=True, blank=True)
+    # Question and score fields
     question = models.ForeignKey(
         AlumniSurveyQuestion,
         on_delete=models.PROTECT,
@@ -169,19 +186,32 @@ class AlumniSurveyResponse(models.Model):
 
 def get_peo_indirect_score(peo_id, batch_id, survey_window=None):
     sources = []
+    print("get_peo_indirect_score called with:")
+    print(f"  peo_id: {peo_id}")
+    print(f"  batch_id: {batch_id}")
+    print(f"  survey_window: {survey_window}")
+    
+    # Check if there are questions for this PEO first
+    questions = AlumniSurveyQuestion.objects.filter(peo__id=peo_id, is_active=True)
+    print(f"  Found {questions.count()} active questions for this PEO")
+    for q in questions:
+        print(f"    - Question: {q.id}, PEO: {q.peo.id if q.peo else None}")
     
     responses_qs = AlumniSurveyResponse.objects.filter(
-        question__peo_id=peo_id,
+        question__peo__id=peo_id,
         cycle__batch_id=batch_id,
         is_active=True,
         question__is_active=True
     )
+    print(f"  Found {responses_qs.count()} responses before survey_window filter")
     
     if survey_window:
         responses_qs = responses_qs.filter(cycle__survey_window=survey_window)
+        print(f"  Found {responses_qs.count()} responses after survey_window filter")
     
     if responses_qs.exists():
         avg_score = responses_qs.aggregate(avg=models.Avg('score'))['avg']
+        print(f"  avg_score from responses: {avg_score}")
         normalized_score = (avg_score / 5) * 100 if avg_score else 0
         sources.append({
             'source': 'Alumni Survey',
@@ -193,7 +223,7 @@ def get_peo_indirect_score(peo_id, batch_id, survey_window=None):
     overall = None
     if sources:
         overall = sum(s['score'] for s in sources) / len(sources)
-    
+    print(f"  Returning overall: {overall}")
     return {
         'sources': sources,
         'overall': overall
@@ -275,6 +305,7 @@ class GAPEOMapping(models.Model):
         on_delete=models.CASCADE, 
         related_name='ga_mappings' 
     ) 
+    weight = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00')) 
     is_active = models.BooleanField(default=True) 
     created_at = models.DateTimeField( 
         auto_now_add=True 
@@ -283,8 +314,22 @@ class GAPEOMapping(models.Model):
     class Meta: 
         unique_together = ('ga', 'peo') 
 
+    def clean(self):
+        # Check that sum of weights for this PEO (excluding self equals <=100%
+        total = GAPEOMapping.objects.filter(
+            peo=self.peo,
+            is_active=True
+        ).exclude(id=self.id).aggregate(Sum('weight'))['weight__sum'] or Decimal('0.00')
+        
+        if total + self.weight > Decimal('100.00'):
+            raise ValidationError(f"Total weight for PEO exceeds 100%")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
     def __str__(self): 
-        return f"{self.ga} -> {self.peo}" 
+        return f"{self.ga} -> {self.peo} ({self.weight}%)" 
 
 
 class CLO(models.Model): 
@@ -451,7 +496,11 @@ class CourseGAScore(models.Model):
 
 class GACQIRecord(models.Model):
     STATUS_CHOICES = [
-        ('PENDING', 'Pending'),
+        ('NOT_TRIGGERED', 'Not Triggered'),
+        ('PENDING_HOD_INPUT', 'Pending HOD Input'),
+        ('SAVED', 'Saved'),
+        ('EXPORTED', 'Exported'),
+        ('PENDING', 'Pending'),  # Keep old status for compatibility
         ('SENT_BACK', 'Sent Back'),
         ('FULLY_APPROVED', 'Fully Approved'),
     ]
@@ -482,7 +531,7 @@ class GACQIRecord(models.Model):
     root_cause = models.TextField(blank=True, null=True)
     remedial_plan = models.TextField(blank=True, null=True)
     hod_comment = models.TextField(blank=True, null=True)
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='NOT_TRIGGERED')
     submitted_by = models.ForeignKey(
         'core.CustomUser',
         on_delete=models.SET_NULL,
@@ -499,6 +548,19 @@ class GACQIRecord(models.Model):
     )
     is_audit_visible = models.BooleanField(default=True)
     is_locked = models.BooleanField(default=False)
+    # NEW fields for GA-CQI Cohort
+    issue_statement = models.TextField(blank=True, null=True)
+    hod_action_plan = models.TextField(blank=True, null=True)
+    triggered_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
+    saved_by_hod = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='saved_ga_cqis',
+        null=True,
+        blank=True
+    )
+    saved_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
+    is_active = models.BooleanField(default=True)  # Soft delete
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -510,6 +572,69 @@ class GACQIRecord(models.Model):
 
     def __str__(self):
         return f"{self.ga} - {self.cqi_level} ({self.status})"
+
+
+class PEOCQIRecord(models.Model):
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('APPROVED', 'Approved'),
+    ]
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    peo = models.ForeignKey(
+        PEO,
+        on_delete=models.PROTECT,
+        related_name='cqi_records'
+    )
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='peo_cqi_records'
+    )
+    attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    root_cause = models.TextField(blank=True, null=True)
+    remedial_plan = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    submitted_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='submitted_peo_cqis',
+        null=True,
+        blank=True
+    )
+    is_locked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('peo', 'batch')
+
+    def __str__(self):
+        return f"{self.peo} - {self.batch} ({self.status})"
+
+
+class PEOCQISubmissionHistory(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    cqi_record = models.ForeignKey(
+        PEOCQIRecord,
+        on_delete=models.CASCADE,
+        related_name='history'
+    )
+    root_cause_snapshot = models.TextField(blank=True, null=True)
+    remedial_plan_snapshot = models.TextField(blank=True, null=True)
+    status_at_time = models.CharField(max_length=30)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.cqi_record} - {self.submitted_at}"
 
 
 class StudentCLOScore(models.Model):
@@ -691,9 +816,16 @@ class GAReport(models.Model):
         on_delete=models.CASCADE,
         related_name='ga_reports'
     )
-    direct_score = models.DecimalField(max_digits=5, decimal_places=2)
+    direct_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     indirect_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    final_score = models.DecimalField(max_digits=5, decimal_places=2)
+    course_feedback_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    course_feedback_coverage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    exit_survey_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    exit_survey_coverage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    final_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    formula_applied = models.CharField(max_length=50, null=True, blank=True)
+    breakdown = models.JSONField(null=True, blank=True)
+    coverage = models.JSONField(null=True, blank=True)
     is_locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -777,6 +909,65 @@ class ExitSurveyGAScore(models.Model):
 
     def __str__(self):
         return f"Exit Survey GA Score: {self.ga} - {self.batch}: {self.score}"
+
+
+class GAMasterCache(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='ga_master_caches'
+    )
+    is_fully_compiled = models.BooleanField(default=False)
+    total_courses_expected = models.IntegerField(default=0)
+    total_courses_finalized = models.IntegerField(default=0)
+    last_updated = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('batch',)
+        ordering = ['-last_updated']
+
+    def __str__(self):
+        return f"GA Master: {self.batch}"
+
+
+class StudentGAEntry(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    master_cache = models.ForeignKey(
+        GAMasterCache,
+        on_delete=models.CASCADE,
+        related_name='student_entries'
+    )
+    student = models.ForeignKey(
+        'students.Student',
+        on_delete=models.CASCADE,
+        related_name='ga_entries'
+    )
+    ga = models.ForeignKey(
+        GA,
+        on_delete=models.CASCADE,
+        related_name='student_entries'
+    )
+    ga_score = models.DecimalField(max_digits=5, decimal_places=2)
+    is_kpi_achieved = models.BooleanField()
+    finalized_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('master_cache', 'student', 'ga')
+        ordering = ['finalized_at']
+
+    def __str__(self):
+        return f"{self.student} - {self.ga}: {self.ga_score}%"
 
 
 # Weight constants

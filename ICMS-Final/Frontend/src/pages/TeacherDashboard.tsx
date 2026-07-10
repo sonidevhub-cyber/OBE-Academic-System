@@ -5,6 +5,7 @@ import { Bar, Line } from 'react-chartjs-2';
 import { BookOpen, Users, Calendar, Clock } from 'lucide-react';
 import { courseService, studentService } from '../api/apiService';
 import { api } from '../api/api';
+import obeService, { TeacherGAContext as TeacherGAContextType } from '../api/obeService';
 import InstructorProfileModal from '../components/ui/modals/InstructorProfileModal';
 import InstructorProfile from '../components/InstructorProfile';
 import { getProfileImageUrl } from '../utils/profileHelpers';
@@ -41,6 +42,8 @@ const TeacherDashboard = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAdvancedProfile, setShowAdvancedProfile] = useState(false);
   const [instructorProfile, setInstructorProfile] = useState<any>(null);
+  const [gaWarningsByCourse, setGaWarningsByCourse] = useState<Record<string, TeacherGAContextType | null>>({});
+  const [dismissedWarnings, setDismissedWarnings] = useState<Record<string, boolean>>({});
 
   // Add header animation effect
   useEffect(() => {
@@ -63,6 +66,17 @@ const TeacherDashboard = () => {
       pendingResults: 3,
     },
   });
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('teacher-ga-warning-dismissed');
+      if (stored) {
+        setDismissedWarnings(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.warn('Failed to load dismissed GA warnings', error);
+    }
+  }, []);
 
   // Fetch instructor profile and dashboard data
   useEffect(() => {
@@ -151,6 +165,95 @@ const TeacherDashboard = () => {
 
     fetchInstructorData();
   }, [currentUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWarnings = async () => {
+      if (!instructorData.courses.length) {
+        setGaWarningsByCourse({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        instructorData.courses.map(async (course: any) => {
+          const courseId = String(course.course_id || course.id || '');
+          if (!courseId) return null;
+
+          try {
+            const context = await obeService.getTeacherGAContext(courseId);
+            return [courseId, context] as const;
+          } catch (error) {
+            console.error(`Failed to load GA warnings for course ${courseId}:`, error);
+            return [courseId, null] as const;
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setGaWarningsByCourse(
+          Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, TeacherGAContextType | null]>)
+        );
+      }
+    };
+
+    loadWarnings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [instructorData.courses]);
+
+  const dismissGaWarning = (courseId: string, gaCode: string) => {
+    const storageKey = `${courseId}:${gaCode}`;
+    setDismissedWarnings((prev) => {
+      const next = { ...prev, [storageKey]: true };
+      sessionStorage.setItem('teacher-ga-warning-dismissed', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const renderGaWarnings = (course: any) => {
+    const courseId = String(course.course_id || course.id || '');
+    const warnings = gaWarningsByCourse[courseId]?.interim_alerts || [];
+
+    const visibleWarnings = warnings.filter((warning) => {
+      return !dismissedWarnings[`${courseId}:${warning.ga_code}`];
+    });
+
+    if (!visibleWarnings.length) {
+      return null;
+    }
+
+    return (
+      <div className="mt-3 space-y-2">
+        {visibleWarnings.map((warning) => {
+          const warningText = `Previous batch showed weakness in ${warning.ga_code} (${warning.ga_title}). Since this course targets the same GA, please focus more on problem-solving tasks in assignments.`;
+          return (
+          <div
+            key={`${courseId}:${warning.ga_code}`}
+            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-700">
+                  GA Warning
+                </div>
+                <p className="mt-1 font-medium leading-5">{warningText}</p>
+              </div>
+              <button
+                onClick={() => dismissGaWarning(courseId, warning.ga_code)}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   // Navigation tabs for instructor - limited access
   const tabs = [
@@ -479,7 +582,7 @@ const TeacherDashboard = () => {
                     <div className="space-y-3 max-h-[192px] overflow-y-auto pr-2">
                       {instructorData.courses.length > 0 ? (
                         instructorData.courses.map((course: any) => (
-                          <div key={course.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 hover:bg-indigo-50 transition-colors">
+                          <div key={course.course_id || course.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 hover:bg-indigo-50 transition-colors">
                             <div className="flex justify-between items-start">
                               <div>
                                 <p className="text-sm font-bold text-gray-900">{course.course_name}</p>
@@ -550,42 +653,44 @@ const TeacherDashboard = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {instructorData.courses.length > 0 ? (
-                    instructorData.courses.map((course: any) => (
-                      <div key={course.id} className="bg-white rounded-2xl p-6 shadow-lg border border-gray-50 hover:shadow-xl transition-all duration-300 group">
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-600 transition-colors duration-300">
-                            <BookOpen className="h-6 w-6 text-indigo-600 group-hover:text-white transition-colors duration-300" />
+                    {instructorData.courses.length > 0 ? (
+                      instructorData.courses.map((course: any) => (
+                        <div key={course.course_id || course.id} className="bg-white rounded-2xl p-6 shadow-lg border border-gray-50 hover:shadow-xl transition-all duration-300 group">
+                          <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-600 transition-colors duration-300">
+                              <BookOpen className="h-6 w-6 text-indigo-600 group-hover:text-white transition-colors duration-300" />
+                            </div>
+                            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold uppercase tracking-wider">
+                              Active
+                            </span>
                           </div>
-                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold uppercase tracking-wider">
-                            Active
-                          </span>
-                        </div>
-                        
-                        <h3 className="text-lg font-bold text-gray-900 mb-1">{course.course_name}</h3>
-                        <p className="text-sm font-medium text-indigo-600 mb-4">{course.course_code}</p>
-                        
-                        <div className="space-y-3 pt-4 border-t border-gray-50">
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Users className="h-4 w-4 mr-3 text-gray-400" />
-                            <span>Batch: <span className="font-semibold text-gray-900">{course.batch_name}</span></span>
+                          
+                          <h3 className="text-lg font-bold text-gray-900 mb-1">{course.course_name}</h3>
+                          <p className="text-sm font-medium text-indigo-600 mb-4">{course.course_code}</p>
+                          
+                          <div className="space-y-3 pt-4 border-t border-gray-50">
+                            <div className="flex items-center text-sm text-gray-600">
+                              <Users className="h-4 w-4 mr-3 text-gray-400" />
+                              <span>Batch: <span className="font-semibold text-gray-900">{course.batch_name}</span></span>
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <Calendar className="h-4 w-4 mr-3 text-gray-400" />
+                              <span>Semester: <span className="font-semibold text-gray-900">{course.semester_no}</span></span>
+                            </div>
+                            <div className="flex items-center text-sm text-gray-600">
+                              <Clock className="h-4 w-4 mr-3 text-gray-400" />
+                              <span>Credits: <span className="font-semibold text-gray-900">{course.credit_hours} Cr. Hr</span></span>
+                            </div>
                           </div>
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Calendar className="h-4 w-4 mr-3 text-gray-400" />
-                            <span>Semester: <span className="font-semibold text-gray-900">{course.semester_no}</span></span>
-                          </div>
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Clock className="h-4 w-4 mr-3 text-gray-400" />
-                            <span>Credits: <span className="font-semibold text-gray-900">{course.credit_hours} Cr. Hr</span></span>
-                          </div>
-                        </div>
 
-                        <button className="w-full mt-6 py-2.5 bg-gray-50 text-gray-700 rounded-xl font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300">
-                          Manage Course
-                        </button>
-                      </div>
-                    ))
-                  ) : (
+                          {renderGaWarnings(course)}
+
+                          <button className="w-full mt-6 py-2.5 bg-gray-50 text-gray-700 rounded-xl font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300">
+                            Manage Course
+                          </button>
+                        </div>
+                      ))
+                    ) : (
                     <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-gray-100">
                       <BookOpen className="h-16 w-16 text-gray-200 mx-auto mb-4" />
                       <h3 className="text-xl font-bold text-gray-900">No Courses Allocated</h3>

@@ -40,6 +40,20 @@ interface SacProgramSetupProps {
   onManagePromotion?: (programId: string, batchId: string) => void;
 }
 
+const canGraduateBatch = (batch: Batch, totalSemesters: number) =>
+  batch.is_graduating_eligible ?? (batch.exit_survey_enabled && batch.current_semester === totalSemesters);
+
+const getGraduationLockReason = (batch: Batch, totalSemesters: number) => {
+  if (batch.is_graduating_eligible) return null;
+  if (!batch.exit_survey_enabled) return 'Exit survey not enabled';
+  if (batch.current_semester !== totalSemesters) return 'Batch is not at final semester';
+  if ((batch.pending_exit_survey_count ?? 0) > 0) {
+    return `${batch.pending_exit_survey_count} exit survey${batch.pending_exit_survey_count === 1 ? '' : 's'} still pending`;
+  }
+
+  return 'Batch is not eligible for graduation yet';
+};
+
 const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) => {
   // State
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -668,12 +682,12 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                                           </Link>
                                         )
                                       )}
-                                      {selectedProgram && b.current_semester === selectedProgram.total_semesters && (
+                                      {selectedProgram && canGraduateBatch(b, selectedProgram.total_semesters) && (
                                         <>
-                                          {!b.exit_survey_enabled || b.pending_exit_survey_count > 0 || !b.is_program_end_ready ? (
+                                          {getGraduationLockReason(b, selectedProgram.total_semesters) ? (
                                             <button 
                                               disabled
-                                              title={`Graduation not available: ${!b.exit_survey_enabled ? "Exit survey not enabled" : b.pending_exit_survey_count > 0 ? `${b.pending_exit_survey_count} students need to submit exit survey` : "Not all courses completed"}`}
+                                              title={`Graduation not available: ${getGraduationLockReason(b, selectedProgram.total_semesters)}`}
                                               className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs font-bold"
                                             >
                                               <GraduationCap className="w-3.5 h-3.5" />

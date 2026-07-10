@@ -6,6 +6,7 @@ import {
   MessageSquare, 
   BookOpen, 
   Users, 
+  
   User,
   GraduationCap, 
   Settings,
@@ -228,19 +229,19 @@ const ModularCoordinatorDashboard: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-[#F0FDF4]">
+    <div className="flex h-screen w-full bg-[#F0FDF4] overflow-hidden">
       <Toaster position="top-right" reverseOrder={false} />
-      {/* Sidebar */}
-      <div className="w-72 bg-gradient-to-b from-green-700 via-emerald-800 to-teal-900 text-white p-4 space-y-2 min-h-screen shadow-xl">
-        <div className="mb-8 text-center">
-          <div className="h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-2 flex items-center justify-center border border-white/30 overflow-hidden">
+      {/* Sidebar - Reduced width */}
+      <div className="w-56 bg-gradient-to-b from-green-700 via-emerald-800 to-teal-900 text-white p-3 space-y-2 flex-shrink-0 shadow-xl overflow-y-auto">
+        <div className="mb-6 text-center">
+          <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-2 flex items-center justify-center border border-white/30 overflow-hidden">
             {headerImageUrl ? (
               <img src={headerImageUrl} alt="Coordinator" className="w-full h-full object-cover" />
             ) : (
-              <User className="h-10 w-10 text-white" />
+              <User className="h-8 w-8 text-white" />
             )}
           </div>
-          <h3 className="text-lg font-semibold text-white truncate px-2">{headerName}</h3>
+          <h3 className="text-sm font-semibold text-white truncate px-2">{headerName}</h3>
           <p className="text-xs text-green-200 uppercase tracking-widest">Coordinator</p>
         </div>
 
@@ -255,14 +256,14 @@ const ModularCoordinatorDashboard: React.FC = () => {
                       setActiveTab(item.id as TabId);
                       setSelectedVersionId(null);
                     }}
-                    className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 ${
+                    className={`w-full flex items-center px-3 py-2 rounded-lg transition-all duration-200 ${
                       activeTab === item.id 
                         ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30' 
                         : 'text-green-100 hover:bg-white/10 hover:text-white'
                     }`}
                   >
-                    <Icon className="h-5 w-5 mr-3" />
-                    <span className="flex-1 text-left font-semibold">{item.label}</span>
+                    <Icon className="h-4 w-4 mr-2" />
+                    <span className="flex-1 text-left font-semibold text-sm">{item.label}</span>
                   </button>
                 </li>
               );
@@ -270,21 +271,21 @@ const ModularCoordinatorDashboard: React.FC = () => {
           </ul>
         </nav>
 
-        <div className="mt-8 pt-4 border-t border-white/10">
+        <div className="mt-6 pt-4 border-t border-white/10">
           <button
             onClick={logout}
-            className="w-full flex items-center justify-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors duration-200 shadow-lg"
+            className="w-full flex items-center justify-center gap-2 bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700 transition-colors duration-200 shadow-lg text-sm"
           >
-            <LogOut className="w-4 h-4" />
-            Sign Out
+            <LogOut className="w-3 h-3" />
+            Logout
           </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1">
+      {/* Main Content - Vertically scrollable */}
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-gradient-to-r from-green-600 via-emerald-600 to-teal-700 p-6 shadow-xl border-b border-white/20">
+        <header className="bg-gradient-to-r from-green-600 via-emerald-600 to-teal-700 p-4 shadow-xl border-b border-white/20 flex-shrink-0">
           <motion.div
             className="flex items-center justify-between"
             initial={{ opacity: 0, y: -20 }}
@@ -292,7 +293,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
             transition={{ duration: 0.8, ease: "easeOut" }}
           >
             <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center overflow-hidden border-2 border-white shadow-lg">
+              <div className="h-10 w-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center overflow-hidden border-2 border-white shadow-lg">
                 {headerImageUrl ? (
                   <img
                     src={headerImageUrl}
@@ -300,29 +301,30 @@ const ModularCoordinatorDashboard: React.FC = () => {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <span className="text-lg font-semibold text-white">
+                  <span className="text-base font-semibold text-white">
                     {headerName.charAt(0).toUpperCase()}
                   </span>
                 )}
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-white capitalize">
+                <h1 className="text-xl font-bold text-white capitalize">
                   {activeTab.replace('-', ' ')}
                 </h1>
-                <p className="text-green-100 text-sm opacity-80">
+                <p className="text-green-100 text-xs opacity-80">
                   Coordinator Management Portal
                 </p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <UniversalRoleSwitcher />
               <TopbarProfileMenu userData={coordinatorProfile || currentUser} />
             </div>
           </motion.div>
         </header>
 
-        {/* Content */}
-        <div className="p-6">
+        {/* Content - Scrollable */}
+        <div 
+          className="flex-1 overflow-y-auto overflow-x-hidden p-4 scroll-smooth">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab + (selectedVersionId || '')}

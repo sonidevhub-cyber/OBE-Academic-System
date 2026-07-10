@@ -4,7 +4,8 @@ from .models import (
     CourseSession, CourseGAScore, GACQIRecord,
     GACQIResubmissionHistory, StudentCLOScore,
     ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse,
-    ExitSurveyTemplate
+    ExitSurveyTemplate, PEOCQIRecord, PEOCQISubmissionHistory,
+    GAReport, CourseFeedbackGAScore, ExitSurveyGAScore
 )
 
 admin.site.register(PEO)
@@ -21,3 +22,8 @@ admin.site.register(ExitSurveyQuestion)
 admin.site.register(ExitSurveyCycle)
 admin.site.register(ExitSurveyResponse)
 admin.site.register(ExitSurveyTemplate)
+admin.site.register(PEOCQIRecord)
+admin.site.register(PEOCQISubmissionHistory)
+admin.site.register(GAReport)
+admin.site.register(CourseFeedbackGAScore)
+admin.site.register(ExitSurveyGAScore)

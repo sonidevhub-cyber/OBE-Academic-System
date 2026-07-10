@@ -6,6 +6,7 @@ import FeedbackButton from '../forms/FeedbackButton';
 import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
 
 import GAReport from '../../pages/GAReport';
+import PEOReport from '../../pages/PEOReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
 import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
@@ -23,6 +24,8 @@ import HODFeedbackControl from "../pages/HODFeedbackControl";
 import EnableResultEditing from "../pages/EnableResultEditing";
 import HODExitSurveyControl from "../pages/HODExitSurveyControl";
 import HODAlumniFeedbackControl from "../pages/HODAlumniFeedbackControl";
+import HODPEOCQI from "../pages/HODPEOCQI";
+import HODGACQIAdvisory from "../pages/HODGACQIAdvisory";
 
 import {
   LayoutDashboard,
@@ -36,7 +39,8 @@ import {
   BookOpen,
   Settings,
   FileSpreadsheet,
-  GraduationCap
+  GraduationCap,
+  TrendingUp
 } from 'lucide-react';
 
 interface Department {
@@ -74,7 +78,7 @@ interface Student {
   email: string;
 }
 
-type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "obe-report" | "notice" | "feedback" | "obe-management" | "peo-report" | "student-obe" | "result-editing" | "exit-survey" | "alumni-feedback";
+type TabId = "dashboard" | "cqi" | "ga-report" | "clo-report" | "obe-report" | "notice" | "feedback" | "obe-management" | "peo-report" | "peo-cqi" | "student-obe" | "result-editing" | "exit-survey" | "alumni-feedback" | "ga-cqi-advisory";
 
 const ModularHODDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -103,6 +107,9 @@ const ModularHODDashboard: React.FC = () => {
     { id: "cqi", label: "CLO CQI Control", icon: ClipboardCheck },
     { id: "clo-report", label: "CLO Reports", icon: BookOpen },
     { id: "ga-report", label: "GA Reports", icon: FileBarChart },
+    { id: "ga-cqi-advisory", label: "CQI Advisory Export", icon: ClipboardCheck },
+    { id: "peo-report", label: "PEO Reports", icon: TrendingUp },
+    { id: "peo-cqi", label: "PEO CQI", icon: ClipboardCheck },
     { id: "obe-report", label: "OBE Report", icon: FileSpreadsheet },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "feedback", label: "Feedback", icon: MessageSquare },
@@ -270,6 +277,15 @@ const ModularHODDashboard: React.FC = () => {
 
       case 'ga-report':
         return <CoordinatorGAReportModule />;
+
+      case 'ga-cqi-advisory':
+        return <HODGACQIAdvisory />;
+
+      case 'peo-report':
+        return <PEOReport />;
+
+      case 'peo-cqi':
+        return <HODPEOCQI />;
 
       case 'obe-report':
         return <OBEReportDashboard />;

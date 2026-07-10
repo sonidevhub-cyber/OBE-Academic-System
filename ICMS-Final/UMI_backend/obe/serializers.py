@@ -13,7 +13,9 @@ from .models import (
     ExitSurveyResponse,
     AlumniSurveyQuestion,
     AlumniSurveyCycle,
-    AlumniSurveyResponse
+    AlumniSurveyResponse,
+    PEOCQIRecord,
+    PEOCQISubmissionHistory
 )
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
@@ -74,7 +76,8 @@ class GAPEOMappingSerializer(
         fields = [ 
             'id', 'ga', 'peo', 
             'ga_title', 'peo_title', 
-            'is_active', 'created_at' 
+            'is_active', 'created_at',
+            'weight'
         ] 
         read_only_fields = ['id', 'created_at']
 
@@ -142,6 +145,9 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
     ga_code = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.name', read_only=True)
     contributing_courses = serializers.SerializerMethodField()
+    saved_by_hod_name = serializers.CharField(
+        source='saved_by_hod.full_name', read_only=True, allow_null=True
+    )
 
     def get_ga_code(self, obj):
         return f'GA-{obj.ga.order_number}'
@@ -173,7 +179,7 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
         # Sort ascending by course_ga_score (so lowest scores come first)
         courses.sort(key=lambda x: x['course_ga_score'])
         return courses
- 
+
     class Meta:
         model = GACQIRecord
         fields = [
@@ -181,9 +187,62 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
             'attainment_value', 'kpi_threshold_at_trigger',
             'root_cause', 'remedial_plan', 'hod_comment', 'status',
             'submitted_by', 'approved_by', 'is_audit_visible', 'is_locked',
-            'created_at', 'updated_at', 'history', 'contributing_courses'
+            'created_at', 'updated_at', 'history', 'contributing_courses',
+            'issue_statement', 'hod_action_plan', 'triggered_at', 
+            'saved_by_hod', 'saved_by_hod_name', 'saved_at', 'is_active'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'history', 'contributing_courses', 'is_locked']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'history', 'contributing_courses', 'is_locked', 'triggered_at', 'saved_at', 'saved_by_hod']
+
+
+class PEOCQISubmissionHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PEOCQISubmissionHistory
+        fields = ['id', 'cqi_record', 'root_cause_snapshot', 'remedial_plan_snapshot', 'status_at_time', 'submitted_at']
+        read_only_fields = ['id', 'submitted_at']
+
+
+class PEOCQIRecordSerializer(serializers.ModelSerializer):
+    history = PEOCQISubmissionHistorySerializer(many=True, read_only=True)
+    peo_title = serializers.CharField(source='peo.title', read_only=True)
+    peo_code = serializers.SerializerMethodField()
+    batch_name = serializers.CharField(source='batch.name', read_only=True)
+    contributing_gas = serializers.SerializerMethodField()
+
+    def get_peo_code(self, obj):
+        return f'PEO-{obj.peo.order_number}'
+        
+    def get_contributing_gas(self, obj):
+        # Get GA-PEO mappings for this PEO
+        mappings = GAPEOMapping.objects.filter(
+            peo=obj.peo,
+            is_active=True
+        ).select_related('ga')
+        
+        gas = []
+        for mapping in mappings:
+            # Get GA score for this batch
+            from .services import calculate_weighted_ga_score
+            ga_result = calculate_weighted_ga_score(mapping.ga, obj.batch)
+            if ga_result and ga_result['final_score']:
+                gas.append({
+                    'ga_id': str(mapping.ga.id),
+                    'ga_code': f'GA-{mapping.ga.order_number}',
+                    'ga_title': mapping.ga.title,
+                    'ga_score': ga_result['final_score'],
+                    'weight': float(mapping.weight)
+                })
+        return gas
+
+    class Meta:
+        model = PEOCQIRecord
+        fields = [
+            'id', 'peo', 'peo_title', 'peo_code', 'batch', 'batch_name',
+            'attainment_value', 'kpi_threshold_at_trigger',
+            'root_cause', 'remedial_plan', 'status',
+            'submitted_by', 'is_locked',
+            'created_at', 'updated_at', 'history', 'contributing_gas'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'history', 'contributing_gas', 'is_locked']
 
 
 class CourseSessionSerializer(
@@ -335,5 +394,5 @@ class AlumniSurveyResponseSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = AlumniSurveyResponse
-        fields = ['id', 'cycle', 'student', 'question', 'question_text', 'peo_title', 'score', 'submitted_at']
+        fields = ['id', 'cycle', 'student', 'question', 'question_text', 'peo_title', 'score', 'submitted_at', 'employment_status', 'organization_name', 'current_designation']
         read_only_fields = ['id', 'submitted_at']

@@ -88,12 +88,27 @@ class GraduateBatchView(generics.GenericAPIView):
             return Response({'error': 'Already graduated'}, status=status.HTTP_400_BAD_REQUEST)
         if batch.current_semester < batch.program.total_semesters:
             return Response({'error': 'Not all semesters completed'}, status=status.HTTP_400_BAD_REQUEST)
-        if batch.pending_exit_survey_count > 0:
-            return Response({'error': f'Cannot graduate: {batch.pending_exit_survey_count} students still need to submit exit survey'}, status=status.HTTP_400_BAD_REQUEST)
         if not batch.exit_survey_enabled:
             return Response({'error': 'Exit survey not enabled for this batch'}, status=status.HTTP_400_BAD_REQUEST)
-        if not batch.is_program_end_ready:
-            return Response({'error': 'Program end not ready: not all course assessments are completed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_students = User.objects.filter(batch=batch, role='student').count()
+        pending_surveys = batch.pending_exit_survey_count
+        responded_students = max(total_students - pending_surveys, 0)
+        required_responses = max(1, (total_students + 1) // 2)
+
+        if total_students <= 0:
+            return Response({'error': 'No students enrolled in this batch'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if responded_students < required_responses:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot graduate: {responded_students}/{total_students} students have submitted '
+                        'the exit survey. At least 50% is required.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         batch.status = 'graduated'
         batch.graduated_at = timezone.now()
@@ -127,17 +142,14 @@ class AllBatchesView(generics.ListAPIView):
     def get_queryset(self):
         queryset = Batch.objects.filter(is_active=True).select_related('program')
         alumni_feedback = self.request.query_params.get('alumni_feedback')
-        if alumni_feedback and alumni_feedback.lower() in ['1', 'true', 'yes', 'all']:
-            if alumni_feedback.lower() == 'all':
-                queryset = queryset.filter(
-                    status='graduated',
-                    graduated_at__isnull=False,
-                )
-            else:
-                queryset = queryset.filter(
-                    status='graduated',
-                    graduated_at__isnull=False,
-                )
+        if alumni_feedback and alumni_feedback.lower() in ['1', 'true', 'yes']:
+            queryset = queryset.filter(
+                status='graduated',
+                graduated_at__isnull=False,
+            )
+        elif alumni_feedback and alumni_feedback.lower() == 'all':
+            # Don't filter by status, return both active and graduated
+            pass
         else:
             queryset = queryset.filter(status='active')
         program_id = self.request.query_params.get('program')

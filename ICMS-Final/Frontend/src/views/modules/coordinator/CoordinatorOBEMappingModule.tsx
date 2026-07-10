@@ -14,6 +14,7 @@ import {
   Check
 } from 'lucide-react';
 import obeService, { PEO, GA, GAPEOMatrix, ExitSurveyQuestion } from '../../../api/obeService';
+import peoService, { GAPEOMatrixWithWeight } from '../../../api/peoService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
 import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../../api/curriculumService';
 import { useAuth } from '../../../context/AuthContext';
@@ -57,7 +58,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   });
 
   // Matrix States
-  const [gaPeoMatrix, setGaPeoMatrix] = useState<GAPEOMatrix | null>(null);
+  const [gaPeoMatrix, setGaPeoMatrix] = useState<GAPEOMatrixWithWeight | null>(null);
   const [cloPiMatrix, setCloPiMatrix] = useState<any>(null);
   const [matrixChanges, setMatrixChanges] = useState<Set<string>>(new Set());
 
@@ -329,7 +330,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const loadGaPeoMatrix = async () => {
     if (!selectedProgram) return;
     try {
-      const res = await obeService.getGAPEOMatrix(selectedProgram.id);
+      const res = await peoService.getGAPEOMatrix(selectedProgram.id);
       setGaPeoMatrix(res);
       setMatrixChanges(new Set());
     } catch (error: any) {
@@ -362,7 +363,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloGaMatrix();
   }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion]);
 
-  const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-ga') => {
+  const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-ga', weight?: number) => {
      const changeKey = `${rowId}-${colId}`;
      const newChanges = new Set(matrixChanges);
      if (newChanges.has(changeKey)) newChanges.delete(changeKey);
@@ -372,8 +373,15 @@ const CoordinatorOBEMappingModule: React.FC = () => {
      if (type === 'ga-peo') {
         const newMappings = [...gaPeoMatrix!.mappings];
         const existingIdx = newMappings.findIndex(m => (m.ga === rowId && m.peo === colId) || (m.ga_id === rowId && m.peo_id === colId));
-        if (existingIdx >= 0) newMappings.splice(existingIdx, 1);
-        else newMappings.push({ id: '', ga: rowId, peo: colId, ga_id: rowId, peo_id: colId });
+        if (existingIdx >= 0) {
+          if (weight !== undefined) {
+            newMappings[existingIdx] = { ...newMappings[existingIdx], weight };
+          } else {
+            newMappings.splice(existingIdx, 1);
+          }
+        } else {
+          newMappings.push({ id: '', ga: rowId, peo: colId, ga_id: rowId, peo_id: colId, weight: weight || 0 });
+        }
         setGaPeoMatrix({ ...gaPeoMatrix!, mappings: newMappings });
       } else {
        const newMappings = [...cloPiMatrix!.mappings];
@@ -387,11 +395,25 @@ const CoordinatorOBEMappingModule: React.FC = () => {
    const handleSaveMatrix = async (type: 'ga-peo' | 'clo-ga') => {
       try {
         if (type === 'ga-peo') {
+          // Validate total weight per PEO is <= 100
+          const weightsByPeo: Record<string, number> = {};
+          gaPeoMatrix!.mappings.forEach(m => {
+            const peoId = m.peo || m.peo_id!;
+            weightsByPeo[peoId] = (weightsByPeo[peoId] || 0) + (m.weight || 0);
+          });
+          for (const peoId in weightsByPeo) {
+            if (weightsByPeo[peoId] > 100) {
+              const peo = gaPeoMatrix!.peos.find(p => p.id === peoId);
+              toast.error(`Total weight for PEO ${peo?.order_number} exceeds 100%`);
+              return;
+            }
+          }
           const mappings = gaPeoMatrix!.mappings.map(m => ({
             ga_id: (m.ga || m.ga_id)!,
-            peo_id: (m.peo || m.peo_id)!
+            peo_id: (m.peo || m.peo_id)!,
+            weight: m.weight || 0
           }));
-          await obeService.saveGAPEOMappings(selectedProgram!.id, mappings);
+          await peoService.saveGAPEOMappings(selectedProgram!.id, mappings);
           toast.success('GA-PEO mappings saved');
           loadGaPeoMatrix();
         } else {
@@ -632,12 +654,18 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="p-6 border-b border-gray-100 font-black text-gray-400 uppercase text-xs tracking-widest w-64">Graduate Attribute</th>
-                        {gaPeoMatrix.peos.map(peo => (
-                          <th key={peo.id} className="p-6 border-b border-gray-100 text-center w-32">
-                            <div className="font-black text-indigo-600 text-sm">PEO-{peo.order_number}</div>
-                            <div className="text-[10px] text-gray-400 mt-1 uppercase truncate max-w-[100px] mx-auto">{peo.title}</div>
-                          </th>
-                        ))}
+                        {gaPeoMatrix.peos.map(peo => {
+                          const currentTotal = gaPeoMatrix.mappings.filter(m => (m.peo === peo.id || m.peo_id === peo.id)).reduce((sum, m) => sum + (m.weight || 0), 0);
+                          return (
+                            <th key={peo.id} className="p-6 border-b border-gray-100 text-center w-48">
+                              <div className="font-black text-indigo-600 text-sm">PEO-{peo.order_number}</div>
+                              <div className="text-[10px] text-gray-400 mt-1 uppercase truncate max-w-[100px] mx-auto">{peo.title}</div>
+                              <div className={`text-[10px] font-bold mt-1 ${currentTotal > 100 ? 'text-red-600' : 'text-gray-500'}`}>
+                                Total: {currentTotal}%
+                              </div>
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
@@ -648,11 +676,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             <div className="text-sm text-gray-500 truncate max-w-[200px]">{ga.title}</div>
                           </td>
                           {gaPeoMatrix.peos.map(peo => {
-                            const active = gaPeoMatrix.mappings.some(m => 
+                            const mapping = gaPeoMatrix.mappings.find(m => 
                               (m.ga === ga.id || m.ga_id === ga.id) && (m.peo === peo.id || m.peo_id === peo.id)
                             );
+                            const active = !!mapping;
                             return (
-                              <td key={peo.id} className="p-6 border-b border-gray-50 text-center">
+                              <td key={peo.id} className="p-6 border-b border-gray-50 text-center space-y-2">
                                 <button
                                   onClick={() => isHOD && handleMatrixChange(ga.id, peo.id, 'ga-peo')}
                                   disabled={!isHOD}
@@ -664,6 +693,17 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                                 >
                                   {active ? <Save size={20} /> : <Plus size={20} />}
                                 </button>
+                                {active && (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={mapping.weight || 0}
+                                    onChange={(e) => isHOD && handleMatrixChange(ga.id, peo.id, 'ga-peo', parseFloat(e.target.value))}
+                                    disabled={!isHOD}
+                                    className="w-20 px-3 py-1.5 border border-gray-200 rounded-xl text-center font-bold text-sm focus:ring-2 focus:ring-indigo-500"
+                                  />
+                                )}
                               </td>
                             );
                           })}

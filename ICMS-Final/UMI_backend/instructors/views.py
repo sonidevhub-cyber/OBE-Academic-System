@@ -46,16 +46,31 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 program=alloc.course.program
             ).first()
             
-            previous_batch = Batch.objects.filter(
-                program=alloc.batch.program,
-                start_year__lt=alloc.batch.start_year
-            ).order_by("-start_year").first()
+            # For same batch, get last completed semester (any semester < current allocation's semester)
+            last_completed_semester = None
+            # Find max semester number that has courses with assessment_status='ASSESSMENT_DONE'
+            from obe.models import CourseSession
+            completed_semesters = CourseSession.objects.filter(
+                batch=alloc.batch,
+                is_active=True,
+                assessment_status='ASSESSMENT_DONE'
+            ).values_list('semester__number', flat=True).distinct()
+            
+            if completed_semesters:
+                # Filter to semesters < current allocation's semester
+                eligible_semesters = [s for s in completed_semesters if s < alloc.semester_no]
+                if eligible_semesters:
+                    last_completed_semester = max(eligible_semesters)
+            
             previous_cqi = None
-            if previous_batch:
+            if last_completed_semester:
                 previous_cqi = GACQIRecord.objects.filter(
-                    batch=previous_batch,
-                    status='FULLY_APPROVED').order_by('-created_at'
-                ).first()
+                    batch=alloc.batch,
+                    cqi_level='SEMESTER',
+                    semester=last_completed_semester,
+                    status__in=['SAVED', 'EXPORTED', 'FULLY_APPROVED', 'PENDING', 'SENT_BACK'],
+                    is_active=True
+                ).order_by('-created_at').first()
             data.append({
                 'id': alloc.id,
                 'allocation_id': alloc.id,
@@ -67,6 +82,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'credit_hours': alloc.course.credit_hours,
                 'batch_id': alloc.batch.id,
                 'batch_name': alloc.batch.name,
+                'last_completed_semester': last_completed_semester,
                 'semester_no': alloc.semester_no,
                 'semester_id': core_semester.id if core_semester else None,
                 'semester_name': f"Semester {alloc.semester_no}",
@@ -79,7 +95,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'has_previous_cqi': previous_cqi is not None,
                 'previous_cqi': {
                  'id': str(previous_cqi.id),
-                'batch': previous_batch.name,
+                 'semester': last_completed_semester,
                  'root_cause': previous_cqi.root_cause,
                   'remedial_plan': previous_cqi.remedial_plan,
                   } if previous_cqi else None,

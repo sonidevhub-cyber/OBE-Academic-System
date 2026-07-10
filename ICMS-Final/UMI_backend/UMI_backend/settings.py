@@ -44,6 +44,9 @@ INSTALLED_APPS = [
     'noticeboard',
     'coordinators',
     'curriculum',
+    'ga_cqi_cohort',
+    'teacher_alerts',
+    'clo_master',
 
 ]
 

@@ -55,6 +55,9 @@ const AlumniDashboard: React.FC = () => {
   const [surveyLoading, setSurveyLoading] = useState(true);
   const [surveySubmitting, setSurveySubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [employmentStatus, setEmploymentStatus] = useState<string | null>(null);
+  const [organizationName, setOrganizationName] = useState('');
+  const [currentDesignation, setCurrentDesignation] = useState('');
   const isSurveyRoute = location.pathname.includes('/alumni/survey');
   const showSurveyModal = !hasSubmitted && (Boolean(surveyCycleId) || isSurveyRoute);
 
@@ -173,8 +176,10 @@ const AlumniDashboard: React.FC = () => {
     () => surveyQuestions.filter((question) => (surveyResponses[question.id] || 0) > 0).length,
     [surveyQuestions, surveyResponses]
   );
-  const progressPercent = surveyQuestions.length ? Math.round((answeredCount / surveyQuestions.length) * 100) : 0;
-  const isComplete = surveyQuestions.length > 0 && surveyQuestions.every((question) => (surveyResponses[question.id] || 0) > 0);
+  const totalItems = surveyQuestions.length + 1; // +1 for employment status
+  const answeredItems = (employmentStatus ? 1 : 0) + answeredCount;
+  const progressPercent = totalItems > 0 ? Math.round((answeredItems / totalItems) * 100) : 0;
+  const isComplete = employmentStatus && surveyQuestions.length > 0 && surveyQuestions.every((question) => (surveyResponses[question.id] || 0) > 0);
 
   const handleSurveyRating = (questionId: string, rating: number) => {
     setSurveyResponses((prev) => ({
@@ -195,6 +200,11 @@ const AlumniDashboard: React.FC = () => {
       return;
     }
 
+    if (!employmentStatus) {
+      toast.error('Please select your Employment Status.');
+      return;
+    }
+
     if (!isComplete) {
       toast.error('Please answer all survey questions.');
       return;
@@ -207,6 +217,9 @@ const AlumniDashboard: React.FC = () => {
           question: question.id,
           score: surveyResponses[question.id],
         })),
+        employment_status: employmentStatus,
+        organization_name: organizationName,
+        current_designation: currentDesignation,
       });
 
       localStorage.setItem(surveyStorageKey(String(surveyCycleId), String(studentIdentifier)), 'true');
@@ -525,6 +538,72 @@ const AlumniDashboard: React.FC = () => {
                       </div>
                     </div>
                   </section>
+
+                  {/* Employment Status Section */}
+                  <motion.section
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-8 bg-white rounded-[28px] p-8 border border-gray-100 shadow-sm"
+                  >
+                    <h3 className="text-xl font-bold text-gray-800 mb-6">Section 1: Employment Status (Basic Information)</h3>
+                    
+                    <div className="mb-6">
+                      <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">
+                        Employment Status
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {[
+                          { value: 'EMPLOYED', label: 'Employed' },
+                          { value: 'SELF_EMPLOYED', label: 'Self-Employed / Entrepreneur' },
+                          { value: 'HIGHER_STUDIES', label: 'Higher Studies' },
+                          { value: 'UNEMPLOYED', label: 'Unemployed / Looking for Job' },
+                          { value: 'HOUSEWIFE', label: 'Housewife / Homemaker' },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            onClick={() => setEmploymentStatus(option.value)}
+                            className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
+                              employmentStatus === option.value
+                                ? 'bg-gradient-to-r from-pink-500 to-indigo-500 text-white border-indigo-600 shadow-lg'
+                                : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {(employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED') && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                            Organization / Company Name
+                          </label>
+                          <input
+                            type="text"
+                            value={organizationName}
+                            onChange={(e) => setOrganizationName(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                            placeholder="e.g., Systems Ltd, NetSol"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                            Current Designation
+                          </label>
+                          <input
+                            type="text"
+                            value={currentDesignation}
+                            onChange={(e) => setCurrentDesignation(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                            placeholder="e.g., Software Engineer, SQA, Team Lead"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </motion.section>
+
                   {surveyLoading ? (
                     <div className="mt-8 rounded-[28px] bg-white p-8 border border-gray-100 shadow-sm flex items-center justify-center">
                       <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />

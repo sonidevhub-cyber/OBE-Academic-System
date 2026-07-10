@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
+from django.db import transaction, models
 from decimal import Decimal
 from core.models import Batch, Semester, Program
 from students.models import Student
@@ -330,6 +330,62 @@ class CourseGAScoresView(APIView):
 class BatchSemesterGASummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _get_readiness_for_semester(self, batch: Batch, semester: Semester):
+        # Get pending courses for this specific semester
+        allowed_course_ids = []
+        if batch.curriculum_version:
+            allowed_course_ids = batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+
+        sessions_query = CourseSession.objects.filter(
+            batch=batch,
+            is_active=True,
+            semester=semester,
+        )
+        if allowed_course_ids:
+            sessions_query = sessions_query.filter(course_id__in=allowed_course_ids)
+        
+        sessions = sessions_query.select_related('course', 'instructor')
+        courses_total = sessions.count()
+        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+
+        pending_courses_list = []
+        finalized_courses_list = []
+        in_process_courses_list = []
+
+        for session in sessions:
+            course_info = {
+                'id': str(session.id),
+                'course_code': session.course.code,
+                'course_name': session.course.name,
+                'instructor_name': session.instructor.full_name if session.instructor else 'N/A',
+            }
+            if session.assessment_status == 'ASSESSMENT_DONE':
+                finalized_courses_list.append(course_info)
+            else:
+                in_process_courses_list.append(course_info)
+                pending_courses_list.append(session.course.code)
+
+        if courses_total == 0:
+            return {
+                'ready': False,
+                'finalized_courses': 0,
+                'total_courses': 0,
+                'pending_courses': [],
+                'finalized_courses_list': [],
+                'in_process_courses_list': [],
+            }
+
+        return {
+            'ready': courses_assessment_done >= courses_total,
+            'finalized_courses': courses_assessment_done,
+            'total_courses': courses_total,
+            'pending_courses': pending_courses_list,
+            'finalized_courses_list': finalized_courses_list,
+            'in_process_courses_list': in_process_courses_list,
+        }
+
     def get(self, request, batch_id):
         semester_id = request.query_params.get('semester_id')
         try:
@@ -347,6 +403,10 @@ class BatchSemesterGASummaryView(APIView):
                 is_active=True
             ).first()
 
+        readiness = None
+        if semester:
+            readiness = self._get_readiness_for_semester(batch, semester)
+        
         summaries = calculate_semester_ga_report(batch, semester) if semester else []
 
         return Response({
@@ -355,6 +415,7 @@ class BatchSemesterGASummaryView(APIView):
                 'number': semester.number if semester else None,
                 'name': semester.name if semester else None,
             },
+            'readiness': readiness,
             'ga_reports': summaries,
         })
 
@@ -620,15 +681,15 @@ class BatchStudentsListView(APIView):
         except Batch.DoesNotExist:
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        # Use User model (core app) which is what has the batch foreign key
+        # Use User model (core app) and Student model which both may have batch foreign keys
         from django.contrib.auth import get_user_model
         User = get_user_model()
         
         users = User.objects.filter(
-            batch=batch,
-            role='student',
+            (models.Q(batch=batch) | models.Q(student_profile__batch=batch)),
+            role__in=['student', 'alumni'],
             is_active=True
-        )
+        ).distinct()
         
         student_list = []
         for user in users:
@@ -670,45 +731,80 @@ class BatchGAReportView(APIView):
         if allowed_course_ids:
             sessions_query = sessions_query.filter(course_id__in=allowed_course_ids)
         
-        sessions = sessions_query
+        sessions = sessions_query.select_related('course', 'instructor', 'semester')
         courses_total = sessions.count()
         courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+
+        pending_courses_list = []
+        finalized_courses_list = []
+        in_process_courses_list = []
+
+        for session in sessions:
+            course_info = {
+                'id': str(session.id),
+                'course_code': session.course.code,
+                'course_name': session.course.name,
+                'instructor_name': session.instructor.full_name if session.instructor else 'N/A',
+                'semester_number': session.semester.number if session.semester else None,
+                'semester_name': session.semester.name if session.semester else None,
+            }
+            if session.assessment_status == 'ASSESSMENT_DONE':
+                finalized_courses_list.append(course_info)
+            else:
+                in_process_courses_list.append(course_info)
+                pending_courses_list.append(session.course.code)
 
         if courses_total == 0:
             return {
                 'ready': False,
                 'finalized_courses': 0,
                 'total_courses': 0,
-                'missing_courses': [],
+                'pending_courses': [],
+                'finalized_courses_list': [],
+                'in_process_courses_list': [],
             }
-
-        missing = []
-        if courses_assessment_done < courses_total:
-            # Identify missing courses by code for readability
-            missing_qs = sessions.exclude(assessment_status='ASSESSMENT_DONE')
-            missing = list(missing_qs.values_list('course__code', flat=True).distinct())
 
         return {
             'ready': courses_assessment_done >= courses_total,
             'finalized_courses': courses_assessment_done,
             'total_courses': courses_total,
-            'missing_courses': missing,
+            'pending_courses': pending_courses_list,
+            'finalized_courses_list': finalized_courses_list,
+            'in_process_courses_list': in_process_courses_list,
         }
 
     def get(self, request, batch_id):
-        print("=== BatchGAReportView ===")
-        print("batch_id:", batch_id)
         try:
             batch = Batch.objects.get(id=batch_id, is_active=True)
         except Batch.DoesNotExist:
-            print("ERROR: Batch not found")
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Readiness check
-        readiness = self._get_readiness_for_cumulative_cohort(batch)
-        if not readiness['ready']:
-            return Response(readiness)
+        scope = request.query_params.get('scope', 'cohort')    # cohort|student|all_students|course_wise
+        student_id = request.query_params.get('student_id', None)
 
+        # For scope=student or all_students
+        student_objs = []
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if scope == 'student':
+            if not student_id:
+                return Response({'error': 'student_id is required when scope=student'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                user = User.objects.get(id=student_id)
+                student_obj = Student.objects.get(user=user)
+                student_objs = [student_obj]
+            except (User.DoesNotExist, Student.DoesNotExist):
+                return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+        elif scope == 'all_students':
+            # Get all students OR alumni in the batch with pre-fetched user
+            student_objs = Student.objects.filter(
+                (models.Q(user__batch=batch) | models.Q(batch=batch)),
+                user__role__in=['student', 'alumni'],
+                user__is_active=True
+            ).select_related('user')
+
+        # Readiness gate (only when scope=cohort)
+        readiness = self._get_readiness_for_cumulative_cohort(batch)
         is_program_end_ready = batch.is_program_end_ready
         
         # Refresh indirect source tables first so the report can show real component percentages.
@@ -717,10 +813,232 @@ class BatchGAReportView(APIView):
         FeedbackService.calculate(batch)
 
         # Calculate Exit Survey scores for all GAs before building the report
-        gas = GA.objects.filter(program=batch.program, is_active=True)
+        gas = GA.objects.filter(program=batch.program, is_active=True).order_by('order_number')
         for ga in gas:
             calculate_exit_survey_ga_score(ga, batch)
-
+        
+        if scope == 'all_students':
+            # Build student-level data
+            student_reports = []
+            
+            # Pre-fetch all required data
+            allowed_course_ids = []
+            if batch.curriculum_version:
+                allowed_course_ids = batch.curriculum_version.version_courses.filter(
+                    is_active=True
+                ).values_list('course_id', flat=True)
+            cs_query = CourseSession.objects.filter(
+                batch=batch,
+                is_active=True,
+                assessment_status='ASSESSMENT_DONE'
+            )
+            if allowed_course_ids:
+                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
+            course_sessions = cs_query.select_related('course')
+            session_ids = [cs.id for cs in course_sessions]
+            
+            # Get all mappings for these courses and GAs
+            mappings = CLOGAMapping.objects.filter(
+                clo__course__in=[cs.course_id for cs in course_sessions],
+                ga__in=gas,
+                is_active=True,
+                clo__is_active=True
+            ).select_related('clo', 'ga')
+            
+            # Group mappings by (course_id, ga_id)
+            mappings_by_course_ga = {}
+            for mapping in mappings:
+                key = (mapping.clo.course_id, mapping.ga_id)
+                if key not in mappings_by_course_ga:
+                    mappings_by_course_ga[key] = []
+                mappings_by_course_ga[key].append(mapping)
+                
+            # Get all student CLO scores
+            student_ids = [s.student_id for s in student_objs]
+            student_clo_scores = StudentCLOScore.objects.filter(
+                student_id__in=student_ids,
+                course_session_id__in=session_ids
+            ).select_related('student', 'clo', 'course_session')
+            
+            # Group scores by (student_id, course_session_id, clo_id)
+            scores_by_key = {}
+            for score in student_clo_scores:
+                key = (score.student_id, score.course_session_id, score.clo_id)
+                scores_by_key[key] = score
+                
+            # Calculate for each student
+            for student_obj in student_objs:
+                user = student_obj.user
+                student_ga_scores = []
+                
+                for ga in gas:
+                    total_attainment = Decimal('0')
+                    total_weight = Decimal('0')
+                    
+                    for session in course_sessions:
+                        key = (session.course_id, ga.id)
+                        session_mappings = mappings_by_course_ga.get(key, [])
+                        
+                        for mapping in session_mappings:
+                            score_key = (student_obj.student_id, session.id, mapping.clo_id)
+                            student_clo_score = scores_by_key.get(score_key)
+                            
+                            if student_clo_score:
+                                contribution = student_clo_score.attainment * mapping.weight
+                                total_attainment += contribution
+                                total_weight += mapping.weight
+                                
+                    ga_attainment = Decimal('0')
+                    if total_weight > 0:
+                        ga_attainment = round(total_attainment / total_weight, 2)
+                        
+                    is_below = False
+                    if ga_attainment is not None:
+                        is_below = float(ga_attainment) < float(ga.kpi_threshold)
+                        
+                    student_ga_scores.append({
+                        'ga_id': str(ga.id),
+                        'ga_code': f'GA-{ga.order_number}',
+                        'direct_score': float(ga_attainment) if ga_attainment is not None else 0.0,
+                        'is_below_threshold': is_below
+                    })
+                    
+                student_reports.append({
+                    'id': str(user.id),
+                    'name': user.full_name,
+                    'registration_number': student_obj.registration_number,
+                    'ga_scores': student_ga_scores,
+                    'is_dropped': not user.is_active,
+                    'is_frozen': False
+                })
+            
+            # Calculate cohort-level summary for footer
+            cohort_summary = []
+            from ..services import calculate_weighted_ga_score
+            for ga in gas:
+                weighted_result = calculate_weighted_ga_score(ga, batch)
+                final_score = weighted_result['final_score'] if weighted_result['final_score'] is not None else 0.0
+                direct_attainment = weighted_result['direct_score'] if weighted_result['direct_score'] is not None else 0.0
+                indirect_attainment = weighted_result['indirect_score'] if weighted_result['indirect_score'] is not None else 0.0
+                calculated_final = None
+                if direct_attainment is not None and indirect_attainment is not None:
+                    calculated_final = (direct_attainment * 0.8) + (indirect_attainment * 0.2)
+                elif direct_attainment is not None:
+                    calculated_final = direct_attainment
+                elif indirect_attainment is not None:
+                    calculated_final = indirect_attainment
+                else:
+                    calculated_final = 0.0
+                cohort_summary.append({
+                    'ga_id': str(ga.id),
+                    'ga_code': f'GA-{ga.order_number}',
+                    'ga_title': ga.title,
+                    'ga_kpi_threshold': float(ga.kpi_threshold),
+                    'direct_attainment': float(direct_attainment),
+                    'indirect_attainment': float(indirect_attainment),
+                    'final_attainment': float(calculated_final),
+                    'status': 'ACHIEVED' if (final_score is not None and float(final_score) >= float(ga.kpi_threshold)) else 'BELOW_TARGET'
+                })
+            
+            return Response({
+                'is_program_end_ready': is_program_end_ready,
+                'gas': [{'ga_id': str(ga.id), 'ga_code': f'GA-{ga.order_number}', 'ga_title': ga.title, 'ga_kpi_threshold': float(ga.kpi_threshold)} for ga in gas],
+                'students': student_reports,
+                'cohort_summary': cohort_summary
+            })
+        elif scope == 'course_wise':
+            # Build course-wise data
+            allowed_course_ids = []
+            if batch.curriculum_version:
+                allowed_course_ids = batch.curriculum_version.version_courses.filter(
+                    is_active=True
+                ).values_list('course_id', flat=True)
+            cs_query = CourseSession.objects.filter(
+                batch=batch,
+                is_active=True,
+                assessment_status='ASSESSMENT_DONE'
+            )
+            if allowed_course_ids:
+                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
+            course_sessions = cs_query.select_related('course', 'semester')
+            
+            # Bulk fetch all CourseGAScores for these sessions and GAs
+            course_session_ids = [cs.id for cs in course_sessions]
+            course_ga_scores = CourseGAScore.objects.filter(
+                course_session_id__in=course_session_ids,
+                ga__in=gas
+            ).select_related('course_session', 'ga')
+            
+            # Group scores by (course_session_id, ga_id) for quick lookup
+            scores_by_session_ga = {}
+            for score in course_ga_scores:
+                key = (score.course_session_id, score.ga_id)
+                scores_by_session_ga[key] = score
+            
+            course_reports = []
+            for session in course_sessions:
+                course_ga_list = []
+                for ga in gas:
+                    key = (session.id, ga.id)
+                    score_obj = scores_by_session_ga.get(key)
+                    if score_obj:
+                        is_below = float(score_obj.score) < float(ga.kpi_threshold)
+                        course_ga_list.append({
+                            'ga_id': str(ga.id),
+                            'ga_code': f'GA-{ga.order_number}',
+                            'score': float(score_obj.score),
+                            'is_below_threshold': is_below
+                        })
+                    else:
+                        course_ga_list.append({
+                            'ga_id': str(ga.id),
+                            'ga_code': f'GA-{ga.order_number}',
+                            'score': None,
+                            'is_below_threshold': False
+                        })
+                course_reports.append({
+                    'course_id': str(session.course.id),
+                    'course_code': session.course.code,
+                    'course_title': session.course.name,
+                    'semester': session.semester.number if session.semester else None,
+                    'ga_scores': course_ga_list
+                })
+                
+            # Calculate cohort-level summary for footer (same as all_students)
+            cohort_summary = []
+            from ..services import calculate_weighted_ga_score
+            for ga in gas:
+                weighted_result = calculate_weighted_ga_score(ga, batch)
+                final_score = weighted_result['final_score'] if weighted_result['final_score'] is not None else 0.0
+                direct_attainment = weighted_result['direct_score'] if weighted_result['direct_score'] is not None else 0.0
+                indirect_attainment = weighted_result['indirect_score'] if weighted_result['indirect_score'] is not None else 0.0
+                calculated_final = None
+                if direct_attainment is not None and indirect_attainment is not None:
+                    calculated_final = (direct_attainment * 0.8) + (indirect_attainment * 0.2)
+                elif direct_attainment is not None:
+                    calculated_final = direct_attainment
+                elif indirect_attainment is not None:
+                    calculated_final = indirect_attainment
+                else:
+                    calculated_final = 0.0
+                cohort_summary.append({
+                    'ga_id': str(ga.id),
+                    'ga_code': f'GA-{ga.order_number}',
+                    'ga_title': ga.title,
+                    'ga_kpi_threshold': float(ga.kpi_threshold),
+                    'direct_attainment': float(direct_attainment),
+                    'indirect_attainment': float(indirect_attainment),
+                    'final_attainment': float(calculated_final),
+                    'status': 'ACHIEVED' if (final_score is not None and float(final_score) >= float(ga.kpi_threshold)) else 'BELOW_TARGET'
+                })
+                
+            return Response({
+                'is_program_end_ready': is_program_end_ready,
+                'gas': [{'ga_id': str(ga.id), 'ga_code': f'GA-{ga.order_number}', 'ga_title': ga.title, 'ga_kpi_threshold': float(ga.kpi_threshold)} for ga in gas],
+                'courses': course_reports,
+                'cohort_summary': cohort_summary
+            })
+        
         # Get GA report using the updated calculation function
         ga_report_rows = calculate_ga_report(batch)
         
@@ -808,9 +1126,10 @@ class BatchGAReportView(APIView):
             })
 
         print("=== returning response with response_items count:", len(response_items))
-        # Return top-level object with is_program_end_ready and data
+        # Return top-level object with is_program_end_ready, readiness, and data
         return Response({
             'is_program_end_ready': is_program_end_ready,
+            'readiness': readiness,
             'ga_reports': response_items
         })
 

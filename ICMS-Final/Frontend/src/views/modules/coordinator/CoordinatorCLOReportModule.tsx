@@ -1,431 +1,470 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FileBarChart, CheckCircle, AlertCircle, XCircle, ArrowLeft } from 'lucide-react';
-import obeService, { CLOReportResponse, CourseSession } from '../../../api/obeService';
+import { FileBarChart, ArrowLeft, Download, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import obeService, {
+  CLOMasterCompilationResponse,
+  CLOMasterCompilationCourse,
+  CLOMasterCompilationStudent,
+  Batch
+} from '../../../api/obeService';
+import academicStructureService, { Program, Semester } from '../../../api/academicStructureService';
 import { toast } from 'react-hot-toast';
+
+type BatchCategory = 'all' | 'ongoing' | 'graduated';
 
 const CoordinatorCLOReportModule: React.FC = () => {
   const [loading, setLoading] = useState(true);
-  const [batches, setBatches] = useState<any[]>([]);
+  const [allPrograms, setAllPrograms] = useState<any[]>([]);
+  const [allSemesters, setAllSemesters] = useState<any[]>([]);
+  const [allBatches, setAllBatches] = useState<Batch[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
-  const [courseSessions, setCourseSessions] = useState<CourseSession[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [cloReport, setCloReport] = useState<CLOReportResponse | null>(null);
+  const [batchCategory, setBatchCategory] = useState<BatchCategory>('all');
+  const [report, setReport] = useState<CLOMasterCompilationResponse | null>(null);
+  const [expandedCqi, setExpandedCqi] = useState<Set<string>>(new Set());
 
-  // Fetch all batches on mount
+  const toggleCqi = (key: string) => {
+    const newSet = new Set(expandedCqi);
+    if (newSet.has(key)) {
+      newSet.delete(key);
+    } else {
+      newSet.add(key);
+    }
+    setExpandedCqi(newSet);
+  };
+
+  // Fetch initial data
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       try {
-        const batchesData = await obeService.getAllBatches();
-        setBatches(batchesData);
+        const [programsRes, batches] = await Promise.all([
+          academicStructureService.getPrograms(),
+          obeService.getAllBatches({ alumni_feedback: 'all' }),
+        ]);
+        const programs = programsRes.data;
+        // Flatten all semesters from all programs
+        const semesters = programs.flatMap((p: any) => p.semesters || []);
+        // De-duplicate semesters by id
+        const uniqueSemesters = Array.from(new Map(semesters.map((s: any) => [s.id, s])).values());
+        setAllPrograms(programs);
+        setAllSemesters(uniqueSemesters);
+        setAllBatches(batches);
+        
+        if (batches.length > 0) {
+          setSelectedProgramId(batches[0].program?.id || '');
+          setSelectedBatchId(batches[0].id);
+        }
       } catch (error) {
         console.error(error);
-        toast.error('Failed to fetch batches');
+        toast.error('Failed to load initial data');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchInitialData();
   }, []);
 
-  // Fetch course sessions when a batch is selected
+  // Filter batches based on program and category
+  const filteredBatches = selectedProgramId
+    ? allBatches.filter((b) => {
+        if (b.program?.id !== selectedProgramId) return false;
+        if (batchCategory === 'all') return true;
+        if (batchCategory === 'ongoing') return b.status === 'active';
+        if (batchCategory === 'graduated') return b.status === 'graduated';
+        return true;
+      })
+    : allBatches.filter((b) => {
+        if (batchCategory === 'all') return true;
+        if (batchCategory === 'ongoing') return b.status === 'active';
+        if (batchCategory === 'graduated') return b.status === 'graduated';
+        return true;
+      });
+
+  // Fetch report when selections change
   useEffect(() => {
-    const fetchSessions = async () => {
-      if (!selectedBatchId) {
-        setCourseSessions([]);
-        setSelectedSessionId(null);
-        return;
-      }
+    if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) return;
 
-      setLoading(true);
-      try {
-        const data = await obeService.getCourseSessions(selectedBatchId);
-        setCourseSessions(data.sessions);
-      } catch (error) {
-        console.error(error);
-        toast.error('Failed to fetch course sessions');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchSessions();
-  }, [selectedBatchId]);
-
-  // Fetch CLO Report when a course session is selected
-  useEffect(() => {
     const fetchReport = async () => {
-      if (!selectedSessionId) {
-        setCloReport(null);
-        return;
-      }
-
       setLoading(true);
       try {
-        const data = await obeService.getCourseCLOReport(selectedSessionId);
-        setCloReport(data);
+        const data = await obeService.getCLOMasterCompilation(
+          selectedProgramId,
+          selectedSemesterId,
+          selectedBatchId
+        );
+        setReport(data as CLOMasterCompilationResponse);
       } catch (error) {
         console.error(error);
-        toast.error('Failed to fetch CLO report');
+        toast.error('Failed to load CLO Master Compilation');
       } finally {
         setLoading(false);
       }
     };
 
     fetchReport();
-  }, [selectedSessionId]);
+  }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
-  // --- Helpers ---
-  const getStatusBadgeColor = (status: string) => {
-    switch (status) {
-      case 'Finalized':
-      case 'ACHIEVED':
-        return 'bg-emerald-100 text-emerald-700';
-      case 'Provisional - CQI Pending':
-      case 'BELOW_TARGET':
-      case 'NEEDS_REVIEW':
-        return 'bg-amber-100 text-amber-700';
-      case 'NOT_ASSESSED':
-        return 'bg-gray-100 text-gray-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
+  // Handle export to Excel
+  const handleExport = async () => {
+    if (!report) return;
+
+    try {
+      const blob = await obeService.getCLOMasterCompilation(
+        report.program.id,
+        report.semester.id,
+        selectedBatchId || undefined,
+        'xlsx'
+      );
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `CLO_Master_Compilation_${report.program.code}_${report.semester.name}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      toast.success('Export successful!');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to export');
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'Finalized':
-      case 'ACHIEVED':
-        return <CheckCircle className="w-4 h-4" />;
-      case 'Provisional - CQI Pending':
-      case 'BELOW_TARGET':
-      case 'NEEDS_REVIEW':
-        return <AlertCircle className="w-4 h-4" />;
-      default:
-        return <XCircle className="w-4 h-4" />;
-    }
-  };
-
-  // --- Render Content ---
-  if (loading && !batches.length) {
-    return (
-      <div className="space-y-6 p-6">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
-            <div className="h-5 bg-gray-200 rounded w-1/3 mb-4" />
-            <div className="h-4 bg-gray-200 rounded w-full" />
+  return (
+    <div className="space-y-6 w-full">
+      {/* Header */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2">
+              <FileBarChart className="w-6 h-6 text-indigo-600" />
+              CLO Master Compilation
+            </h2>
+            <p className="text-gray-500 font-semibold mt-1">
+              Semester-level live append of CLO attainment
+            </p>
           </div>
-        ))}
-      </div>
-    );
-  }
+          {report && (
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
+            >
+              <Download className="w-4 h-4" />
+              Export to Excel
+            </button>
+          )}
+        </div>
 
-  if (!selectedBatchId) {
-    return (
-      <div className="space-y-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <h2 className="text-2xl font-black text-gray-900">CLO Reports</h2>
-          <p className="text-gray-500 font-semibold mt-1">Select a batch to view course reports</p>
-          <div className="mt-6">
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Select Batch</label>
+        {/* Selection Area */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Program
+            </label>
             <select
+              value={selectedProgramId}
+              onChange={(e) => {
+                setSelectedProgramId(e.target.value);
+                setSelectedSemesterId('');
+                setSelectedBatchId('');
+                setReport(null);
+              }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+            >
+              <option value="">Select a program</option>
+              {allPrograms.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Batch Category
+            </label>
+            <select
+              value={batchCategory}
+              onChange={(e) => {
+                setBatchCategory(e.target.value as BatchCategory);
+                setSelectedBatchId('');
+                setReport(null);
+              }}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+            >
+              <option value="all">All Batches</option>
+              <option value="ongoing">Ongoing</option>
+              <option value="graduated">Graduated</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Semester
+            </label>
+            <select
+              value={selectedSemesterId}
+              onChange={(e) => {
+                setSelectedSemesterId(e.target.value);
+                setReport(null);
+              }}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+            >
+              <option value="">Select Semester</option>
+              {allSemesters.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} (Semester {s.number})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Batch
+            </label>
+            <select
               value={selectedBatchId}
               onChange={(e) => setSelectedBatchId(e.target.value)}
+              disabled={!selectedProgramId}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all disabled:bg-gray-100"
             >
               <option value="">Select a batch</option>
-              {batches.map(batch => (
-                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              {filteredBatches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
           </div>
         </div>
       </div>
-    );
-  }
 
-  if (!selectedSessionId) {
-    const finalizedCount = courseSessions.filter(s => s.assessment_status === 'ASSESSMENT_DONE').length;
-    const totalCount = courseSessions.length;
-    
-    return (
-      <div className="space-y-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-black text-gray-900">CLO Reports</h2>
-              <p className="text-gray-500 font-semibold mt-1">Select a course to view detailed CLO report</p>
-            </div>
-            <button
-              onClick={() => setSelectedBatchId('')}
-              className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Change Batch
-            </button>
-          </div>
-          {/* Summary Stats */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-              <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-1">Finalized Courses</p>
-              <p className="text-3xl font-black text-emerald-700">{finalizedCount} / {totalCount}</p>
-            </div>
-            <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
-              <p className="text-xs font-black text-amber-600 uppercase tracking-widest mb-1">In Progress</p>
-              <p className="text-3xl font-black text-amber-700">{totalCount - finalizedCount} / {totalCount}</p>
-            </div>
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-              <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1">Completion</p>
-              <p className="text-3xl font-black text-blue-700">{totalCount > 0 ? Math.round((finalizedCount / totalCount) * 100) : 0}%</p>
-            </div>
-          </div>
+      {/* Loading State */}
+      {loading && (
+        <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center animate-pulse">
+          <div className="h-6 bg-gray-200 rounded w-1/3 mx-auto mb-4" />
+          <div className="h-4 bg-gray-200 rounded w-2/3 mx-auto" />
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {loading ? (
-            [1, 2, 3].map(i => (
-              <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
-                <div className="h-5 bg-gray-200 rounded w-1/2 mb-4" />
-                <div className="h-4 bg-gray-200 rounded w-full mb-2" />
-                <div className="h-4 bg-gray-200 rounded w-2/3" />
-              </div>
-            ))
-          ) : courseSessions.length === 0 ? (
-            <div className="col-span-full bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
-              <FileBarChart className="w-16 h-16 text-gray-300 mx-auto mb-6" />
-              <h3 className="text-xl font-black text-gray-900">No course sessions found for this batch</h3>
-            </div>
-          ) : (
-            courseSessions.map(session => (
-              <motion.div
-                key={session.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                whileHover={{ scale: 1.02 }}
-                onClick={() => setSelectedSessionId(session.id)}
-                className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-lg font-black text-indigo-700">{session.course_code}</span>
-                  <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'NOT_ASSESSED')}`}>
-                    {getStatusIcon(session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'NOT_ASSESSED')}
-                    {session.assessment_status === 'ASSESSMENT_DONE' ? 'Finalized' : 'In Progress'}
-                  </span>
-                </div>
-                <h3 className="text-xl font-black text-gray-900 mb-1">{session.course_name}</h3>
-                <p className="text-gray-400 text-sm mt-1">{session.batch_name} • {session.semester_name}</p>
-              </motion.div>
-            ))
-          )}
-        </div>
-      </div>
-    );
-  }
+      )}
 
-  if (loading) {
-    return (
-      <div className="space-y-6 p-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/3 mb-4" />
-          <div className="h-4 bg-gray-200 rounded w-1/4" />
-        </div>
-        {[1, 2].map(i => (
-          <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 animate-pulse">
-            <div className="h-5 bg-gray-200 rounded w-1/2 mb-4" />
-            <div className="h-4 bg-gray-200 rounded w-full mb-2" />
-            <div className="h-4 bg-gray-200 rounded w-3/4" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (!cloReport) {
-    return (
-      <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
-        <XCircle className="w-16 h-16 text-gray-300 mx-auto mb-6" />
-        <h3 className="text-xl font-black text-gray-900">No CLO report found</h3>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header / Back Button */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setSelectedSessionId(null)}
-            className="flex items-center gap-2 text-indigo-600 font-bold hover:text-indigo-700 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Courses
-          </button>
-          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor('NOT_ASSESSED')}`}>
-            {getStatusIcon('NOT_ASSESSED')}
-            Not Finalized
-          </span>
-        </div>
-        <h2 className="text-2xl font-black text-gray-900">{cloReport.course.title}</h2>
-        <p className="text-gray-500 font-semibold mt-1">{cloReport.course.code} • {cloReport.course.batch} • Semester {cloReport.course.semester}</p>
-      </div>
-
-      {/* 1. CLO Summary Cards */}
-      <div>
-        <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-          <FileBarChart className="w-5 h-5 text-indigo-600" />
-          CLO Summary
-        </h3>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {cloReport.clo_summary.map((clo) => (
-            <motion.div
-              key={clo.clo_code}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`bg-white p-6 rounded-2xl shadow-sm border ${clo.status === 'NOT_ASSESSED' ? 'border-dashed border-gray-300' : 'border-gray-100'}`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-xl font-bold text-gray-800">{clo.clo_code}</h4>
-                <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadgeColor(clo.status)}`}>
-                  {getStatusIcon(clo.status)}
-                  {clo.status}
-                </span>
-              </div>
-              <p className="text-gray-600 font-medium mb-4">{clo.description}</p>
-
-              {clo.status !== 'NOT_ASSESSED' && clo.overall_attainment !== null ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-500 font-semibold">Attainment</span>
-                    <span className="font-black text-indigo-600">{clo.overall_attainment.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-3 w-full bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${clo.status === 'ACHIEVED' ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                      style={{ width: `${clo.overall_attainment}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400 font-semibold">Target KPI</span>
-                    <span className="font-black text-gray-700">{clo.target_kpi}%</span>
-                  </div>
-                </div>
+      {/* Report */}
+      {!loading && report && (
+        <>
+          {/* Status Badge */}
+          <div className={`p-4 rounded-2xl border ${report.status.is_fully_compiled ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+            <div className="flex items-center gap-3">
+              {report.status.is_fully_compiled ? (
+                <CheckCircle className="w-6 h-6 text-emerald-600" />
               ) : (
-                <p className="text-gray-400 italic text-sm">No assessments mapped yet</p>
+                <AlertCircle className="w-6 h-6 text-amber-600" />
               )}
-
-              <div className="mt-6 pt-4 border-t border-gray-100">
-                <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Mapped Assessments</p>
-                <div className="flex flex-wrap gap-2">
-                  {clo.mapped_assessments.length > 0 ? (
-                    clo.mapped_assessments.map((a) => (
-                      <span key={a.id} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold">
-                        {a.title}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-xs text-gray-400 italic">None</span>
-                  )}
+              <div>
+                <div className="font-black text-lg text-gray-800">
+                  Courses Finalized: {report.status.finalized_count} / {report.status.total_count}
+                </div>
+                <div className="font-semibold text-gray-600">
+                  {report.status.is_fully_compiled ? 'All courses finalized' : 'In Progress'}
                 </div>
               </div>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* 2. Assessment Effectiveness Table */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-          <FileBarChart className="w-5 h-5 text-indigo-600" />
-          Assessment Effectiveness
-        </h3>
-        <div className="overflow-x-auto rounded-xl border border-gray-100">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50">
-                <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Assessment</th>
-                <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Mapped CLOs</th>
-                <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider text-center">Avg Attainment</th>
-                <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Effectiveness</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cloReport.assessment_effectiveness.map((assmnt, idx) => (
-                <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-bold text-gray-700">
-                    {assmnt.assessment?.title}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {assmnt.mapped_clos.map((cloCode) => (
-                        <span key={cloCode} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold">
-                          {cloCode}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center font-bold text-gray-700">{assmnt.avg_attainment?.toFixed(1) ?? '-'}%</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs font-black px-3 py-1 rounded-full ${getStatusBadgeColor(assmnt.effectiveness)}`}>
-                      {assmnt.effectiveness}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* 3. CQI List */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
-          <FileBarChart className="w-5 h-5 text-indigo-600" />
-          CQI Records
-        </h3>
-        {cloReport.cqi_list.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 font-medium">
-            No CQI records found
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-100">
-            <table className="w-full text-left border-collapse">
-              <thead>
+
+          {/* Main Table */}
+          <div 
+            className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-x-auto w-full"
+          >
+            <div className="w-full">
+            <table className="min-w-max text-left border-collapse">
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">CLO</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Course</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Reason</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Action Plan</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Instructor</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Approved By</th>
-                  <th className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wider">Status</th>
+                  <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-0 bg-gray-50 z-20">
+                    Sr. No
+                  </th>
+                  <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-[80px] bg-gray-50 z-20">
+                    Reg. No
+                  </th>
+                  <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-[180px] bg-gray-50 z-20">
+                    Name
+                  </th>
+                  {report.finalized_courses.map((course: CLOMasterCompilationCourse) => (
+                    <th key={course.course_id} colSpan={course.clos.length} className="px-4 py-3 text-xs font-black text-indigo-700 uppercase tracking-wide border border-gray-200 bg-indigo-50">
+                      {course.course_code}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="bg-gray-50">
+                  {/* Empty placeholders for the sticky left columns */}
+                  {report.finalized_courses.map((course: CLOMasterCompilationCourse) => (
+                    course.clos.map((clo) => {
+                      const cohortPercentage = clo.cohort_percentage ?? 0;
+                      const kpiTarget = clo.kpi_target ?? 0;
+                      const isAchieved = cohortPercentage >= kpiTarget;
+                      return (
+                        <th key={`${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-200">
+                          <div className="flex flex-col items-center gap-1">
+                            {/* CLO Code with Target */}
+                            <div className="font-semibold">
+                              {clo.clo_code} (Target: {kpiTarget}%)
+                            </div>
+                            {/* Cohort Percentage */}
+                            <div className="text-gray-500 text-xs">
+                              {cohortPercentage.toFixed(2)}%
+                            </div>
+                            {/* Status Badge */}
+                            <div className={`text-xs px-2 py-0.5 rounded-full ${isAchieved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                              {isAchieved ? '✅ Achieved' : '❌ CQI Triggered'}
+                            </div>
+                            {/* CQI Info Button */}
+                            {clo.cqi && (
+                              <button
+                                onClick={() => toggleCqi(`${course.course_id}-${clo.clo_id}`)}
+                                className="p-1 rounded-full hover:bg-indigo-100 text-indigo-600 flex items-center gap-1"
+                              >
+                                <Info size={14} />
+                                {expandedCqi.has(`${course.course_id}-${clo.clo_id}`) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                              </button>
+                            )}
+                          </div>
+                        </th>
+                      );
+                    })
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {cloReport.cqi_list.map((cqi, idx) => (
-                  <tr key={idx} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="font-black text-gray-800">{cqi.clo_code}</div>
-                      <div className="text-xs text-gray-500">{cqi.clo_description}</div>
-                    </td>
-                    <td className="px-4 py-3 font-bold text-gray-700">{cqi.course_code}</td>
-                    <td className="px-4 py-3 text-gray-700">{cqi.reason}</td>
-                    <td className="px-4 py-3 text-gray-700">{cqi.action_plan}</td>
-                    <td className="px-4 py-3 font-bold text-gray-700">{cqi.instructor}</td>
-                    <td className="px-4 py-3 font-bold text-gray-700">{cqi.approved_by}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-black px-3 py-1 rounded-full ${getStatusBadgeColor(cqi.status)}`}>
-                        {cqi.status}
-                      </span>
-                    </td>
-                  </tr>
+                {report.students.map((student: CLOMasterCompilationStudent) => (
+                  <React.Fragment key={student.sr_no}>
+                    <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-0 bg-gray-50 z-10">
+                        {student.sr_no}
+                      </td>
+                      <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-[80px] bg-gray-50 z-10">
+                        {student.reg_no}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-gray-800 border border-gray-100 sticky left-[180px] bg-gray-50 z-10">
+                        {student.name}
+                      </td>
+                      {report.finalized_courses.map((course: CLOMasterCompilationCourse) => (
+                        course.clos.map((clo) => {
+                          const courseData = student.courses[course.course_id];
+                          const cloData = courseData ? courseData[clo.clo_code] : null;
+                          return (
+                            <td key={`${student.sr_no}-${course.course_id}-${clo.clo_id}`} className={`px-3 py-2 text-center border border-gray-100 font-bold ${cloData ? (cloData.achieved ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700') : 'text-gray-400'}`}>
+                              {cloData ? `${cloData.score}%` : '-'}
+                            </td>
+                          );
+                        })
+                      ))}
+                    </tr>
+                    {/* Expanded CQI Row */}
+                    {report.finalized_courses.some((c) => c.clos.some((clo) => clo.cqi && expandedCqi.has(`${c.course_id}-${clo.clo_id}`))) && (
+                      <tr className="bg-yellow-50">
+                        <td colSpan={3} className="px-4 py-2 sticky left-0 bg-yellow-50 z-10"></td>
+                        {report.finalized_courses.map((course: CLOMasterCompilationCourse) => (
+                          course.clos.map((clo) => {
+                            const key = `${course.course_id}-${clo.clo_id}`;
+                            if (clo.cqi && expandedCqi.has(key)) {
+                              return (
+                                <td key={key} colSpan={1} className="px-3 py-3 text-xs border border-gray-200 align-top">
+                                  <div className="space-y-2">
+                                    <div>
+                                      <span className="font-bold text-gray-800">Reason:</span>
+                                      <p className="mt-1 text-gray-700">{clo.cqi.reason}</p>
+                                    </div>
+                                    <div>
+                                      <span className="font-bold text-gray-800">Action Plan:</span>
+                                      <p className="mt-1 text-gray-700">{clo.cqi.action_plan}</p>
+                                    </div>
+                                    {clo.cqi.coordinator_comment && (
+                                      <div>
+                                        <span className="font-bold text-gray-800">Coordinator Comment:</span>
+                                        <p className="mt-1 text-gray-700">{clo.cqi.coordinator_comment}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            }
+                            return <td key={key} colSpan={1} className="border border-gray-200"></td>;
+                          })
+                        ))}
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
+                {/* Summary Row 1: No. of Students Achieving CLOs KPI */}
+                <tr className="border-t-2 border-gray-300 bg-indigo-50">
+                  <td colSpan={3} className="px-4 py-3 font-black text-indigo-800 border border-gray-200 sticky left-0 bg-indigo-50 z-10">
+                    No. of Students Achieving CLOs KPI (50%):
+                  </td>
+                  {report.finalized_courses.map((course) => 
+                    course.clos.map((clo) => {
+                      // Count achieved students for this clo
+                      let achievedCount = 0;
+                      for (const student of report.students) {
+                        const courseData = student.courses[course.course_id];
+                        const cloData = courseData ? courseData[clo.clo_code] : null;
+                        if (cloData && cloData.achieved) {
+                          achievedCount++;
+                        }
+                      }
+                      return (
+                        <td key={`count-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
+                          {achievedCount}
+                        </td>
+                      );
+                    })
+                  )}
+                </tr>
+                {/* Summary Row 2: Percentage of Students Achieving CLOs KPI */}
+                <tr className="border-t border-gray-300 bg-indigo-50">
+                  <td colSpan={3} className="px-4 py-3 font-black text-indigo-800 border border-gray-200 sticky left-0 bg-indigo-50 z-10">
+                    % of Students Achieving CLOs at Cohort-Level (50%):
+                  </td>
+                  {report.finalized_courses.map((course) => 
+                    course.clos.map((clo) => {
+                      // Calculate percentage
+                      let achievedCount = 0;
+                      for (const student of report.students) {
+                        const courseData = student.courses[course.course_id];
+                        const cloData = courseData ? courseData[clo.clo_code] : null;
+                        if (cloData && cloData.achieved) {
+                          achievedCount++;
+                        }
+                      }
+                      const percentage = report.summary.total_students > 0 
+                        ? ((achievedCount / report.summary.total_students) * 100).toFixed(2)
+                        : '0.00';
+                      return (
+                        <td key={`percentage-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
+                          {percentage}%
+                        </td>
+                      );
+                    })
+                  )}
+                </tr>
               </tbody>
             </table>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Pending Courses */}
+          {report.pending_courses.length > 0 && (
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
+                Pending Courses
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {report.pending_courses.map((pc) => (
+                  <div key={pc.course_id} className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <div className="font-black text-amber-800">{pc.course_code} - {pc.course_name}</div>
+                      <div className="text-sm font-semibold text-amber-700">Instructor: {pc.instructor_name}</div>
+                    </div>
+                    <AlertCircle className="w-5 h-5 text-amber-500" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

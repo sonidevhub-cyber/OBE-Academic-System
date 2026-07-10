@@ -17,6 +17,7 @@ export interface Batch {
     pending_exit_survey_count: number;
     is_program_end_ready: boolean;
     graduation_status: 'not_graduating' | 'in_progress' | 'graduated_partial' | 'graduated_complete';
+    is_graduating_eligible?: boolean;
 } 
 
 export interface BatchCreateData { 

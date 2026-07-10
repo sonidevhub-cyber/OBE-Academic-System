@@ -1,3 +1,4 @@
+
 import { api } from './api';
 
 export interface CLOGAMapping {
@@ -77,7 +78,7 @@ export interface GACQIRecord {
   root_cause: string | null;
   remedial_plan: string | null;
   hod_comment: string | null;
-  status: 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED';
+  status: 'NOT_TRIGGERED' | 'PENDING_HOD_INPUT' | 'SAVED' | 'EXPORTED' | 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED';
   submitted_by: any | null;
   approved_by: any | null;
   is_audit_visible: boolean;
@@ -86,6 +87,12 @@ export interface GACQIRecord {
   updated_at: string;
   history?: GACQIResubmissionHistory[];
   contributing_courses?: GAReportContributingCourse[];
+  issue_statement: string | null;
+  hod_action_plan: string | null;
+  triggered_at: string | null;
+  saved_by_hod: any | null;
+  saved_at: string | null;
+  is_active: boolean;
 }
 
 export interface GACQIResubmissionHistory {
@@ -137,17 +144,61 @@ export interface InterimAlert {
   ga_code: string;
   ga_title: string;
   previous_courses: InterimAlertCourse[];
+  mapped_clos?: Array<{
+    clo_id: string;
+    clo_code: string;
+    clo_title: string | null;
+    bloom_level?: string;
+  }>;
+  previous_batch?: {
+    id: string | null;
+    name: string | null;
+    custom_id: string | null;
+  } | null;
+  source_semester?: {
+    number: number | null;
+    name: string | null;
+  } | null;
+  issue_statement?: string | null;
+  attainment_value?: number | null;
+  saved_at?: string | null;
+}
+
+export interface CourseInfo {
+  id: string;
+  course_code: string;
+  course_name: string;
+  instructor_name: string;
+  semester_number?: number | null;
+  semester_name?: string | null;
 }
 
 export interface ReadinessResponse {
   ready: boolean;
   finalized_courses: number;
   total_courses: number;
-  missing_courses: string[];
+  pending_courses: string[];
+  finalized_courses_list: CourseInfo[];
+  in_process_courses_list: CourseInfo[];
 }
 
 export interface BatchGAReportResponse {
   is_program_end_ready: boolean;
+  readiness: ReadinessResponse;
+  ga_reports: GAReportItem[];
+  ongoing_semester?: {
+    number: number;
+    name?: string | null;
+  };
+}
+
+export interface SemesterGASummaryResponse {
+  semester: {
+    id: string;
+    number: number;
+    name: string;
+  } | null;
+  readiness?: ReadinessResponse;
   ga_reports: GAReportItem[];
 }
 
@@ -315,11 +366,72 @@ export interface Batch {
   is_alumni_feedback_eligible: boolean;
   pending_exit_survey_count: number;
   graduation_status: 'not_graduating' | 'in_progress' | 'graduated_partial' | 'graduated_complete';
+  status: 'active' | 'graduated'; // Added status field
   alumni_feedback_cycle_status?: 'DRAFT' | 'ACTIVE' | 'CLOSED' | null;
   alumni_feedback_due_at?: string | null;
   alumni_feedback_response_rate?: number;
   alumni_feedback_response_count?: number;
   alumni_feedback_total_alumni?: number;
+}
+
+// --- CLO Master Compilation Interfaces ---
+export interface CLOMasterCompilationCourseCLO {
+  clo_id: string;
+  clo_code: string;
+  clo_title: string;
+  kpi_target: number;
+  cohort_achieved_count: number;
+  cohort_percentage: number;
+  cqi: {
+    reason: string;
+    action_plan: string;
+    coordinator_comment: string;
+  } | null;
+}
+
+export interface CLOMasterCompilationCourse {
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  clos: CLOMasterCompilationCourseCLO[];
+}
+
+export interface CLOMasterCompilationStudentCourseCLO {
+  score: number;
+  achieved: boolean;
+}
+
+export interface CLOMasterCompilationStudent {
+  sr_no: number;
+  reg_no: string;
+  name: string;
+  courses: Record<string, Record<string, CLOMasterCompilationStudentCourseCLO | null>>;
+}
+
+export interface CLOMasterCompilationPendingCourse {
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  instructor_name: string;
+  status: string;
+}
+
+export interface CLOMasterCompilationResponse {
+  program: { id: string; name: string; code: string };
+  semester: { id: string; name: string; number: number };
+  batch?: { id: string; name: string } | null;
+  status: {
+    finalized_count: number;
+    total_count: number;
+    is_fully_compiled: boolean;
+  };
+  finalized_courses: CLOMasterCompilationCourse[];
+  students: CLOMasterCompilationStudent[];
+  pending_courses: CLOMasterCompilationPendingCourse[];
+  summary: {
+    total_students: number;
+    kpi_breakdown: Record<string, number>;
+  };
 }
 
 class OBEService {
@@ -414,16 +526,18 @@ class OBEService {
   async getBatchGAReport(batchId: string, params?: {
     mode?: 'semester' | 'cumulative';
     semester?: number;
-    scope?: 'cohort' | 'student';
+    scope?: 'cohort' | 'student' | 'all_students' | 'course_wise';
     student_id?: string;
-  }): Promise<GAReportItem[] | ReadinessResponse | BatchGAReportResponse> {
+  }): Promise<GAReportItem[] | ReadinessResponse | BatchGAReportResponse | any> {
     const response = await api.get(`/obe/ga-reports/${batchId}/`, { params });
     return response.data;
   }
 
   // Get Teacher GA Context
-  async getTeacherGAContext(courseId: string): Promise<TeacherGAContext> {
-    const response = await api.get(`/obe/teacher/ga-context/${courseId}/`);
+  async getTeacherGAContext(courseId: string, batchId?: string): Promise<TeacherGAContext> {
+    const response = await api.get(`/obe/teacher/ga-context/${courseId}/`, {
+      params: batchId ? { batch_id: batchId } : undefined
+    });
     return response.data;
   }
 
@@ -513,7 +627,12 @@ class OBEService {
   async submitAlumniSurvey(
     cycleId: string,
     studentId: string,
-    data: { responses: Array<{ question: string; score: number }> }
+    data: {
+      employment_status?: string;
+      organization_name?: string;
+      current_designation?: string;
+      responses: Array<{ question: string; score: number }>;
+    }
   ): Promise<{ success: boolean }> {
     const response = await api.post(`/obe/alumni-survey/${cycleId}/student/${studentId}/`, data);
     return response.data;
@@ -544,6 +663,82 @@ class OBEService {
 
   async getStudentPortalStatus(): Promise<StudentPortalStatus> {
     const response = await api.get('/obe/student/portal-status/');
+    return response.data;
+  }
+
+  async getAlumniEmploymentStats(batchId: string): Promise<{
+    employment_distribution: Record<string, number>;
+    top_employers: Array<{ name: string; count: number }>;
+  }> {
+    const response = await api.get(`/obe/batches/${batchId}/alumni-employment-stats/`);
+    return response.data;
+  }
+
+  // --- New GA CQI Cohort Methods ---
+  async getGAStatusRow(programId: string, batchId: string): Promise<Array<{
+    ga_id: string;
+    ga_code: string;
+    ga_title: string;
+    cohort_score: number | null;
+    kpi_threshold: number;
+    status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
+    cqi_record_id: string | null;
+    cqi_status: string | null;
+  }>> {
+    const response = await api.get(`/ga-report/${programId}/${batchId}/status-row/`);
+    return response.data;
+  }
+
+  async saveGACQI(recordId: string, data: {
+    hod_action_plan: string;
+    issue_statement?: string;
+  }): Promise<GACQIRecord> {
+    const response = await api.patch(`/ga-cqi/${recordId}/save/`, data);
+    return response.data;
+  }
+
+  async getGACQIAdvisoryExport(programId: string, batchId: string): Promise<GACQIRecord[]> {
+    const response = await api.get(`/ga-cqi/advisory-export/${programId}/${batchId}/`);
+    return response.data;
+  }
+
+  async downloadGACQIAdvisoryExportPDF(programId: string, batchId: string): Promise<Blob> {
+    const response = await api.get(`/ga-cqi/advisory-export/${programId}/${batchId}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  // --- CLO Master Compilation Methods ---
+  async getCLOMasterCompilation(
+    programId: string,
+    semesterId: string,
+    batchId?: string,
+    format?: 'json'
+  ): Promise<CLOMasterCompilationResponse>;
+  async getCLOMasterCompilation(
+    programId: string,
+    semesterId: string,
+    batchId?: string,
+    format?: 'xlsx'
+  ): Promise<Blob>;
+  async getCLOMasterCompilation(
+    programId: string,
+    semesterId: string,
+    batchId?: string,
+    format?: 'json' | 'xlsx'
+  ): Promise<CLOMasterCompilationResponse | Blob> {
+    const params: Record<string, any> = {};
+    if (batchId) params['batch_id'] = batchId;
+    if (format === 'xlsx') {
+      params['format'] = 'xlsx';
+      const response = await api.get(`clo-master/report/${programId}/${semesterId}/`, {
+        params,
+        responseType: 'blob'
+      });
+      return response.data;
+    }
+    const response = await api.get(`clo-master/report/${programId}/${semesterId}/`, { params });
     return response.data;
   }
 

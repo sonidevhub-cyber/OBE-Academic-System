@@ -57,9 +57,19 @@ from .views import (
     AlumniSurveyCycleActivateView,
     AlumniSurveyCycleCloseView,
     AlumniSurveyResponseView,
+    AlumniSurveyStatusView,
+    AlumniEmploymentStatsView,
     PEOIndirectScoreView
 )
 from .views.ga_views import EnableResultEditingView
+from .views.peo_views import (
+    PEOReportView,
+    PEOCQIListView,
+    PEOCQICreateView,
+    PEOCQIDetailView,
+    PEOCQISubmitView,
+    PEOCQIHistoryView
+)
 
 urlpatterns = [
     # PEO
@@ -212,12 +222,15 @@ urlpatterns = [
     path('alumni-survey-cycles/<uuid:cycle_id>/activate/', AlumniSurveyCycleActivateView.as_view()),
     path('alumni-survey-cycles/<uuid:cycle_id>/close/', AlumniSurveyCycleCloseView.as_view()),
     
-    # Alumni Survey Responses (Alumni - no auth)
+# Alumni Survey Responses (Alumni - no auth)
     path('alumni-survey/<uuid:cycle_id>/', AlumniSurveyResponseView.as_view()),
     path('alumni-survey/<uuid:cycle_id>/student/<uuid:student_id>/', AlumniSurveyResponseView.as_view()),
+    path('batches/<uuid:batch_id>/alumni-survey-status/', AlumniSurveyStatusView.as_view()),
     
     # PEO Indirect Score
     path('peo/<uuid:peo_id>/batch/<uuid:batch_id>/indirect-score/', PEOIndirectScoreView.as_view()),
+    # Alumni Employment Stats
+    path('batches/<uuid:batch_id>/alumni-employment-stats/', AlumniEmploymentStatsView.as_view()),
     
     # ========== NEW EXIT SURVEY ENDPOINTS ==========
     path('exit-survey/questions/', ExitSurveyQuestionListView.as_view()),
@@ -234,5 +247,15 @@ urlpatterns = [
     # edit admin
     path(
         "course-sessions/<uuid:session_id>/enable-editing/",
-        EnableResultEditingView.as_view())
+        EnableResultEditingView.as_view()),
+    
+    # PEO Report
+    path('peo-reports/<uuid:batch_id>/', PEOReportView.as_view()),
+    
+    # PEO CQI
+    path('peo-cqi/', PEOCQIListView.as_view()),
+    path('peo-cqi/create/', PEOCQICreateView.as_view()),
+    path('peo-cqi/<uuid:cqi_id>/', PEOCQIDetailView.as_view()),
+    path('peo-cqi/<uuid:cqi_id>/submit/', PEOCQISubmitView.as_view()),
+    path('peo-cqi/<uuid:cqi_id>/history/', PEOCQIHistoryView.as_view()),
 ]

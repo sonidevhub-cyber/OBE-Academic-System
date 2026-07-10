@@ -57,6 +57,7 @@ class Batch(models.Model):
     exit_survey_enabled_at = models.DateTimeField(null=True, blank=True)
     alumni_feedback_enabled = models.BooleanField(default=False)
     alumni_feedback_enabled_at = models.DateTimeField(null=True, blank=True)
+    alumni_feedback_due_at = models.DateTimeField(null=True, blank=True)
     graduation_status = models.CharField(
         max_length=20,
         choices=GRADUATION_STATUS_CHOICES,

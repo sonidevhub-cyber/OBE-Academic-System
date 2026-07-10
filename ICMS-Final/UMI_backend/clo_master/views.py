@@ -1,0 +1,437 @@
+from django.http import HttpResponse
+from rest_framework import viewsets
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+from assessments.models import CQI as CLOCQI
+from core.models import Batch, Program, Semester
+
+from .models import CourseCLOMasterEntry, SemesterCLOMasterCache
+from .serializers import SemesterCLOMasterCacheSerializer
+
+
+class CLOMasterViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = SemesterCLOMasterCache.objects.filter(is_active=True)
+    serializer_class = SemesterCLOMasterCacheSerializer
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_clo_master_report(request, program_id, semester_id):
+    """
+    Get the master CLO compilation for a specific program and semester.
+    Optional batch_id query param.
+    Optional format=xlsx for Excel export.
+    """
+    batch_id = request.query_params.get("batch_id")
+
+    program = Program.objects.get(id=program_id)
+    semester = Semester.objects.get(id=semester_id)
+    batch = Batch.objects.get(id=batch_id) if batch_id else None
+
+    # Get or create master cache when batch context is available.
+    master_cache = None
+    if batch:
+        master_cache, cache_created = SemesterCLOMasterCache.objects.get_or_create(
+            program=program,
+            batch=batch,
+            semester=semester,
+            defaults={
+                "total_courses_expected": 0,
+                "total_courses_finalized": 0,
+            },
+        )
+
+        if cache_created:
+            # Trigger cache population for all already finalized courses.
+            from obe.models import CourseSession
+            from .signals import append_course_to_clo_master
+
+            finalized_sessions = CourseSession.objects.filter(
+                course__program=program,
+                semester=semester,
+                batch_id=batch_id,
+                assessment_status="ASSESSMENT_DONE",
+                is_active=True,
+            )
+            for session in finalized_sessions:
+                append_course_to_clo_master(
+                    sender=CourseSession,
+                    instance=session,
+                    created=False,
+                )
+
+            master_cache.refresh_from_db()
+
+    # Get all course sessions for pending list.
+    from obe.models import CourseSession
+
+    all_course_sessions = CourseSession.objects.filter(
+        course__program=program,
+        semester=semester,
+        is_active=True,
+    )
+    if batch_id:
+        all_course_sessions = all_course_sessions.filter(batch_id=batch_id)
+    pending_course_sessions = all_course_sessions.exclude(
+        assessment_status="ASSESSMENT_DONE"
+    )
+
+    # Get all students for this batch.
+    from students.models import Student
+
+    students = (
+        Student.objects.filter(user__batch_id=batch_id).select_related("user")
+        if batch_id
+        else Student.objects.none()
+    )
+
+    # Get all active course entries from cache.
+    course_entries = []
+    if master_cache:
+        course_entries = (
+            CourseCLOMasterEntry.objects.filter(master_cache=master_cache, is_active=True)
+            .select_related("student", "clo", "clo__course", "course_session")
+        )
+
+    # Precompute lookups for O(1) access.
+    course_entry_lookup = {}
+    kpi_achieved_lookup = {}
+
+    for entry in course_entries:
+        student_id = entry.student.student_id
+        course_id = entry.course.id
+        clo_id = entry.clo.id
+        course_entry_lookup[(student_id, course_id, clo_id)] = entry
+
+        kpi_key = (course_id, clo_id)
+        kpi_achieved_lookup.setdefault(kpi_key, 0)
+        if entry.is_kpi_achieved:
+            kpi_achieved_lookup[kpi_key] += 1
+
+    # Fetch all approved CQIs for this program, batch, semester.
+    cqi_filter = {
+        "course__program": program,
+        "semester": semester,
+        "status": "approved",
+    }
+    if batch:
+        cqi_filter["batch"] = batch
+    approved_cqis = CLOCQI.objects.filter(**cqi_filter).select_related("course", "clo")
+
+    cqi_lookup = {}
+    for cqi in approved_cqis:
+        cqi_lookup[(cqi.course.id, cqi.clo.id)] = cqi
+
+    # Build course -> CLO map from cache entries.
+    course_clos_map = {}
+    for entry in course_entries:
+        course = entry.course
+        course_id = course.id
+        if course_id not in course_clos_map:
+            course_clos_map[course_id] = {
+                "course": course,
+                "clos": set(),
+            }
+        course_clos_map[course_id]["clos"].add(entry.clo)
+
+    sorted_courses = []
+    for course_id in sorted(course_clos_map.keys(), key=lambda x: course_clos_map[x]["course"].code):
+        course_info = course_clos_map[course_id]
+        course_info["clos"] = sorted(course_info["clos"], key=lambda clo: clo.order_number)
+        sorted_courses.append(course_info)
+
+    # Prepare student data.
+    students_data = []
+    for student in students:
+        row = {
+            "sr_no": len(students_data) + 1,
+            "reg_no": getattr(student, "registration_number", ""),
+            "name": getattr(student, "name", student.user.full_name),
+            "courses": {},
+        }
+
+        for course_info in sorted_courses:
+            course_id = course_info["course"].id
+            course_key = str(course_id)
+            row["courses"][course_key] = {}
+
+            for clo in course_info["clos"]:
+                clo_key = f"CLO-{clo.order_number}"
+                entry_obj = course_entry_lookup.get((student.student_id, course_id, clo.id))
+                if entry_obj:
+                    row["courses"][course_key][clo_key] = {
+                        "score": float(entry_obj.clo_score),
+                        "achieved": entry_obj.is_kpi_achieved,
+                    }
+                else:
+                    row["courses"][course_key][clo_key] = None
+
+        students_data.append(row)
+
+    total_students = students.count()
+    kpi_achieved_counts = {}
+    for course_info in sorted_courses:
+        for clo in course_info["clos"]:
+            clo_key = f"{course_info['course'].id}-CLO-{clo.order_number}"
+            achieved_count = kpi_achieved_lookup.get((course_info["course"].id, clo.id), 0)
+            kpi_achieved_counts[clo_key] = achieved_count
+
+    pending_courses_info = [
+        {
+            "course_id": cs.course.id,
+            "course_code": cs.course.code,
+            "course_name": cs.course.name,
+            "instructor_name": cs.instructor.full_name if cs.instructor else "Not Assigned",
+            "status": "Pending",
+        }
+        for cs in pending_course_sessions
+    ]
+
+    finalized_count = master_cache.total_courses_finalized if master_cache else 0
+    total_count = all_course_sessions.count()
+    is_fully_compiled = (
+        master_cache.is_fully_compiled if master_cache else finalized_count == total_count
+    )
+
+    response_data = {
+        "program": {
+            "id": program.id,
+            "name": program.name,
+            "code": program.code,
+        },
+        "semester": {
+            "id": semester.id,
+            "name": semester.name,
+            "number": semester.number,
+        },
+        "batch": {
+            "id": batch_id,
+            "name": batch.name if batch else "",
+        }
+        if batch_id
+        else None,
+        "status": {
+            "finalized_count": finalized_count,
+            "total_count": total_count,
+            "is_fully_compiled": is_fully_compiled,
+        },
+        "finalized_courses": [
+            {
+                "course_id": info["course"].id,
+                "course_code": info["course"].code,
+                "course_name": info["course"].name,
+                "clos": [
+                    {
+                        "clo_id": clo.id,
+                        "clo_code": f"CLO-{clo.order_number}",
+                        "clo_name": clo.title,
+                        "kpi_target": clo.kpi_target,
+                        "cohort_achieved_count": kpi_achieved_lookup.get(
+                            (info["course"].id, clo.id), 0
+                        ),
+                        "cohort_percentage": (
+                            (
+                                kpi_achieved_lookup.get((info["course"].id, clo.id), 0)
+                                / total_students
+                                * 100
+                            )
+                            if total_students > 0
+                            else 0
+                        ),
+                        "cqi": {
+                            "reason": cqi_lookup[(info["course"].id, clo.id)].reason,
+                            "action_plan": cqi_lookup[(info["course"].id, clo.id)].action_plan,
+                            "coordinator_comment": cqi_lookup[(info["course"].id, clo.id)].coordinator_comment,
+                        }
+                        if (info["course"].id, clo.id) in cqi_lookup
+                        else None,
+                    }
+                    for clo in info["clos"]
+                ],
+            }
+            for info in sorted_courses
+        ],
+        "students": students_data,
+        "pending_courses": pending_courses_info,
+        "summary": {
+            "total_students": total_students,
+            "kpi_breakdown": kpi_achieved_counts,
+        },
+    }
+
+    if request.query_params.get("format") == "xlsx":
+        return export_to_excel(response_data)
+
+    return Response(response_data)
+
+
+def export_to_excel(data):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "CLO Master Compilation"
+
+    header_font = Font(name="Arial", size=12, bold=True)
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    cell_alignment = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    title = f"CLO Master Compilation - {data['program']['name']} - {data['semester']['name']}"
+    ws["A1"] = title
+    ws["A1"].font = Font(name="Arial", size=14, bold=True)
+    ws.merge_cells("A1:Z1")
+    ws["A1"].alignment = header_alignment
+
+    ws["A3"] = f"Courses Finalized: {data['status']['finalized_count']}/{data['status']['total_count']}"
+    ws["A3"].font = Font(bold=True)
+    ws.merge_cells("A3:Z3")
+
+    headers = ["Sr. No", "Reg. No", "Student Name"]
+    for course in data["finalized_courses"]:
+        for clo in course["clos"]:
+            headers.append(
+                f"{course['course_code']} - {clo['clo_code']} (Target: {clo.get('kpi_target', 0)}%, Cohort: {round(clo.get('cohort_percentage', 0), 2)}%)"
+            )
+            if clo.get("cqi"):
+                headers.append(f"{course['course_code']} - {clo['clo_code']} - CQI Reason")
+                headers.append(f"{course['course_code']} - {clo['clo_code']} - CQI Action Plan")
+                if clo["cqi"].get("coordinator_comment"):
+                    headers.append(
+                        f"{course['course_code']} - {clo['clo_code']} - Coordinator Comment"
+                    )
+
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=5, column=col_num, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    last_student_row = 5
+    for row_num, student in enumerate(data["students"], 6):
+        last_student_row = row_num
+        ws.cell(row=row_num, column=1, value=student["sr_no"]).alignment = cell_alignment
+        ws.cell(row=row_num, column=2, value=student["reg_no"]).alignment = cell_alignment
+        ws.cell(row=row_num, column=3, value=student["name"]).alignment = cell_alignment
+
+        col = 4
+        for course in data["finalized_courses"]:
+            course_id = str(course["course_id"])
+            for clo in course["clos"]:
+                clo_key = f"CLO-{clo['clo_code'].split('-')[1]}"
+                course_data = student["courses"].get(course_id, {})
+                clo_data = course_data.get(clo_key)
+
+                if clo_data:
+                    cell_val = f"{clo_data['score']}%"
+                    cell = ws.cell(row=row_num, column=col, value=cell_val)
+                    cell.alignment = cell_alignment
+                    if clo_data["achieved"]:
+                        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                    else:
+                        cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                else:
+                    ws.cell(row=row_num, column=col, value="-").alignment = cell_alignment
+                col += 1
+
+                if clo.get("cqi"):
+                    ws.cell(row=row_num, column=col, value=clo["cqi"]["reason"]).alignment = Alignment(
+                        horizontal="left", vertical="center"
+                    )
+                    col += 1
+                    ws.cell(row=row_num, column=col, value=clo["cqi"]["action_plan"]).alignment = Alignment(
+                        horizontal="left", vertical="center"
+                    )
+                    col += 1
+                    if clo["cqi"].get("coordinator_comment"):
+                        ws.cell(
+                            row=row_num,
+                            column=col,
+                            value=clo["cqi"]["coordinator_comment"],
+                        ).alignment = Alignment(horizontal="left", vertical="center")
+                        col += 1
+
+    total_students = data["summary"]["total_students"]
+    summary_row1 = last_student_row + 1
+    summary_row2 = last_student_row + 2
+
+    ws.cell(
+        row=summary_row1,
+        column=1,
+        value="No. of Students Achieving CLOs KPI (50%):",
+    )
+    ws.merge_cells(start_row=summary_row1, start_column=1, end_row=summary_row1, end_column=3)
+    ws.cell(row=summary_row1, column=1).font = Font(name="Arial", size=12, bold=True)
+    ws.cell(row=summary_row1, column=1).alignment = cell_alignment
+
+    ws.cell(
+        row=summary_row2,
+        column=1,
+        value="% of Students Achieving CLOs at Cohort-Level (50%):",
+    )
+    ws.merge_cells(start_row=summary_row2, start_column=1, end_row=summary_row2, end_column=3)
+    ws.cell(row=summary_row2, column=1).font = Font(name="Arial", size=12, bold=True)
+    ws.cell(row=summary_row2, column=1).alignment = cell_alignment
+
+    col = 4
+    for course in data["finalized_courses"]:
+        course_id = str(course["course_id"])
+        for clo in course["clos"]:
+            clo_key = f"CLO-{clo['clo_code'].split('-')[1]}"
+
+            achieved_count = 0
+            for student in data["students"]:
+                course_student_data = student["courses"].get(course_id, {})
+                if (
+                    clo_key in course_student_data
+                    and course_student_data[clo_key]
+                    and course_student_data[clo_key]["achieved"]
+                ):
+                    achieved_count += 1
+
+            cell1 = ws.cell(row=summary_row1, column=col, value=achieved_count)
+            cell1.font = Font(bold=True)
+            cell1.alignment = cell_alignment
+
+            percentage = round((achieved_count / total_students * 100), 2) if total_students > 0 else 0
+            cell2 = ws.cell(row=summary_row2, column=col, value=f"{percentage}%")
+            cell2.font = Font(bold=True)
+            cell2.alignment = cell_alignment
+            col += 1
+
+            if clo.get("cqi"):
+                col += 1
+                col += 1
+                if clo["cqi"].get("coordinator_comment"):
+                    col += 1
+
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except Exception:
+                pass
+        adjusted_width = (max_length + 2) * 1.5
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="CLO_Master_Compilation_{data["program"]["code"]}_{data["semester"]["name"]}.xlsx"'
+    )
+    wb.save(response)
+    return response

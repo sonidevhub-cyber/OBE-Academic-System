@@ -74,11 +74,11 @@ class BatchListSerializer(serializers.ModelSerializer):
     exit_survey_enabled_at = serializers.DateTimeField(read_only=True, allow_null=True)
     alumni_feedback_enabled = serializers.BooleanField(read_only=True)
     alumni_feedback_enabled_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    alumni_feedback_due_at = serializers.SerializerMethodField()
     graduation_status = serializers.CharField(read_only=True)
     is_program_end_ready = serializers.BooleanField(read_only=True)
     is_alumni_feedback_eligible = serializers.BooleanField(read_only=True)
     alumni_feedback_cycle_status = serializers.SerializerMethodField()
-    alumni_feedback_due_at = serializers.SerializerMethodField()
     alumni_feedback_response_rate = serializers.SerializerMethodField()
     alumni_feedback_response_count = serializers.SerializerMethodField()
     alumni_feedback_total_alumni = serializers.SerializerMethodField()
@@ -108,11 +108,11 @@ class BatchListSerializer(serializers.ModelSerializer):
             'exit_survey_enabled_at',
             'alumni_feedback_enabled',
             'alumni_feedback_enabled_at',
+            'alumni_feedback_due_at',
             'graduation_status',
             'is_program_end_ready',
             'is_alumni_feedback_eligible',
             'alumni_feedback_cycle_status',
-            'alumni_feedback_due_at',
             'alumni_feedback_response_rate',
             'alumni_feedback_response_count',
             'alumni_feedback_total_alumni',
@@ -133,6 +133,13 @@ class BatchListSerializer(serializers.ModelSerializer):
         ).count()
 
     def _get_alumni_cycle(self, obj):
+        active_cycle = obj.alumni_survey_cycles.filter(
+            survey_window='2_YEARS',
+            status='ACTIVE',
+            is_active=True
+        ).order_by('-created_at').first()
+        if active_cycle:
+            return active_cycle
         return obj.alumni_survey_cycles.filter(
             survey_window='2_YEARS',
             is_active=True
@@ -143,6 +150,9 @@ class BatchListSerializer(serializers.ModelSerializer):
         return cycle.status if cycle else None
 
     def get_alumni_feedback_due_at(self, obj):
+        if obj.alumni_feedback_due_at:
+            return obj.alumni_feedback_due_at
+
         cycle = self._get_alumni_cycle(obj)
         return cycle.due_at if cycle else None
 

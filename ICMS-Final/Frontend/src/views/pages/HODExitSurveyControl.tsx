@@ -59,7 +59,7 @@ const HODExitSurveyControl: React.FC = () => {
             } 
           : batch
       ));
-      toast.success('Exit survey toggled successfully');
+      toast.success(result.exit_survey_enabled ? 'Exit survey enabled successfully' : 'Exit survey updated successfully');
     } catch (error) {
       toast.error('Failed to toggle exit survey');
     } finally {
@@ -162,7 +162,18 @@ const HODExitSurveyControl: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  {batch.is_graduating_eligible ? (
+                  {batch.exit_survey_enabled ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-sm">
+                        Exit Survey Enabled
+                      </span>
+                      {batch.exit_survey_enabled_at && (
+                        <span className="text-xs text-gray-500">
+                          Enabled on {new Date(batch.exit_survey_enabled_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  ) : batch.is_graduating_eligible ? (
                     <button
                       onClick={() => toggleExitSurvey(batch.id)}
                       disabled={toggling === batch.id}
@@ -176,7 +187,7 @@ const HODExitSurveyControl: React.FC = () => {
                         ? 'Processing...' 
                         : batch.exit_survey_enabled 
                           ? 'Disable Exit Survey' 
-                          : 'Enable Exit Survey'}
+                        : 'Enable Exit Survey'}
                     </button>
                   ) : (
                     <div className="flex items-center gap-2 text-yellow-700 bg-yellow-50 px-4 py-2 rounded-xl">

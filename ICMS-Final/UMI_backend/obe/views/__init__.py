@@ -11,7 +11,9 @@ from .peo_views import (
     AlumniSurveyCycleCloseView,
     AlumniSurveyResponseView,
     BatchToggleAlumniFeedbackView,
-    PEOIndirectScoreView
+    PEOIndirectScoreView,
+    AlumniSurveyStatusView,
+    AlumniEmploymentStatsView
 )
 from .ga_views import (
     GAListCreateView,
@@ -132,6 +134,8 @@ __all__ = [
     'AlumniSurveyCycleActivateView',
     'AlumniSurveyCycleCloseView',
     'AlumniSurveyResponseView',
+    'AlumniSurveyStatusView',
+    'AlumniEmploymentStatsView',
     'PEOIndirectScoreView',
     'EnableResultEditingView'
 ]

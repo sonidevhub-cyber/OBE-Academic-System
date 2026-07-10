@@ -56,6 +56,9 @@ const AlumniSurvey: React.FC = () => {
   const [questions, setQuestions] = useState<AlumniSurveyQuestion[]>([]);
   const [questionsSource, setQuestionsSource] = useState<'cycle' | 'peo' | null>(null);
   const [responses, setResponses] = useState<Record<string, number>>({});
+  const [employmentStatus, setEmploymentStatus] = useState<string | null>(null);
+  const [organizationName, setOrganizationName] = useState('');
+  const [currentDesignation, setCurrentDesignation] = useState('');
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -72,7 +75,13 @@ const AlumniSurvey: React.FC = () => {
     const loadSurvey = async () => {
       try {
         setLoading(true);
-        const dashboard = await obeService.getAlumniDashboard().catch(() => null);
+        console.log("[AlumniSurvey] Starting loadSurvey...");
+        
+        const dashboard = await obeService.getAlumniDashboard().catch((err) => {
+          console.error("[AlumniSurvey] Error loading dashboard:", err);
+          return null;
+        });
+        console.log("[AlumniSurvey] Dashboard data:", dashboard);
 
         if (cancelled) return;
         if (dashboard) {
@@ -80,17 +89,32 @@ const AlumniSurvey: React.FC = () => {
         }
 
         const effectiveBatchId = batchId || dashboard?.batch_id || null;
-        const effectiveProgramId = dashboard?.program_id || currentUser?.program_id || null;
+        let effectiveProgramId = dashboard?.program_id || currentUser?.program_id || null;
+        // Also try to get programId from batch if we have batchId
+        if (!effectiveProgramId && effectiveBatchId) {
+          // We don't have a direct API for that, but let's rely on dashboard
+          console.log("[AlumniSurvey] No programId yet, hoping dashboard provides it");
+        }
+        console.log("[AlumniSurvey] effectiveBatchId:", effectiveBatchId);
+        console.log("[AlumniSurvey] effectiveProgramId:", effectiveProgramId);
+        console.log("[AlumniSurvey] currentUser:", currentUser);
+        
         const cycles = effectiveBatchId
-          ? await obeService.getAlumniSurveyCycles(String(effectiveBatchId)).catch(() => [])
+          ? await obeService.getAlumniSurveyCycles(String(effectiveBatchId)).catch((err) => {
+              console.error("[AlumniSurvey] Error loading cycles:", err);
+              return [];
+            })
           : [];
+        console.log("[AlumniSurvey] Cycles data:", cycles);
 
         if (cancelled) return;
 
         const cycle = cycles.find((item: SurveyCycle) => item.status === 'ACTIVE') || null;
+        console.log("[AlumniSurvey] Found active cycle:", cycle);
         setActiveCycle(cycle);
 
         const studentId = resolveAlumniStudentIdentifier(currentUser, dashboard);
+        console.log("[AlumniSurvey] studentId:", studentId);
         setHasSubmitted(
           cycle ? localStorage.getItem(storageKey(cycle.id, String(studentId || 'guest'))) === 'true' : false
         );
@@ -98,25 +122,43 @@ const AlumniSurvey: React.FC = () => {
         const loadCycleQuestions = async () => {
           if (!cycle) return [];
           try {
+            console.log("[AlumniSurvey] Loading cycle questions for cycle.id: ", cycle.id);
             const questionData = await obeService.getAlumniSurveyQuestions(cycle.id);
+            console.log("[AlumniSurvey] Cycle question data: ", questionData);
             return Array.isArray(questionData) ? questionData : [];
           } catch (error) {
+            console.error("[AlumniSurvey] Error loading cycle questions: ", error);
             return [];
           }
         };
 
         const loadPeoQuestions = async () => {
           if (!effectiveProgramId) return [];
-
-          const peos: PEO[] = await obeService.getProgramPEOs(String(effectiveProgramId)).catch(() => []);
-          const questionGroups = await Promise.all(
-            peos.map((peo) => obeService.getPEOAlumniSurveyQuestions(peo.id).catch(() => []))
-          );
-          return questionGroups.flat();
+          try {
+            console.log("[AlumniSurvey] Loading PEOs for effectiveProgramId: ", effectiveProgramId);
+            const peos: PEO[] = await obeService.getProgramPEOs(String(effectiveProgramId)).catch((err) => {
+              console.error("[AlumniSurvey] Error loading PEOs:", err);
+              return [];
+            });
+            console.log("[AlumniSurvey] Loaded PEOs: ", peos);
+            const questionGroups = await Promise.all(
+              peos.map((peo) => obeService.getPEOAlumniSurveyQuestions(peo.id).catch((err) => {
+                console.error("[AlumniSurvey] Error loading questions for PEO", peo.id, ":", err);
+                return [];
+              }))
+            );
+            console.log("[AlumniSurvey] PEO question groups: ", questionGroups);
+            return questionGroups.flat();
+          } catch (err) {
+            console.error("[AlumniSurvey] Error in loadPeoQuestions:", err);
+            return [];
+          }
         };
 
         const cycleQuestions = await loadCycleQuestions();
         if (cancelled) return;
+
+        console.log("[AlumniSurvey] Cycle questions length: ", cycleQuestions.length);
 
         if (cycleQuestions.length > 0) {
           setQuestionsSource('cycle');
@@ -132,6 +174,9 @@ const AlumniSurvey: React.FC = () => {
         const peoQuestions = await loadPeoQuestions();
         if (cancelled) return;
 
+        console.log("[AlumniSurvey] PEO questions length: ", peoQuestions.length);
+        console.log("[AlumniSurvey] PEO questions: ", peoQuestions);
+
         setQuestionsSource(peoQuestions.length > 0 ? 'peo' : null);
         setQuestions(peoQuestions);
         const initialResponses: Record<string, number> = {};
@@ -140,7 +185,7 @@ const AlumniSurvey: React.FC = () => {
         });
         setResponses(initialResponses);
       } catch (error) {
-        console.error('Failed to load alumni survey:', error);
+        console.error('[AlumniSurvey] Failed to load alumni survey:', error);
         toast.error('Failed to load alumni survey');
       } finally {
         if (!cancelled) {
@@ -182,6 +227,11 @@ const AlumniSurvey: React.FC = () => {
       return;
     }
 
+    if (!employmentStatus) {
+      toast.error('Please select your employment status.');
+      return;
+    }
+
     if (!isComplete) {
       toast.error('Please answer all survey questions.');
       return;
@@ -190,6 +240,9 @@ const AlumniSurvey: React.FC = () => {
     setIsSubmitting(true);
     try {
       await obeService.submitAlumniSurvey(String(activeCycle.id), String(studentId), {
+        employment_status: employmentStatus ?? undefined,
+        organization_name: organizationName || undefined,
+        current_designation: currentDesignation || undefined,
         responses: questions.map((question) => ({
           question: question.id,
           score: responses[question.id],
@@ -321,6 +374,71 @@ const AlumniSurvey: React.FC = () => {
             </div>
           </div>
         </section>
+
+        {/* Employment Status Section */}
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[#112240] rounded-[32px] p-8 border border-[#233554] shadow-xl"
+        >
+          <h3 className="text-xl font-bold text-white mb-6">Section 1: Employment Status (Basic Information)</h3>
+          
+          <div className="mb-6">
+            <label className="block text-sm font-bold text-[#8892B0] mb-3 uppercase tracking-wider">
+              Employment Status
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                { value: 'EMPLOYED', label: 'Employed' },
+                { value: 'SELF_EMPLOYED', label: 'Self-Employed / Entrepreneur' },
+                { value: 'HIGHER_STUDIES', label: 'Higher Studies' },
+                { value: 'UNEMPLOYED', label: 'Unemployed / Looking for Job' },
+                { value: 'HOUSEWIFE', label: 'Housewife / Homemaker' },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setEmploymentStatus(option.value)}
+                  className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
+                    employmentStatus === option.value
+                      ? 'bg-gradient-to-r from-pink-500 to-indigo-500 text-white border-indigo-600 shadow-lg'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED') && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Organization / Company Name
+                </label>
+                <input
+                  type="text"
+                  value={organizationName}
+                  onChange={(e) => setOrganizationName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                  placeholder="e.g., Systems Ltd, NetSol"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Current Designation
+                </label>
+                <input
+                  type="text"
+                  value={currentDesignation}
+                  onChange={(e) => setCurrentDesignation(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                  placeholder="e.g., Software Engineer, SQA, Team Lead"
+                />
+              </div>
+            </div>
+          )}
+        </motion.section>
 
         <div className="space-y-6">
           {questions.map((question, index) => (

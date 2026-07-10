@@ -1,1061 +1,911 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import obeService, { GAReportItem, Batch, BatchGAReportResponse, GAReportContributingCourse, GACQIRecord } from '../api/obeService';
+import React, { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import authService from '../api/authService';
 import * as XLSX from 'xlsx-js-style';
+import obeService, { Batch, GACQIRecord } from '../api/obeService';
+
+type ViewMode = 'student-wise' | 'course-wise';
+
+interface GA {
+  ga_id: string;
+  ga_code: string;
+  ga_title: string;
+  ga_kpi_threshold: number;
+}
+
+interface StudentGA {
+  ga_id: string;
+  ga_code: string;
+  direct_score: number;
+  is_below_threshold: boolean;
+}
+
+interface StudentReport {
+  id: string;
+  name: string;
+  registration_number: string;
+  ga_scores: StudentGA[];
+  is_dropped?: boolean;
+  is_frozen?: boolean;
+}
+
+interface CourseGA {
+  ga_id: string;
+  ga_code: string;
+  score: number | null;
+  is_below_threshold: boolean;
+}
+
+interface CourseReport {
+  course_id: string;
+  course_code: string;
+  course_title: string;
+  semester: number | null;
+  ga_scores: CourseGA[];
+}
+
+interface CohortSummary {
+  ga_id: string;
+  ga_code: string;
+  ga_title: string;
+  ga_kpi_threshold: number;
+  direct_attainment: number;
+  indirect_attainment: number;
+  final_attainment: number;
+  status: 'ACHIEVED' | 'BELOW_TARGET';
+}
+
+interface GAStatusRow {
+  ga_id: string;
+  ga_code: string;
+  ga_title: string;
+  cohort_score: number | null;
+  kpi_threshold: number;
+  status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
+  cqi_record_id: string | null;
+  cqi_status: string | null;
+}
+
+interface AllStudentsReportData {
+  is_program_end_ready: boolean;
+  gas: GA[];
+  students?: StudentReport[];
+  courses?: CourseReport[];
+  cohort_summary: CohortSummary[];
+}
+
+type BatchCategory = 'all' | 'ongoing' | 'graduated';
 
 const GAReport: React.FC = () => {
+  const [programs, setPrograms] = useState<any[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState<string>('');
-  const [mode, setMode] = useState<'semester' | 'cumulative'>('cumulative');
-  const [selectedSemester, setSelectedSemester] = useState<number>(1);
-  const [report, setReport] = useState<GAReportItem[] | { ready: boolean; [key: string]: any } | BatchGAReportResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [expandedGA, setExpandedGA] = useState<string | null>(null);
-  const [expandedCqiForm, setExpandedCqiForm] = useState<{ [key: string]: boolean }>({});
-  const [localCqiData, setLocalCqiData] = useState<{ [key: string]: { root_cause: string; remedial_plan: string; hod_comment: string } }>({});
-  const [submitting, setSubmitting] = useState<{ [key: string]: boolean }>({});
-  const [isProgramEndReady, setIsProgramEndReady] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'course_code' | 'course_ga_score' | 'semester' | 'credits'>('course_code');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Get actual user role
-  const authData = authService.getCurrentUser();
-  const userRole = useMemo((): 'hod' | 'coordinator' | 'teacher' | 'student' => {
-    if (authData?.role === 'hod' || authData?.user?.secondary_role === 'hod') return 'hod';
-    if (authData?.role === 'coordinator' || authData?.user?.secondary_role === 'coordinator') return 'coordinator';
-    if (authData?.role === 'teacher' || authData?.user?.secondary_role === 'teacher') return 'teacher';
-    return 'student';
-  }, [authData]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+  const [viewMode, setViewMode] = useState<ViewMode>('student-wise');
+  const [reportData, setReportData] = useState<AllStudentsReportData | null>(null);
+  const [readinessInfo, setReadinessInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [batchCategory, setBatchCategory] = useState<BatchCategory>('all');
+  const [gaStatusRow, setGAStatusRow] = useState<GAStatusRow[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [currentGA, setCurrentGA] = useState<GAStatusRow | null>(null);
+  const [currentCQIRecord, setCurrentCQIRecord] = useState<GACQIRecord | null>(null);
+  const [issueStatement, setIssueStatement] = useState('');
+  const [hodActionPlan, setHodActionPlan] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetchBatches = async () => {
       try {
-        const data = await obeService.getAllBatches();
-        setBatches(data);
-        if (data.length > 0) {
-          setSelectedBatch(data[0].id);
+        const batchesData = await obeService.getAllBatches({ alumni_feedback: 'all' });
+        console.log('=== Fetched batches:', batchesData); // Log to see what each batch has!
+        setBatches(batchesData);
+        const uniquePrograms = Array.from(
+          new Map(
+            batchesData.map((batch) => [batch.program?.id, batch.program])
+          ).values()
+        ).filter(Boolean);
+        setPrograms(uniquePrograms as any[]);
+        
+        if (batchesData.length > 0) {
+          setSelectedProgramId(batchesData[0].program?.id || '');
+          setSelectedBatchId(batchesData[0].id);
         }
       } catch (error) {
         console.error('Failed to fetch batches:', error);
+        toast.error('Failed to fetch batches');
       }
     };
+
     fetchBatches();
   }, []);
 
-  const gaItems = useMemo(() => {
-    if (!report) return [];
-    if ('ga_reports' in report) return report.ga_reports;
-    if (Array.isArray(report)) return report;
-    return [];
-  }, [report]);
-
+  // Auto-generate report when batch or view mode changes
   useEffect(() => {
-    if (!selectedBatch) return;
+    if (!selectedBatchId) {
+      return;
+    }
+
     const fetchReport = async () => {
       setLoading(true);
+      setReadinessInfo(null);
+      setReportData(null);
+      
       try {
-        console.log('Fetching GA report');
-        const data = await obeService.getBatchGAReport(selectedBatch);
-        console.log('Received data:', data);
-        setReport(data);
-        
-        // Set isProgramEndReady
-        if ('is_program_end_ready' in data) {
-          setIsProgramEndReady(data.is_program_end_ready);
-        } else {
-          setIsProgramEndReady(false);
-        }
-
-        // Initialize local CQI data
-        const initialCqiData: typeof localCqiData = {};
-        const items = 'ga_reports' in data ? data.ga_reports : (Array.isArray(data) ? data : []);
-        items.forEach(ga => {
-          ga.ga_cqi_records.forEach(cqi => {
-            initialCqiData[cqi.id] = {
-              root_cause: cqi.root_cause || '',
-              remedial_plan: cqi.remedial_plan || '',
-              hod_comment: ''
-            };
-          });
+        const data = await obeService.getBatchGAReport(selectedBatchId, {
+          mode: 'cumulative',
+          scope: viewMode === 'student-wise' ? 'all_students' : 'course_wise',
         });
-        setLocalCqiData(initialCqiData);
+
+        // Check if it's a readiness response
+        if ('ready' in data && !data.ready) {
+          setReadinessInfo(data);
+        } else {
+          setReportData(data as unknown as AllStudentsReportData);
+        }
       } catch (error) {
         console.error('Failed to fetch GA report:', error);
+        toast.error('Failed to fetch GA report');
       } finally {
         setLoading(false);
       }
     };
+
     fetchReport();
-  }, [selectedBatch]);
+  }, [selectedBatchId, viewMode]);
 
-  const isReady = useMemo(() => {
-    if (!report) return false;
-    if ('ready' in report) return report.ready;
-    return true;
-  }, [report]);
-
-  const failedGAs = useMemo(() => {
-    return gaItems.filter((ga: GAReportItem) => ga.status === 'BELOW_TARGET');
-  }, [gaItems]);
-
-  const getSortedFilteredCourses = (courses: GAReportContributingCourse[], kpiThreshold: number) => {
-    let filteredCourses = [...courses];
-
-    // Apply search filter
-    if (searchQuery) {
-      const lowerQuery = searchQuery.toLowerCase();
-      filteredCourses = filteredCourses.filter(course => 
-        course.course_code.toLowerCase().includes(lowerQuery) ||
-        (course.course_name?.toLowerCase().includes(lowerQuery) || '')
-      );
+  // Fetch GA Status Row when program and batch are selected
+  useEffect(() => {
+    if (!selectedProgramId || !selectedBatchId) {
+      setGAStatusRow([]);
+      return;
     }
-
-    // Apply sorting
-    filteredCourses.sort((a, b) => {
-      let aVal = a[sortBy];
-      let bVal = b[sortBy];
-
-      // Handle null/undefined values
-      if (aVal === null || aVal === undefined) aVal = 0;
-      if (bVal === null || bVal === undefined) bVal = 0;
-
-      // Handle string vs number comparisons
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
+    const fetchGAStatusRow = async () => {
+      try {
+        const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
+        setGAStatusRow(data);
+      } catch (error) {
+        console.error('Failed to fetch GA status row:', error);
       }
+    };
+    fetchGAStatusRow();
+  }, [selectedProgramId, selectedBatchId]);
 
-      if (sortOrder === 'asc') {
-        return aVal > bVal ? 1 : -1;
-      } else {
-        return aVal < bVal ? 1 : -1;
+  // Handle Trigger CQI button click
+  const handleTriggerCQI = async (ga: GAStatusRow) => {
+    try {
+      setSaving(true);
+      // Re-fetch to get the latest record
+      const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
+      setGAStatusRow(data);
+      const updatedGA = data.find(g => g.ga_id === ga.ga_id);
+      if (!updatedGA) {
+        toast.error('GA not found');
+        return;
       }
-    });
-
-    return filteredCourses;
-  };
-
-  const refreshReport = async () => {
-    const newReport = await obeService.getBatchGAReport(selectedBatch);
-    setReport(newReport);
-    if ('is_program_end_ready' in newReport) {
-      setIsProgramEndReady(newReport.is_program_end_ready);
+      setCurrentGA(updatedGA);
+      // Reset fields first
+      setIssueStatement('');
+      setHodActionPlan('');
+      setCurrentCQIRecord(null);
+      // Fetch the actual CQI record if it exists
+      if (updatedGA.cqi_record_id) {
+        try {
+          const record = await obeService.getGACQIRecord(updatedGA.cqi_record_id);
+          setCurrentCQIRecord(record);
+          setIssueStatement(record.issue_statement || '');
+          setHodActionPlan(record.hod_action_plan || '');
+        } catch (err) {
+          console.error('Failed to fetch CQI record:', err);
+        }
+      }
+      setModalOpen(true);
+    } catch (error) {
+      console.error('Failed to trigger CQI:', error);
+      toast.error('Failed to trigger CQI');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleSaveDraft = async (cqiId: string) => {
-    setSubmitting(prev => ({ ...prev, [cqiId]: true }));
+  // Handle save CQI
+  const handleSaveCQI = async () => {
+    if (!currentGA?.cqi_record_id) {
+      toast.error('No CQI record found');
+      return;
+    }
+    if (hodActionPlan.trim().length < 20) {
+      toast.error('HOD Action Plan must be at least 20 characters');
+      return;
+    }
+    setSaving(true);
     try {
-      const data = localCqiData[cqiId];
-      await obeService.updateGACQIRecord(cqiId, {
-        root_cause: data.root_cause,
-        remedial_plan: data.remedial_plan
+      await obeService.saveGACQI(currentGA.cqi_record_id, {
+        hod_action_plan: hodActionPlan.trim(),
+        issue_statement: issueStatement.trim()
       });
-      await refreshReport();
-      toast.success('Draft saved successfully!');
+      toast.success('Saved. This will appear in Advisory Export.');
+      setModalOpen(false);
+      // Re-fetch status row
+      const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
+      setGAStatusRow(data);
     } catch (error) {
-      console.error('Failed to save draft:', error);
-      toast.error('Failed to save draft');
+      console.error('Failed to save CQI:', error);
+      toast.error('Failed to save CQI');
     } finally {
-      setSubmitting(prev => ({ ...prev, [cqiId]: false }));
+      setSaving(false);
     }
   };
 
-  const handleSubmitToHod = async (cqiId: string) => {
-    setSubmitting(prev => ({ ...prev, [cqiId]: true }));
-    try {
-      const data = localCqiData[cqiId];
-      // Update the existing record and set status to PENDING
-      await obeService.updateGACQIRecord(cqiId, {
-        root_cause: data.root_cause,
-        remedial_plan: data.remedial_plan,
-        status: 'PENDING'
+  const filteredBatches = selectedProgramId
+    ? batches.filter((b) => {
+        if (b.program?.id !== selectedProgramId) return false;
+        if (batchCategory === 'all') return true;
+        if (batchCategory === 'ongoing') return b.status === 'active';
+        if (batchCategory === 'graduated') return b.status === 'graduated';
+        return true;
+      })
+    : batches.filter((b) => {
+        if (batchCategory === 'all') return true;
+        if (batchCategory === 'ongoing') return b.status === 'active';
+        if (batchCategory === 'graduated') return b.status === 'graduated';
+        return true;
       });
-      await refreshReport();
-      toast.success('Submitted — awaiting HOD approval!');
-    } catch (error) {
-      console.error('Failed to submit to HOD:', error);
-      toast.error('Failed to submit to HOD');
-    } finally {
-      setSubmitting(prev => ({ ...prev, [cqiId]: false }));
-    }
-  };
-
-  const handleApprove = async (cqiId: string) => {
-    setSubmitting(prev => ({ ...prev, [cqiId]: true }));
-    try {
-      await obeService.approveGACQI(cqiId);
-      await refreshReport();
-      toast.success('CQI approved!');
-    } catch (error) {
-      console.error('Failed to approve CQI:', error);
-      toast.error('Failed to approve CQI');
-    } finally {
-      setSubmitting(prev => ({ ...prev, [cqiId]: false }));
-    }
-  };
-
-  const handleReject = async (cqiId: string) => {
-    setSubmitting(prev => ({ ...prev, [cqiId]: true }));
-    try {
-      const data = localCqiData[cqiId];
-      await obeService.rejectGACQI(cqiId, data.hod_comment);
-      await refreshReport();
-      toast.success('CQI sent back!');
-    } catch (error) {
-      console.error('Failed to reject CQI:', error);
-      toast.error('Failed to reject CQI');
-    } finally {
-      setSubmitting(prev => ({ ...prev, [cqiId]: false }));
-    }
-  };
 
   const handleExport = () => {
-    if (!report || !isReady) {
+    if (!reportData) {
       toast.error('No report data to export');
       return;
     }
 
-    const selectedBatchObj = batches.find(b => b.id === selectedBatch);
+    const selectedBatch = batches.find((b) => b.id === selectedBatchId);
     const wb = XLSX.utils.book_new();
-    
-    // --- Summary Sheet ---
-    const summaryHeaderRows: any[][] = [
-      [selectedBatchObj?.program?.name || 'Program Name'],
-      ['Department: ' + (selectedBatchObj?.program?.department || 'Computer Science')],
-      ['Batch: ' + (selectedBatchObj?.name || 'Selected Batch')],
-      ['GA Attainment Summary Report'],
+    const rows: any[][] = [
+      [selectedBatch?.program?.name || 'Program Name'],
+      ['Department: ' + (selectedBatch?.program?.department || 'Computer Science')],
+      ['Batch: ' + (selectedBatch?.name || 'Selected Batch')],
+      [viewMode === 'student-wise' ? 'Student-wise Cohort Attainment' : 'Course-wise PLO Contribution'],
       ['Date: ' + new Date().toLocaleDateString()],
       [],
-      []
     ];
-    
-    const summaryData: any[] = [...summaryHeaderRows];
-    summaryData.push([
-      'Type',
-      'GA Code',
-      'GA Title',
-      'Direct Score',
-      'Indirect Score',
-      'GA Attainment',
-      'KPI Threshold',
-      'Status',
-      'Course Code',
-      'Course Name',
-      'Semester',
-      'Credits',
-      'Course Direct Score',
-      'Course Indirect Score',
-      'Enrolled Students'
+
+    // Header row
+    const gas = reportData.gas || [];
+    const header = viewMode === 'student-wise'
+      ? ['Sr. No.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
+      : ['Sr. No.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
+    rows.push(header);
+
+    const items = viewMode === 'student-wise' ? (reportData.students || []) : (reportData.courses || []);
+
+    // Data rows
+    items.forEach((item, idx) => {
+      if ('name' in item) {
+        // Student row
+        const student = item as StudentReport;
+        if (student.is_dropped || student.is_frozen) {
+          const row = [
+            idx + 1,
+            student.registration_number,
+            student.name,
+            ...Array(reportData.gas.length).fill(student.is_dropped ? 'Dropped Out' : 'Semester Frozen'),
+          ];
+          rows.push(row);
+        } else {
+          const row = [
+            idx + 1,
+            student.registration_number,
+            student.name,
+            ...reportData.gas.map((g) => {
+              const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score || 0;
+              return `${score.toFixed(1)}%`;
+            }),
+          ];
+          rows.push(row);
+        }
+      } else {
+        // Course row
+        const course = item as CourseReport;
+        const row = [
+          idx + 1,
+          course.course_code,
+          course.course_title,
+          ...reportData.gas.map((g) => {
+            const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
+            return score != null ? `${score.toFixed(1)}%` : '';
+          }),
+        ];
+        rows.push(row);
+      }
+    });
+
+    // Footer rows (4 summary rows)
+    const cohortSummary = reportData.cohort_summary || [];
+    const dividerRow = ['', '', '', ...Array(gas.length).fill('')];
+    rows.push(dividerRow);
+    rows.push([
+      'Direct Attainment (%)',
+      '(From Exams/Labs)',
+      '',
+      ...cohortSummary.map((s) => `${s.direct_attainment.toFixed(1)}%`),
     ]);
-    
-    const summaryStatusIndices: number[] = [];
-    gaItems.forEach((ga: GAReportItem) => {
-      // Add GA Summary row
-      summaryStatusIndices.push(summaryData.length);
-      summaryData.push([
-        'GA Summary',
-        ga.ga_code,
-        ga.ga_title,
-        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
-        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
-        ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
-        (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
-        ga.status,
-        '',
-        '',
-        '',
-        '',
-        '',
-        ''
-      ]);
-      
-      // Add contributing courses
-      (ga.contributing_courses || []).forEach((course) => {
-        summaryData.push([
-          'Contributing Course',
-          '', // Empty GA code for contributing course rows (so it doesn't repeat)
-          '', // Empty GA title for contributing course rows
-          '',
-          '',
-          '',
-          '',
-          '',
-          course.course_code,
-          course.course_name || '',
-          course.semester || '',
-          course.credits || '',
-          course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
-          course.course_feedback_score ? course.course_feedback_score.toFixed(1) + '%' : '—',
-          course.enrolled_students || ''
-        ]);
-      });
-      
-      // Add empty row between GAs
-      summaryData.push([]);
-    });
-    
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-    
-    // Style Summary Sheet
-    const summaryMerges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 13 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 13 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 13 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: 13 } }
-    ];
-    
-    summaryWs['!merges'] = summaryMerges;
-    
-    const summaryRange = XLSX.utils.decode_range(summaryWs['!ref'] || 'A1');
-    
-    for (let R = 0; R <= summaryRange.e.r; ++R) {
-      for (let C = 0; C <= 13; ++C) {
-        const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-        if (!summaryWs[cell_address]) continue;
-        
-        if (R < 5) {
-          // Header rows (blue)
-          summaryWs[cell_address].s = {
-            fill: { fgColor: { rgb: '4472C4' } },
-            font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 14 },
-            alignment: { horizontal: 'center', vertical: 'center' }
-          };
-        } else if (R === 6) { // Column headers
-          summaryWs[cell_address].s = {
-            fill: { fgColor: { rgb: 'D9E1F2' } },
-            font: { bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        } else if (summaryStatusIndices.includes(R)) {
-          // GA summary rows - apply background to entire row
-          const statusIndex = summaryStatusIndices.indexOf(R);
-          const status = gaItems[statusIndex].status;
-          
-          summaryWs[cell_address].s = {
-            fill: { fgColor: { rgb: status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
-            font: { color: { rgb: status === 'ACHIEVED' ? '006100' : '9C0006' }, bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        } else if (summaryWs[cell_address].v === 'Contributing Course') {
-          // Contributing Course Type column - light gray
-          summaryWs[cell_address].s = {
-            fill: { fgColor: { rgb: 'E7E6E6' } },
-            font: { bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        }
-      }
-    }
-    
-    // Set Summary column widths
-    summaryWs['!cols'] = [
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 30 },
-      { wch: 15 }, // Direct Score
-      { wch: 15 }, // Indirect Score
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 30 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 18 }, // Course Direct Score
-      { wch: 18 }, // Course Indirect Score
-      { wch: 18 }
-    ];
-    
-    // --- GA Report Sheet ---
-    // Prepare header data
-    const headerRows: any[][] = [
-      [selectedBatchObj?.program?.name || 'Program Name'],
-      ['Department: ' + (selectedBatchObj?.program?.department || 'Computer Science')],
-      ['Batch: ' + (selectedBatchObj?.name || 'Selected Batch')],
-      ['GA Attainment Report'],
-      ['Date: ' + new Date().toLocaleDateString()],
-      [],
-      []
-    ];
-    
-    // Convert header to sheet with merged cells
-    const wsData: any[] = [...headerRows];
-    const gaSummaryRowIndices: number[] = [];
-    const gaStatuses: string[] = [];
-    
-    // Add each GA
-    gaItems.forEach((ga: GAReportItem) => {
-      // Track GA summary row index
-      gaSummaryRowIndices.push(wsData.length);
-      gaStatuses.push(ga.status);
-      
-      // Add GA summary row
-      const gaRow = [
-        'GA Summary',
-        ga.ga_code,
-        ga.ga_title,
-        ga.direct_score ? ga.direct_score.toFixed(1) + '%' : '—',
-        ga.indirect_score ? ga.indirect_score.toFixed(1) + '%' : '—',
-        ga.ga_attainment ? ga.ga_attainment.toFixed(1) + '%' : '0.0%',
-        (ga.ga_kpi_threshold ?? 0).toFixed(1) + '%',
-        ga.status
-      ];
-      wsData.push(gaRow);
-      
-      // Add contributing courses header
-      wsData.push([
-        'Contributing Courses',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        ''
-      ]);
-      wsData.push([
-        'Course Code',
-        'Course Name',
-        'Semester',
-        'Credits',
-        'Course GA Score',
-        'Enrolled Students',
-        '',
-        ''
-      ]);
-      
-      // Add contributing courses
-      (ga.contributing_courses || []).forEach((course: GAReportContributingCourse) => {
-        wsData.push([
-          course.course_code,
-          course.course_name || '',
-          course.semester || '',
-          course.credits || '',
-          course.course_ga_score ? course.course_ga_score.toFixed(1) + '%' : '0.0%',
-          course.enrolled_students || '',
-          '',
-          ''
-        ]);
-      });
-      
-      // Add empty row between GAs
-      wsData.push([]);
-    });
-    
-    // Create worksheet
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    
-    // Style header (blue, bold, merged)
-    const merges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 7 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: 7 } }
-    ];
-    
-    ws['!merges'] = merges;
-    
-    // Style cells
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-    
-    // Apply styles
-    for (let R = 0; R <= range.e.r; ++R) {
-      for (let C = 0; C <= 7; ++C) {
-        const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-        if (!ws[cell_address]) continue;
-        
-        if (R < 5) {
-          // Header rows (blue)
-          ws[cell_address].s = {
-            fill: { fgColor: { rgb: '4472C4' } },
-            font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 14 },
-            alignment: { horizontal: 'center', vertical: 'center' }
-          };
-        } else if (gaSummaryRowIndices.includes(R)) {
-          // GA summary row - apply background to entire row
-          const statusIndex = gaSummaryRowIndices.indexOf(R);
-          const status = gaStatuses[statusIndex];
-          
-          ws[cell_address].s = {
-            fill: { fgColor: { rgb: status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
-            font: { color: { rgb: status === 'ACHIEVED' ? '006100' : '9C0006' }, bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        } else if (ws[cell_address].v === 'Contributing Courses') {
-          // Contributing courses header - gray background
-          ws[cell_address].s = {
-            fill: { fgColor: { rgb: 'E7E6E6' } },
-            font: { bold: true }
-          };
-        } else if (R === gaSummaryRowIndices[0] + 2) { // Course headers
-          ws[cell_address].s = {
-            fill: { fgColor: { rgb: 'D9E1F2' } },
-            font: { bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        } else if (C === 4) { // Course GA Score column
-          ws[cell_address].s = {
-            font: { bold: true },
-            alignment: { horizontal: 'center' }
-          };
-        }
-      }
-    }
-    
+    rows.push([
+      'Indirect Attainment (%)',
+      '(From Surveys)',
+      '',
+      ...cohortSummary.map((s) => `${s.indirect_attainment.toFixed(1)}%`),
+    ]);
+    rows.push([
+      'Final Combined Attainment (%)',
+      '(80% Direct + 20% Indirect)',
+      '',
+      ...cohortSummary.map((s) => `${s.final_attainment.toFixed(1)}%`),
+    ]);
+    rows.push([
+      'Status',
+      '(Target KPI: 50%)',
+      '',
+      ...cohortSummary.map((s) => s.status),
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
     // Set column widths
-    ws['!cols'] = [
-      { wch: 20 },
-      { wch: 40 },
-      { wch: 15 }, // Direct Score
-      { wch: 15 }, // Indirect Score
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 20 },
-      { wch: 20 }
-    ];
-    
-    // Add sheets to workbook
-    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+    const colWidths = viewMode === 'student-wise'
+      ? [{ wch: 10 }, { wch: 15 }, { wch: 25 }, ...gas.map(() => ({ wch: 12 }))]
+      : [{ wch: 10 }, { wch: 15 }, { wch: 30 }, ...gas.map(() => ({ wch: 12 }))];
+    ws['!cols'] = colWidths;
+
+    // Apply styles
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R++) {
+      for (let C = 0; C <= range.e.c; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ c: C, r: R });
+        if (!ws[cellAddress]) continue;
+
+        if (R < 5) {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: '1F7A6B' } },
+            font: { color: { rgb: 'FFFFFF' }, bold: true },
+            alignment: { horizontal: 'center', vertical: 'center' },
+          };
+        } else if (R === 6) {
+          ws[cellAddress].s = {
+            fill: { fgColor: { rgb: 'D9E1F2' } },
+            font: { bold: true },
+            alignment: { horizontal: 'center' },
+          };
+        } else if (R > 6 && R <= 6 + items.length && C > 2) {
+          // Check if cell is below threshold
+          let isBelow = false;
+          if (viewMode === 'student-wise') {
+            const studentIdx = R - 7;
+            const gaIdx = C - 3;
+            const student = items[studentIdx] as StudentReport;
+            if (student && !student.is_dropped && !student.is_frozen) {
+              const ga = reportData.gas[gaIdx];
+              const score = student.ga_scores.find((s) => s.ga_id === ga?.ga_id);
+              isBelow = score?.is_below_threshold ?? false;
+            }
+          } else {
+            const courseIdx = R - 7;
+            const gaIdx = C - 3;
+            const course = items[courseIdx] as CourseReport;
+            const gaScore = course.ga_scores.find((s) => s.ga_id === reportData.gas[gaIdx].ga_id);
+            isBelow = gaScore?.is_below_threshold ?? false;
+          }
+
+          if (isBelow) {
+            ws[cellAddress].s = {
+              fill: { fgColor: { rgb: 'FFC7CE' } },
+              font: { color: { rgb: '9C0006' }, bold: true },
+              alignment: { horizontal: 'center' },
+            };
+          } else {
+            ws[cellAddress].s = { alignment: { horizontal: 'center' } };
+          }
+        } else if (R > 6 + items.length + 1 && R <= 6 + items.length + 5) {
+          // Summary rows
+          if (C === 0 || C === 1) {
+            ws[cellAddress].s = {
+              fill: { fgColor: { rgb: 'E2EFDA' } },
+              font: { bold: true },
+              alignment: { horizontal: 'left' },
+            };
+          } else if (R === 6 + items.length + 5) {
+            // Status row
+            const summaryIdx = C - 3;
+            const summary = reportData.cohort_summary[summaryIdx];
+            if (summary) {
+              ws[cellAddress].s = {
+                fill: { fgColor: { rgb: summary.status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
+                font: {
+                  color: { rgb: summary.status === 'ACHIEVED' ? '006100' : '9C0006' },
+                  bold: true,
+                },
+                alignment: { horizontal: 'center' },
+              };
+            }
+          } else {
+            ws[cellAddress].s = {
+              font: { bold: true },
+              alignment: { horizontal: 'center' },
+            };
+          }
+        } else {
+          ws[cellAddress].s = { alignment: { horizontal: 'center' } };
+        }
+      }
+    }
+
     XLSX.utils.book_append_sheet(wb, ws, 'GA Report');
-    
-    // Generate filename
-    const filename = `GA_Report_${selectedBatchObj?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    
-    // Download
+
+    const filename = `${viewMode === 'student-wise' ? 'Student_Wise' : 'Course_Wise'}_GA_Report_${selectedBatch?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date()
+      .toISOString()
+      .split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, filename);
     toast.success('Report exported successfully');
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-900">GA Attainment Report</h1>
-          <p className="text-slate-500 font-medium mt-1">
-            {batches.find(b => b.id === selectedBatch)?.name || 'Select a batch'}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={handleExport}
-            disabled={!report || !isReady}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2z" />
-            </svg>
-            Export Report
-          </button>
-          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Batch:</span>
+    <div className="space-y-6">
+      {/* Filters and Header */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <h2 className="text-2xl font-black text-gray-900 mb-6">Unified Cohort Analytics Engine</h2>
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+          {/* Program Select */}
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Program
+            </label>
             <select
-              value={selectedBatch}
-              onChange={(e) => setSelectedBatch(e.target.value)}
-              className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+              value={selectedProgramId}
+              onChange={(e) => {
+                setSelectedProgramId(e.target.value);
+                setSelectedBatchId('');
+              }}
             >
-              {batches.map(batch => (
-                <option key={batch.id} value={batch.id}>{batch.name}</option>
+              <option value="">Select a program</option>
+              {programs.map((program) => (
+                <option key={program.id} value={program.id}>
+                  {program.name}
+                </option>
               ))}
             </select>
+          </div>
+
+          {/* Batch Category Select */}
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Batch Category
+            </label>
+            <select
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+              value={batchCategory}
+              onChange={(e) => {
+                setBatchCategory(e.target.value as BatchCategory);
+                setSelectedBatchId('');
+              }}
+            >
+              <option value="all">All Batches</option>
+              <option value="ongoing">Ongoing</option>
+              <option value="graduated">Graduated</option>
+            </select>
+          </div>
+
+          {/* Batch Select */}
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Batch
+            </label>
+            <select
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
+              value={selectedBatchId}
+              onChange={(e) => setSelectedBatchId(e.target.value)}
+              disabled={!selectedProgramId}
+            >
+              <option value="">Select a batch</option>
+              {filteredBatches.map((batch) => (
+                <option key={batch.id} value={batch.id}>
+                  {batch.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              View Mode
+            </label>
+            <div className="flex bg-gray-100 rounded-xl p-1">
+              <button
+                className={`flex-1 py-2 px-4 rounded-lg font-bold transition-all ${
+                  viewMode === 'student-wise'
+                    ? 'bg-white text-indigo-600 shadow'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+                onClick={() => setViewMode('student-wise')}
+              >
+                Student-wise
+              </button>
+              <button
+                className={`flex-1 py-2 px-4 rounded-lg font-bold transition-all ${
+                  viewMode === 'course-wise'
+                    ? 'bg-white text-indigo-600 shadow'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+                onClick={() => setViewMode('course-wise')}
+              >
+                Course-wise
+              </button>
+            </div>
+          </div>
+
+          {/* Action Button */}
+          <div className="flex items-end gap-3">
+            <button
+              onClick={handleExport}
+              disabled={!reportData}
+              className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
+            >
+              Export to Excel
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-4 mb-8 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-500 uppercase">Mode:</span>
-          <button
-            onClick={() => setMode('semester')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${mode === 'semester'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-          >
-            Semester-wise
-          </button>
-          <button
-            onClick={() => setMode('cumulative')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${mode === 'cumulative'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-          >
-            Cumulative
-          </button>
-        </div>
-
-        {mode === 'semester' && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 uppercase">Semester:</span>
-            <select
-              value={selectedSemester}
-              onChange={(e) => setSelectedSemester(Number(e.target.value))}
-              className="bg-slate-100 px-4 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none"
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(sem => (
-                <option key={sem} value={sem}>{sem}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 flex-1">
-          <span className="text-xs font-bold text-slate-500 uppercase">Search:</span>
-          <input
-            type="text"
-            placeholder="Search by course code or name"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-100 px-4 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none flex-1"
-          />
-        </div>
-      </div>
-
+      {/* Loading State */}
       {loading && (
-        <div className="flex items-center justify-center p-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-xl font-bold text-gray-600">Generating report...</p>
         </div>
       )}
 
-      {!loading && !isReady && report && 'ready' in report && (
-        <div className="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded-r-lg mb-8">
-          <h3 className="text-yellow-900 font-bold text-lg">Report Not Ready</h3>
-          <p className="text-yellow-800 mt-2">
-            {report.message || `Finalized ${report.finalized_courses}/${report.total_courses} courses.`}
+      {/* Readiness State */}
+      {!loading && readinessInfo && (
+        <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
+          <div className="text-amber-500 text-5xl mb-4">⚠️</div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">Report not ready</h3>
+          <p className="text-gray-600 mb-2">Please finalize all course assessments first.</p>
+          <p className="text-sm text-gray-500">
+            Finalized: {readinessInfo.finalized_courses} / {readinessInfo.total_courses}
           </p>
-          {report.missing_courses && (
-            <div className="mt-4">
-              <h4 className="text-sm font-bold text-yellow-700">Missing Courses:</h4>
-              <ul className="list-disc list-inside text-sm text-yellow-800 mt-2">
-                {report.missing_courses.map((course: string, idx: number) => (
-                  <li key={idx}>{course}</li>
-                ))}
-              </ul>
-            </div>
+          {readinessInfo.missing_courses && readinessInfo.missing_courses.length > 0 && (
+            <p className="text-sm text-amber-700 mt-2">
+              Missing courses: {readinessInfo.missing_courses.join(', ')}
+            </p>
           )}
         </div>
       )}
 
-      {!loading && isReady && report && !('ready' in report) && (
-        <div className="space-y-8">
-          {/* GA Cards Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {gaItems.map((ga: GAReportItem) => {
-              const isExpanded = expandedGA === ga.ga_id;
-
-              return (
-                <div
-                  key={ga.ga_id}
-                  className={`bg-white rounded-[24px] shadow-sm border transition-all duration-300 ${isExpanded ? 'ring-2 ring-indigo-500 border-transparent shadow-xl' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'}`}
-                >
-                  <div
-                    className="p-6 cursor-pointer"
-                    onClick={() => setExpandedGA(isExpanded ? null : ga.ga_id)}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-bold text-slate-800">
-                        {ga.ga_code} — {ga.ga_title}
-                      </h3>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${ga.status === 'ACHIEVED'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-rose-100 text-rose-700'}`}
-                      >
-                        {ga.status === 'ACHIEVED' ? 'Achieved ✅' : 'Below Target ❌'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Direct Score</div>
-                        <div className="text-xl font-bold text-slate-700">
-                          {ga.direct_score !== null ? `${ga.direct_score.toFixed(1)}%` : 'N/A'}
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Course Feedback</div>
-                        <div className="text-xl font-bold text-fuchsia-600">
-                          {ga.course_feedback_score !== null && ga.course_feedback_score !== undefined ? `${ga.course_feedback_score.toFixed(1)}%` : 'N/A'}
-                        </div>
-                        <div className="text-[11px] font-semibold text-slate-400 mt-1">
-                          Coverage: {ga.course_feedback_coverage !== null && ga.course_feedback_coverage !== undefined ? `${ga.course_feedback_coverage.toFixed(1)}%` : 'N/A'}
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Exit Survey</div>
-                        <div className="text-xl font-bold text-rose-500">
-                          {ga.exit_survey_score !== null && ga.exit_survey_score !== undefined ? `${ga.exit_survey_score.toFixed(1)}%` : 'N/A'}
-                        </div>
-                        <div className="text-[11px] font-semibold text-slate-400 mt-1">
-                          Coverage: {ga.exit_survey_coverage !== null && ga.exit_survey_coverage !== undefined ? `${ga.exit_survey_coverage.toFixed(1)}%` : 'N/A'}
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg text-center">
-                        <div className="text-xs font-bold text-slate-400 uppercase mb-1">Indirect Score</div>
-                        <div className="text-xl font-bold text-slate-700">
-                          {ga.indirect_score !== null ? `${ga.indirect_score.toFixed(1)}%` : 'N/A'}
-                        </div>
-                        <div className="text-[11px] font-semibold text-slate-400 mt-1">Combined CF + Exit</div>
-                      </div>
-                    </div>
-                    <div className="relative pt-2 pb-1">
-                      <div className="flex justify-between text-xs font-bold mb-1">
-                        <span className="text-slate-400">
-                          Final Attainment: {ga.ga_attainment ? `${ga.ga_attainment.toFixed(1)}%` : 'N/A'}
-                        </span>
-                        <span className="text-indigo-600">KPI: {ga.ga_kpi_threshold}%</span>
-                      </div>
-                      <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden relative">
-                        {ga.ga_attainment !== null && (
-                          <div
-                            className={`h-full transition-all duration-1000 ease-out rounded-full ${ga.status === 'ACHIEVED' ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                            style={{ width: `${Math.min(ga.ga_attainment, 100)}%` }}
-                          />
-                        )}
-                        <div
-                          className="absolute top-0 bottom-0 w-0.5 bg-indigo-600 z-10"
-                          style={{ left: `${ga.ga_kpi_threshold}%` }}
-                          title={`KPI: ${ga.ga_kpi_threshold}%`}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="border-t border-slate-100 p-6 bg-slate-50/50 rounded-b-[24px] animate-in fade-in slide-in-from-top-2 duration-300">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest">
-                          Contributing Courses
-                        </h4>
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs font-bold text-slate-500">Sort by:</label>
-                          <select
-                            className="bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-slate-700"
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as any)}
-                          >
-                            <option value="course_code">Course Code</option>
-                            <option value="course_ga_score">GA Score</option>
-                            <option value="semester">Semester</option>
-                            <option value="credits">Credits</option>
-                          </select>
-                          <button
-                            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                            className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-slate-700 hover:bg-slate-100 transition-all"
-                          >
-                            {sortOrder === 'asc' ? 'Asc' : 'Desc'}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-slate-50 border-b border-slate-200">
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">
-                                Course Code
-                              </th>
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                Semester
-                              </th>
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                Credits
-                              </th>
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                Direct Score
-                              </th>
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                Indirect Score
-                              </th>
-                              <th className="px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider text-center">
-                                Enrolled Students
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {getSortedFilteredCourses(ga.contributing_courses, ga.ga_kpi_threshold ?? 0).map((course: GAReportContributingCourse, idx: number) => {
-                              const isBelowTarget = course.course_ga_score < (ga.ga_kpi_threshold ?? 0);
-                              return (
-                                <tr key={idx} className={`border-b border-slate-100 hover:bg-slate-50 ${isBelowTarget ? 'bg-red-50' : ''}`}>
-                                  <td className="px-4 py-3 font-bold text-slate-700">
-                                    {course.course_code}
-                                    {course.course_name && (
-                                      <div className="text-sm text-slate-600">
-                                        {course.course_name}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3 text-center font-bold text-slate-700">
-                                    {course.semester ?? 'N/A'}
-                                  </td>
-                                  <td className="px-4 py-3 text-center font-bold text-slate-700">
-                                    {course.credits ?? 'N/A'}
-                                  </td>
-                                  <td className="px-4 py-3 text-center">
-                                    <span
-                                      className={`text-sm font-black ${isBelowTarget
-                                        ? 'text-rose-600'
-                                        : 'text-emerald-600'}`}
-                                    >
-                                      {course.course_ga_score.toFixed(1)}%
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-center text-sm font-black text-indigo-600">
-                                    {course.course_feedback_score?.toFixed(1) ?? '—'}%
-                                  </td>
-                                  <td className="px-4 py-3 text-center text-sm text-slate-600">
-                                    {course.enrolled_students}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {isProgramEndReady && ga.ga_cqi_records.length > 0 && (
-                        <div className="mt-6 space-y-4">
-                          <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest">
-                            CQI Records
-                          </h4>
-                          {ga.ga_cqi_records.map((cqi: GACQIRecord, idx: number) => (
-                            <div
-                              key={idx}
-                              className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm"
-                            >
-                              <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                  <span
-                                    className={`px-3 py-1 rounded-full text-xs font-black uppercase ${cqi.status === 'FULLY_APPROVED'
-                                      ? 'bg-emerald-100 text-emerald-700'
-                                      : cqi.status === 'SENT_BACK'
-                                      ? 'bg-yellow-100 text-yellow-700'
-                                      : 'bg-blue-100 text-blue-700'}`}
-                                  >
-                                    {cqi.status}
-                                  </span>
-                                  <span className="text-sm font-bold text-slate-700">
-                                    {cqi.cqi_level}
-                                    {cqi.semester && ` — Semester ${cqi.semester}`}
-                                  </span>
-                                </div>
-                                {cqi.attainment_value !== null && (
-                                  <span className="text-sm text-slate-500">
-                                    Attainment: {cqi.attainment_value.toFixed(1)}%
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* Inline CQI Form for PENDING/SENT_BACK status */}
-                              {(cqi.status === 'PENDING' || cqi.status === 'SENT_BACK') && (userRole === 'hod' || userRole === 'coordinator') && (
-                                <div className="mt-4">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setExpandedCqiForm(prev => ({ ...prev, [cqi.id]: !prev[cqi.id] }));
-                                    }}
-                                    className="text-indigo-600 text-sm font-bold hover:underline mb-3 inline-block"
-                                  >
-                                    {expandedCqiForm[cqi.id] ? 'Hide Form' : 'Open CQI Form'}
-                                  </button>
-
-                                  {expandedCqiForm[cqi.id] && (
-                                    <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 mt-2">
-                                      {cqi.status === 'SENT_BACK' && cqi.hod_comment && (
-                                        <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded-r-lg">
-                                          <p className="text-sm font-bold text-yellow-900">HOD Comment:</p>
-                                          <p className="text-sm text-yellow-800 mt-1">{cqi.hod_comment}</p>
-                                        </div>
-                                      )}
-
-                                      {userRole === 'coordinator' && (
-                                        <div className="space-y-4 mb-4">
-                                          <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                                              Root Cause
-                                            </label>
-                                            <textarea
-                                              value={localCqiData[cqi.id]?.root_cause || ''}
-                                              onChange={(e) => setLocalCqiData(prev => ({
-                                                ...prev,
-                                                [cqi.id]: { ...prev[cqi.id], root_cause: e.target.value }
-                                              }))}
-                                              className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                              rows={4}
-                                              placeholder="Describe the root cause of the GA-level deficiency..."
-                                              disabled={cqi.status === 'PENDING' && !cqi.is_locked}
-                                            />
-                                          </div>
-                                          <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                                              Remedial Plan
-                                            </label>
-                                            <textarea
-                                              value={localCqiData[cqi.id]?.remedial_plan || ''}
-                                              onChange={(e) => setLocalCqiData(prev => ({
-                                                ...prev,
-                                                [cqi.id]: { ...prev[cqi.id], remedial_plan: e.target.value }
-                                              }))}
-                                              className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                              rows={4}
-                                              placeholder="Describe the remedial action plan..."
-                                              disabled={cqi.status === 'PENDING' && !cqi.is_locked}
-                                            />
-                                          </div>
-                                          <div className="flex gap-3">
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleSaveDraft(cqi.id);
-                                              }}
-                                              disabled={submitting[cqi.id]}
-                                              className="px-4 py-2 bg-slate-500 text-white rounded-lg text-sm font-bold hover:bg-slate-600 disabled:bg-slate-400"
-                                            >
-                                              {submitting[cqi.id] ? 'Saving...' : 'Save Draft'}
-                                            </button>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleSubmitToHod(cqi.id);
-                                              }}
-                                              disabled={submitting[cqi.id]}
-                                              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:bg-slate-400"
-                                            >
-                                              {submitting[cqi.id] ? 'Submitting...' : 'Submit to HOD'}
-                                            </button>
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {userRole === 'hod' && (
-                                        <div className="space-y-4">
-                                          <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                                              Root Cause
-                                            </label>
-                                            <textarea
-                                              value={cqi.root_cause || ''}
-                                              disabled
-                                              className="w-full p-3 border border-slate-300 rounded-lg bg-slate-100"
-                                              rows={4}
-                                            />
-                                          </div>
-                                          <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                                              Remedial Plan
-                                            </label>
-                                            <textarea
-                                              value={cqi.remedial_plan || ''}
-                                              disabled
-                                              className="w-full p-3 border border-slate-300 rounded-lg bg-slate-100"
-                                              rows={4}
-                                            />
-                                          </div>
-                                          <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                                              HOD Comment (if sending back)
-                                            </label>
-                                            <textarea
-                                              value={localCqiData[cqi.id]?.hod_comment || ''}
-                                              onChange={(e) => setLocalCqiData(prev => ({
-                                                ...prev,
-                                                [cqi.id]: { ...prev[cqi.id], hod_comment: e.target.value }
-                                              }))}
-                                              className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                              rows={3}
-                                              placeholder="Enter comment if sending back..."
-                                            />
-                                          </div>
-                                          <div className="flex gap-3">
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleApprove(cqi.id);
-                                              }}
-                                              disabled={submitting[cqi.id]}
-                                              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:bg-slate-400"
-                                            >
-                                              {submitting[cqi.id] ? 'Approving...' : 'Approve'}
-                                            </button>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleReject(cqi.id);
-                                              }}
-                                              disabled={submitting[cqi.id]}
-                                              className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-bold hover:bg-rose-700 disabled:bg-slate-400"
-                                            >
-                                              {submitting[cqi.id] ? 'Sending Back...' : 'Send Back'}
-                                            </button>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Display existing CQI data */}
-                              {cqi.root_cause && (
-                                <div className="mb-2">
-                                  <span className="text-xs font-bold text-slate-500 uppercase">Root Cause:</span>
-                                  <p className="text-sm text-slate-700 mt-1">{cqi.root_cause}</p>
-                                </div>
-                              )}
-                              {cqi.remedial_plan && (
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase">Remedial Plan:</span>
-                                  <p className="text-sm text-slate-700 mt-1">{cqi.remedial_plan}</p>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+      {/* Report Display */}
+      {!loading && !readinessInfo && reportData && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              {/* Header */}
+              <thead className="bg-gray-50">
+                <tr>
+                  {viewMode === 'student-wise' ? (
+                    <>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Sr. No.
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Reg. No.
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Student Name
+                      </th>
+                      {(reportData.gas || []).map((ga) => (
+                        <th
+                          key={ga.ga_id}
+                          title={`${ga.ga_code}: ${ga.ga_title}`}
+                          className="px-4 py-3 text-center text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200"
+                        >
+                          {ga.ga_code}
+                          <div className="text-gray-400 font-normal text-xs mt-1 truncate max-w-[120px]">
+                            {ga.ga_title}
+                          </div>
+                        </th>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Sr. No.
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Course Code
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+                        Course Title
+                      </th>
+                      {(reportData.gas || []).map((ga) => (
+                        <th
+                          key={ga.ga_id}
+                          title={`${ga.ga_code}: ${ga.ga_title}`}
+                          className="px-4 py-3 text-center text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200"
+                        >
+                          {ga.ga_code}
+                        </th>
+                      ))}
+                    </>
                   )}
-                </div>
-              );
-            })}
-          </div>
+                </tr>
+              </thead>
 
-          {/* CQI Flags for Cohort (only when program end ready) */}
-          {mode === 'cumulative' && isProgramEndReady && failedGAs.length > 0 && (
-            <div className="mt-12 space-y-4">
-              <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                <svg className="w-6 h-6 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                Continuous Quality Improvement (CQI) Required
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {failedGAs.map((ga: GAReportItem) => (
-                  <div
-                    key={ga.ga_id}
-                    className="bg-white border-2 border-rose-100 rounded-3xl p-6 shadow-sm hover:shadow-md transition-shadow"
+              {/* Body */}
+              <tbody className="divide-y divide-gray-200">
+                {viewMode === 'student-wise' ? (
+                  (reportData.students || []).map((student, idx) => (
+                    <tr key={student.id}>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{idx + 1}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{student.registration_number}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-semibold">{student.name}</td>
+                      {(reportData.gas || []).map((ga) => {
+                        const score = (student.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
+                        const isBelow = score?.is_below_threshold;
+                        return (
+                          <td
+                            key={ga.ga_id}
+                            className={`px-4 py-3 text-center text-sm font-semibold ${
+                              isBelow
+                                ? 'bg-red-50 text-red-800'
+                                : 'text-gray-900'
+                            }`}
+                          >
+                            {student.is_dropped || student.is_frozen ? (
+                              student.is_dropped ? 'Dropped Out' : 'Semester Frozen'
+                            ) : (
+                              `${score?.direct_score?.toFixed(1) ?? '0.0'}%`
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                ) : (
+                  (reportData.courses || []).map((course, idx) => (
+                    <tr key={course.course_id}>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900">{idx + 1}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{course.course_code}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-semibold">{course.course_title}</td>
+                      {(reportData.gas || []).map((ga) => {
+                        const gaScore = (course.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
+                        const isBelow = gaScore?.is_below_threshold;
+                        return (
+                          <td
+                            key={ga.ga_id}
+                            className={`px-4 py-3 text-center text-sm font-semibold ${
+                              isBelow
+                                ? 'bg-red-50 text-red-800'
+                                : 'text-gray-900'
+                            }`}
+                          >
+                            {gaScore?.score != null ? `${gaScore.score.toFixed(1)}%` : '-'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+
+              {/* Footer (4 summary rows + CQI row) */}
+              <tfoot>
+                <tr className="border-t-4 border-gray-300">
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 bg-green-50 text-sm font-bold text-green-800"
                   >
-                    <div className="flex items-start gap-4">
-                      <div className="p-3 bg-rose-50 rounded-2xl">
-                        <span className="text-rose-600 font-black text-lg">⚠️</span>
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="font-black text-rose-900">
-                          {ga.ga_code} — {ga.ga_title}
-                        </h4>
-                        <p className="text-sm text-rose-700 mt-2">
-                          Attainment: {ga.ga_attainment?.toFixed(1)}% (Target: {ga.kpi_threshold}%)
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    Direct Attainment (%)
+                  </td>
+                  {(reportData.gas || []).map((ga) => {
+                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                    return (
+                      <td
+                        key={ga.ga_id}
+                        className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-green-50"
+                      >
+                        {summary?.direct_attainment.toFixed(1) ?? '0.0'}%
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 bg-yellow-50 text-sm font-bold text-yellow-800"
+                  >
+                    Indirect Attainment (%) (From Surveys)
+                  </td>
+                  {(reportData.gas || []).map((ga) => {
+                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                    return (
+                      <td
+                        key={ga.ga_id}
+                        className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-yellow-50"
+                      >
+                        {summary?.indirect_attainment.toFixed(1) ?? '0.0'}%
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 bg-blue-50 text-sm font-bold text-blue-800"
+                  >
+                    Final Combined Attainment (%) (80% Direct + 20% Indirect)
+                  </td>
+                  {(reportData.gas || []).map((ga) => {
+                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                    return (
+                      <td
+                        key={ga.ga_id}
+                        className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-blue-50"
+                      >
+                        {summary?.final_attainment.toFixed(1) ?? '0.0'}%
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 bg-gray-100 text-sm font-bold text-gray-800"
+                  >
+                    Status (Target KPI: 50%)
+                  </td>
+                  {(reportData.gas || []).map((ga) => {
+                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                    return (
+                      <td
+                        key={ga.ga_id}
+                        className={`px-4 py-3 text-center text-sm font-black uppercase ${
+                          summary?.status === 'ACHIEVED'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {summary?.status ?? 'NOT ASSESSED'}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 bg-gray-200 text-sm font-bold text-gray-800"
+                  >
+                    CQI Action
+                  </td>
+                  {(reportData.gas || []).map((ga) => {
+                    const gaStatus = gaStatusRow.find((s) => s.ga_id === ga.ga_id);
+                    const isSaved = gaStatus?.cqi_status === 'SAVED';
+                    return (
+                      <td
+                        key={ga.ga_id}
+                        className={`px-4 py-3 text-center text-sm font-semibold border-t-4 border-gray-300 ${
+                          gaStatus?.status === 'BELOW_TARGET'
+                            ? 'bg-red-50'
+                            : 'bg-gray-50'
+                        }`}
+                      >
+                        {gaStatus?.status === 'BELOW_TARGET' ? (
+                          <div className="mx-auto max-w-[220px] rounded-xl border-2 border-red-300 bg-white px-3 py-3 shadow-sm">
+                            <div className="text-xs font-black uppercase tracking-[0.2em] text-red-600 mb-2">
+                              BELOW_TARGET
+                            </div>
+                            {isSaved ? (
+                              <button
+                                className="text-green-700 hover:text-green-900 font-bold underline underline-offset-2"
+                                onClick={() => handleTriggerCQI(gaStatus)}
+                              >
+                                ✅ CQI Recorded (View)
+                              </button>
+                            ) : (
+                              <button
+                                className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors"
+                                onClick={() => handleTriggerCQI(gaStatus)}
+                              >
+                                ⚠ Trigger CQI
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* CQI Modal */}
+      {modalOpen && currentGA && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-xl font-bold text-gray-900">
+                  GA-CQI: {currentGA.ga_code} ({currentGA.ga_title}) - Batch {batches.find(b => b.id === selectedBatchId)?.name}
+                </h3>
+                {currentGA.cqi_status === 'SAVED' && (
+                  <span className="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-700">
+                    View Only
+                  </span>
+                )}
+              </div>
+              {currentCQIRecord && (
+                <p className="mt-2 text-sm text-gray-500">
+                  Saved by {currentCQIRecord.saved_by_hod?.full_name || currentCQIRecord.saved_by_hod?.name || 'HOD'}
+                  {currentCQIRecord.saved_at ? ` on ${new Date(currentCQIRecord.saved_at).toLocaleString()}` : ''}
+                </p>
+              )}
+              </div>
+            <div className="p-6 space-y-4">
+              {/* Issue Statement */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Issue <span className="text-gray-400">(auto-filled, editable)</span>
+                </label>
+                <textarea
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                    currentGA.cqi_status === 'SAVED' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                  }`}
+                  rows={3}
+                  value={issueStatement}
+                  onChange={(e) => setIssueStatement(e.target.value)}
+                  disabled={currentGA.cqi_status === 'SAVED'}
+                />
+              </div>
+              
+              {/* HOD Action Plan */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  HOD Action Plan <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                    currentGA.cqi_status === 'SAVED' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                  }`}
+                  rows={4}
+                  value={hodActionPlan}
+                  onChange={(e) => setHodActionPlan(e.target.value)}
+                  disabled={currentGA.cqi_status === 'SAVED'}
+                  placeholder="Enter your action plan here... (minimum 20 characters)"
+                />
               </div>
             </div>
-          )}
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                {currentGA.cqi_status === 'SAVED' ? 'Close' : 'Cancel'}
+              </button>
+              {currentGA.cqi_status !== 'SAVED' && (
+                <button
+                  onClick={handleSaveCQI}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {saving ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : null}
+                  Save CQI Record
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1063,3 +913,4 @@ const GAReport: React.FC = () => {
 };
 
 export default GAReport;
+

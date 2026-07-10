@@ -8,6 +8,7 @@ import {
   CourseDetails
 } from '../../api/instructorCourseService';
 import CourseData from 'views/pages/CourseData';
+import obeService, { TeacherGAContext as TeacherGAContextType, InterimAlert } from '../../api/obeService';
 
 const MyCoursesModule: React.FC = () => {
   const [courses, setCourses] = useState<InstructorCourse[]>([]);
@@ -15,9 +16,22 @@ const MyCoursesModule: React.FC = () => {
   const [selectedCourse, setSelectedCourse] = useState<CourseDetails | null>(null);
   const [expandedCourseId, setExpandedCourseId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gaWarningsByCourse, setGaWarningsByCourse] = useState<Record<string, TeacherGAContextType | null>>({});
+  const [dismissedWarnings, setDismissedWarnings] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('my-courses-ga-warning-dismissed');
+      if (stored) {
+        setDismissedWarnings(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.warn('Failed to load dismissed GA warnings', error);
+    }
   }, []);
 
   const fetchData = async () => {
@@ -57,6 +71,104 @@ setCourses(Array.isArray(coursesData) ? coursesData : []);
     } catch (error) {
       console.error('Error fetching course details:', error);
     }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWarnings = async () => {
+      if (!courses.length) {
+        setGaWarningsByCourse({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        courses.map(async (course) => {
+          const courseId = String(course.course_id || '');
+          const batchId = String(course.batch_id || '');
+          if (!courseId || !batchId) return null;
+
+          try {
+            const context = await obeService.getTeacherGAContext(courseId, batchId);
+            return [courseId, context] as const;
+          } catch (error) {
+            console.error(`Failed to load GA warnings for course ${courseId}:`, error);
+            return [courseId, null] as const;
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setGaWarningsByCourse(
+          Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, TeacherGAContextType | null]>)
+        );
+      }
+    };
+
+    loadWarnings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courses]);
+
+  const dismissGaWarning = (courseId: string, gaCode: string) => {
+    const storageKey = `${courseId}:${gaCode}`;
+    setDismissedWarnings((prev) => {
+      const next = { ...prev, [storageKey]: true };
+      sessionStorage.setItem('my-courses-ga-warning-dismissed', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const renderGaWarnings = (course: InstructorCourse) => {
+    const courseId = String(course.course_id || '');
+    const warnings = gaWarningsByCourse[courseId]?.interim_alerts || [];
+    const visibleWarnings = warnings.filter((warning) => !dismissedWarnings[`${courseId}:${warning.ga_code}`]);
+
+    if (!visibleWarnings.length) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 space-y-2">
+        {visibleWarnings.map((warning: InterimAlert) => {
+          const mappedClos = warning.mapped_clos || [];
+          const semesterLabel = warning.source_semester?.name || '';
+          const baseText = warning.issue_statement || `Previous semester showed weakness in ${warning.ga_code} (${warning.ga_title}).`;
+          const cloText = mappedClos.length > 0
+            ? `Mapped CLOs: ${mappedClos.map((clo: any) => `${clo.clo_code}${clo.clo_title ? ` (${clo.clo_title})` : ''}`).join(', ')}.`
+            : '';
+          const warningText = [
+            baseText,
+            semesterLabel ? `${semesterLabel}.` : '',
+            cloText,
+            'Since this course targets the same GA, please focus more on problem-solving tasks in assignments.'
+          ].filter(Boolean).join(' ');
+          return (
+            <div
+              key={`${courseId}:${warning.ga_code}`}
+              className="rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-black uppercase tracking-[0.25em] text-yellow-700">
+                    GA Warning
+                  </div>
+                  <p className="mt-1 font-medium leading-5">{warningText}</p>
+                </div>
+                <button
+                  onClick={() => dismissGaWarning(courseId, warning.ga_code)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-yellow-700 hover:bg-yellow-100"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   if (loading) {
@@ -158,6 +270,8 @@ setCourses(Array.isArray(coursesData) ? coursesData : []);
                       <span>{course.coordinator_name}</span>
                     </div>
                   </div>
+
+                  {renderGaWarnings(course)}
                 </motion.div>
 
                 {/* 🔥 EXPAND
