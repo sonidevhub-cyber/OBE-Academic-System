@@ -349,7 +349,10 @@ def get_clo_master_report(request, program_id, semester_id):
         },
     }
 
-    if request.query_params.get("format") == "xlsx":
+    is_export_route = bool(request.resolver_match and request.resolver_match.url_name == "clo-master-report-export")
+    is_xlsx_export = request.query_params.get("format") == "xlsx" or is_export_route
+
+    if is_xlsx_export:
         return export_to_excel(response_data)
 
     return Response(response_data)

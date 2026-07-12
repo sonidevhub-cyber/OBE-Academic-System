@@ -91,6 +91,7 @@ export interface GACQIRecord {
   hod_action_plan: string | null;
   triggered_at: string | null;
   saved_by_hod: any | null;
+  saved_by_hod_name?: string | null;
   saved_at: string | null;
   is_active: boolean;
 }

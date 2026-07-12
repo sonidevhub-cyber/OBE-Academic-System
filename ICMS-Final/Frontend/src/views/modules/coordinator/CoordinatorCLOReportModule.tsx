@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileBarChart, ArrowLeft, Download, RotateCw, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import * as XLSX from 'xlsx-js-style';
 import obeService, {
   CLOMasterCompilationResponse,
   CLOMasterCompilationCourse,
@@ -143,20 +144,193 @@ const CoordinatorCLOReportModule: React.FC = () => {
     if (!report) return;
 
     try {
-      const blob = await obeService.getCLOMasterCompilation(
-        report.program.id,
-        report.semester.id,
-        selectedBatchId || undefined,
-        'xlsx'
+      const wb = XLSX.utils.book_new();
+      const selectedBatch = allBatches.find((b) => b.id === selectedBatchId);
+      const courseColumns = report.finalized_courses.flatMap((course) =>
+        course.clos.map((clo) => ({
+          course,
+          clo,
+        }))
       );
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `CLO_Master_Compilation_${report.program.code}_${report.semester.name}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const cqiRows = report.finalized_courses.flatMap((course) =>
+        course.clos
+          .filter((clo) => clo.cqi)
+          .map((clo) => ({
+            course,
+            clo,
+          }))
+      );
+
+      const rows: any[][] = [
+        [report.program.name],
+        [`Program Code: ${report.program.code}`],
+        [`Batch: ${selectedBatch?.name || report.batch?.name || 'Selected Batch'}`],
+        [`Semester: ${report.semester.name}`],
+        ['CLO Master Compilation'],
+        [`Date: ${new Date().toLocaleDateString()}`],
+        [],
+      ];
+
+      const header = [
+        'Sr. No.',
+        'Reg. No.',
+        'Student Name',
+        ...courseColumns.map(({ course, clo }) => `${course.course_code} - ${clo.clo_code}`),
+      ];
+      rows.push(header);
+
+      report.students.forEach((student) => {
+        const row: any[] = [student.sr_no, student.reg_no, student.name];
+        courseColumns.forEach(({ course, clo }) => {
+          const score = student.courses?.[course.course_id]?.[clo.clo_code];
+          row.push(score ? `${score.score.toFixed(1)}%` : '-');
+        });
+        rows.push(row);
+      });
+
+      rows.push([]);
+      rows.push([
+        'No. of Students Achieving CLOs KPI (50%)',
+        '',
+        '',
+        ...courseColumns.map(({ course, clo }) => `${clo.cohort_achieved_count}`),
+      ]);
+      rows.push([
+        '% of Students Achieving CLOs at Cohort-Level (50%)',
+        '',
+        '',
+        ...courseColumns.map(({ clo }) => `${clo.cohort_percentage.toFixed(2)}%`),
+      ]);
+
+      const cqiSectionStart = rows.length;
+      rows.push([]);
+      rows.push(['CQI Details']);
+      rows.push([
+        'Course Code',
+        'CLO Code',
+        'KPI Target',
+        'Cohort %',
+        'Reason',
+        'Action Plan',
+        'Coordinator Comment',
+      ]);
+      if (cqiRows.length === 0) {
+        rows.push(['No CQI records found']);
+      } else {
+        cqiRows.forEach(({ course, clo }) => {
+          rows.push([
+            course.course_code,
+            clo.clo_code,
+            `${clo.kpi_target.toFixed(1)}%`,
+            `${clo.cohort_percentage.toFixed(2)}%`,
+            clo.cqi?.reason || '',
+            clo.cqi?.action_plan || '',
+            clo.cqi?.coordinator_comment || '',
+          ]);
+        });
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(2, 2 + courseColumns.length) } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: Math.max(2, 2 + courseColumns.length) } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: Math.max(2, 2 + courseColumns.length) } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: Math.max(2, 2 + courseColumns.length) } },
+        { s: { r: 4, c: 0 }, e: { r: 4, c: Math.max(2, 2 + courseColumns.length) } },
+        { s: { r: 5, c: 0 }, e: { r: 5, c: Math.max(2, 2 + courseColumns.length) } },
+      ];
+
+      const columnWidths = [
+        { wch: 10 },
+        { wch: 16 },
+        { wch: 26 },
+        ...courseColumns.map(() => ({ wch: 14 })),
+      ];
+      while (columnWidths.length < 7) {
+        columnWidths.push({ wch: 20 });
+      }
+      ws['!cols'] = columnWidths;
+
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = 0; R <= range.e.r; R++) {
+        for (let C = 0; C <= range.e.c; C++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = ws[cellAddress];
+          if (!cell) continue;
+
+          if (R <= 5) {
+            cell.s = {
+              fill: { fgColor: { rgb: '1D4ED8' } },
+              font: { color: { rgb: 'FFFFFF' }, bold: true },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === 7) {
+            cell.s = {
+              fill: { fgColor: { rgb: 'DBEAFE' } },
+              font: { bold: true, color: { rgb: '1E3A8A' } },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            };
+          } else if (R > 7 && R <= 7 + report.students.length) {
+            if (C >= 3) {
+              const student = report.students[R - 8];
+              const course = courseColumns[C - 3];
+              const score = student?.courses?.[course.course.course_id]?.[course.clo.clo_code];
+              const achieved = score?.achieved;
+              cell.s = {
+                fill: {
+                  fgColor: {
+                    rgb: achieved ? 'DCFCE7' : 'FEE2E2',
+                  },
+                },
+                font: {
+                  color: {
+                    rgb: achieved ? '166534' : '991B1B',
+                  },
+                  bold: true,
+                },
+                alignment: { horizontal: 'center', vertical: 'center' },
+              };
+            } else {
+              cell.s = {
+                font: { bold: true },
+                alignment: { horizontal: 'center', vertical: 'center' },
+              };
+            }
+          } else if (R === 9 + report.students.length) {
+            cell.s = {
+              fill: { fgColor: { rgb: 'EDE9FE' } },
+              font: { bold: true, color: { rgb: '312E81' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === 10 + report.students.length) {
+            cell.s = {
+              fill: { fgColor: { rgb: 'EDE9FE' } },
+              font: { bold: true, color: { rgb: '312E81' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === cqiSectionStart + 1) {
+            cell.s = {
+              fill: { fgColor: { rgb: 'DBEAFE' } },
+              font: { bold: true, color: { rgb: '1E3A8A' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === cqiSectionStart + 2) {
+            cell.s = {
+              fill: { fgColor: { rgb: 'DBEAFE' } },
+              font: { bold: true, color: { rgb: '1E3A8A' } },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            };
+          } else if (R > cqiSectionStart + 2) {
+            cell.s = {
+              alignment: { horizontal: 'left', vertical: 'top', wrapText: true },
+            };
+          }
+        }
+      }
+
+      XLSX.utils.book_append_sheet(wb, ws, 'CLO Master');
+      const filename = `CLO_Master_Compilation_${report.program.code}_${report.semester.name.replace(/\s+/g, '_')}.xlsx`;
+      XLSX.writeFile(wb, filename);
       toast.success('Export successful!');
     } catch (error) {
       console.error(error);

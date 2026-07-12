@@ -278,199 +278,271 @@ const GAReport: React.FC = () => {
         return true;
       });
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!reportData) {
       toast.error('No report data to export');
       return;
     }
 
-    const selectedBatch = batches.find((b) => b.id === selectedBatchId);
-    const wb = XLSX.utils.book_new();
-    const rows: any[][] = [
-      [selectedBatch?.program?.name || 'Program Name'],
-      ['Department: ' + (selectedBatch?.program?.department || 'Computer Science')],
-      ['Batch: ' + (selectedBatch?.name || 'Selected Batch')],
-      [viewMode === 'student-wise' ? 'Student-wise Cohort Attainment' : 'Course-wise PLO Contribution'],
-      ['Date: ' + new Date().toLocaleDateString()],
-      [],
-    ];
+    try {
+      const selectedBatch = batches.find((b) => b.id === selectedBatchId);
+      const wb = XLSX.utils.book_new();
+      const cqiRecords = selectedProgramId && selectedBatchId
+        ? await obeService.getGACQIAdvisoryExport(selectedProgramId, selectedBatchId)
+        : [];
+      const rows: any[][] = [
+        [selectedBatch?.program?.name || 'Program Name'],
+        ['Department: ' + (selectedBatch?.program?.department || 'Computer Science')],
+        ['Batch: ' + (selectedBatch?.name || 'Selected Batch')],
+        [viewMode === 'student-wise' ? 'Student-wise Cohort Attainment' : 'Course-wise PLO Contribution'],
+        ['Date: ' + new Date().toLocaleDateString()],
+        [],
+      ];
 
-    // Header row
-    const gas = reportData.gas || [];
-    const header = viewMode === 'student-wise'
-      ? ['Sr. No.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
-      : ['Sr. No.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
-    rows.push(header);
+      // Header row
+      const gas = reportData.gas || [];
+      const header = viewMode === 'student-wise'
+        ? ['Sr. No.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
+        : ['Sr. No.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
+      rows.push(header);
 
-    const items = viewMode === 'student-wise' ? (reportData.students || []) : (reportData.courses || []);
+      const items = viewMode === 'student-wise' ? (reportData.students || []) : (reportData.courses || []);
 
-    // Data rows
-    items.forEach((item, idx) => {
-      if ('name' in item) {
-        // Student row
-        const student = item as StudentReport;
-        if (student.is_dropped || student.is_frozen) {
-          const row = [
-            idx + 1,
-            student.registration_number,
-            student.name,
-            ...Array(reportData.gas.length).fill(student.is_dropped ? 'Dropped Out' : 'Semester Frozen'),
-          ];
-          rows.push(row);
+      // Data rows
+      items.forEach((item, idx) => {
+        if ('name' in item) {
+          // Student row
+          const student = item as StudentReport;
+          if (student.is_dropped || student.is_frozen) {
+            const row = [
+              idx + 1,
+              student.registration_number,
+              student.name,
+              ...Array(reportData.gas.length).fill(student.is_dropped ? 'Dropped Out' : 'Semester Frozen'),
+            ];
+            rows.push(row);
+          } else {
+            const row = [
+              idx + 1,
+              student.registration_number,
+              student.name,
+              ...reportData.gas.map((g) => {
+                const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score || 0;
+                return `${score.toFixed(1)}%`;
+              }),
+            ];
+            rows.push(row);
+          }
         } else {
+          // Course row
+          const course = item as CourseReport;
           const row = [
             idx + 1,
-            student.registration_number,
-            student.name,
+            course.course_code,
+            course.course_title,
             ...reportData.gas.map((g) => {
-              const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score || 0;
+              const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score ?? 0;
               return `${score.toFixed(1)}%`;
             }),
           ];
           rows.push(row);
         }
-      } else {
-        // Course row
-        const course = item as CourseReport;
-        const row = [
-          idx + 1,
-          course.course_code,
-          course.course_title,
-          ...reportData.gas.map((g) => {
-            const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
-            return `${(score ?? 0).toFixed(1)}%`;
-          }),
-        ];
-        rows.push(row);
-      }
-    });
+      });
 
-    // Footer rows (4 summary rows)
-    const cohortSummary = reportData.cohort_summary || [];
-    const dividerRow = ['', '', '', ...Array(gas.length).fill('')];
-    rows.push(dividerRow);
-    rows.push([
-      'Direct Attainment (%)',
-      '(From Exams/Labs)',
-      '',
-      ...cohortSummary.map((s) => `${s.direct_attainment.toFixed(1)}%`),
-    ]);
-    rows.push([
-      'Indirect Attainment (%)',
-      '(From Surveys)',
-      '',
-      ...cohortSummary.map((s) => `${s.indirect_attainment.toFixed(1)}%`),
-    ]);
-    rows.push([
-      'Final Combined Attainment (%)',
-      '(80% Direct + 20% Indirect)',
-      '',
-      ...cohortSummary.map((s) => `${s.final_attainment.toFixed(1)}%`),
-    ]);
-    rows.push([
-      'Status',
-      '(Target KPI: 50%)',
-      '',
-      ...cohortSummary.map((s) => s.status),
-    ]);
+      // Footer rows (4 summary rows)
+      const cohortSummary = reportData.cohort_summary || [];
+      const dividerRow = ['', '', '', ...Array(gas.length).fill('')];
+      rows.push(dividerRow);
+      rows.push([
+        'Direct Attainment (%)',
+        '(From Exams/Labs)',
+        '',
+        ...cohortSummary.map((s) => `${s.direct_attainment.toFixed(1)}%`),
+      ]);
+      rows.push([
+        'Indirect Attainment (%)',
+        '(From Surveys)',
+        '',
+        ...cohortSummary.map((s) => `${s.indirect_attainment.toFixed(1)}%`),
+      ]);
+      rows.push([
+        'Final Combined Attainment (%)',
+        '(80% Direct + 20% Indirect)',
+        '',
+        ...cohortSummary.map((s) => `${s.final_attainment.toFixed(1)}%`),
+      ]);
+      rows.push([
+        'Status',
+        '(Target KPI: 50%)',
+        '',
+        ...cohortSummary.map((s) => s.status),
+      ]);
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+      const cqiSectionStart = rows.length;
+      rows.push([]);
+      rows.push(['CQI Details']);
+      rows.push([
+        'GA Code',
+        'GA Title',
+        'Status',
+        'Issue / Problem Statement',
+        'HOD Action Plan',
+        'Saved By',
+        'Saved At',
+        'Root Cause',
+        'Remedial Plan',
+        'HOD Comment',
+      ]);
+      cqiRecords.forEach((record) => {
+        rows.push([
+          record.ga_code,
+          record.ga_title,
+          record.status,
+          record.issue_statement || record.root_cause || '',
+          record.hod_action_plan || record.remedial_plan || '',
+          record.saved_by_hod_name || record.saved_by_hod?.full_name || record.saved_by_hod?.name || '',
+          record.saved_at ? new Date(record.saved_at).toLocaleString() : '',
+          record.root_cause || '',
+          record.remedial_plan || '',
+          record.hod_comment || '',
+        ]);
+      });
 
-    // Set column widths
-    const colWidths = viewMode === 'student-wise'
-      ? [{ wch: 10 }, { wch: 15 }, { wch: 25 }, ...gas.map(() => ({ wch: 12 }))]
-      : [{ wch: 10 }, { wch: 15 }, { wch: 30 }, ...gas.map(() => ({ wch: 12 }))];
-    ws['!cols'] = colWidths;
+      const ws = XLSX.utils.aoa_to_sheet(rows);
 
-    // Apply styles
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-    for (let R = 0; R <= range.e.r; R++) {
-      for (let C = 0; C <= range.e.c; C++) {
-        const cellAddress = XLSX.utils.encode_cell({ c: C, r: R });
-        if (!ws[cellAddress]) continue;
+      // Set column widths
+      const colWidths = viewMode === 'student-wise'
+        ? [{ wch: 10 }, { wch: 15 }, { wch: 25 }, ...gas.map(() => ({ wch: 12 }))]
+        : [{ wch: 10 }, { wch: 15 }, { wch: 30 }, ...gas.map(() => ({ wch: 12 }))];
+      ws['!cols'] = [
+        ...colWidths,
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 30 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 24 },
+        { wch: 24 },
+      ];
 
-        if (R < 5) {
-          ws[cellAddress].s = {
-            fill: { fgColor: { rgb: '1F7A6B' } },
-            font: { color: { rgb: 'FFFFFF' }, bold: true },
-            alignment: { horizontal: 'center', vertical: 'center' },
-          };
-        } else if (R === 6) {
-          ws[cellAddress].s = {
-            fill: { fgColor: { rgb: 'D9E1F2' } },
-            font: { bold: true },
-            alignment: { horizontal: 'center' },
-          };
-        } else if (R > 6 && R <= 6 + items.length && C > 2) {
-          // Check if cell is below threshold
-          let isBelow = false;
-          if (viewMode === 'student-wise') {
-            const studentIdx = R - 7;
-            const gaIdx = C - 3;
-            const student = items[studentIdx] as StudentReport;
-            if (student && !student.is_dropped && !student.is_frozen) {
-              const ga = reportData.gas[gaIdx];
-              const score = student.ga_scores.find((s) => s.ga_id === ga?.ga_id);
-              isBelow = score?.is_below_threshold ?? false;
-            }
-          } else {
-            const courseIdx = R - 7;
-            const gaIdx = C - 3;
-            const course = items[courseIdx] as CourseReport;
-            const gaScore = course.ga_scores.find((s) => s.ga_id === reportData.gas[gaIdx].ga_id);
-            isBelow = gaScore?.is_below_threshold ?? false;
-          }
+      // Apply styles
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      for (let R = 0; R <= range.e.r; R++) {
+        for (let C = 0; C <= range.e.c; C++) {
+          const cellAddress = XLSX.utils.encode_cell({ c: C, r: R });
+          if (!ws[cellAddress]) continue;
 
-          if (isBelow) {
+          if (R < 5) {
             ws[cellAddress].s = {
-              fill: { fgColor: { rgb: 'FFC7CE' } },
-              font: { color: { rgb: '9C0006' }, bold: true },
+              fill: { fgColor: { rgb: '1F7A6B' } },
+              font: { color: { rgb: 'FFFFFF' }, bold: true },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === 6) {
+            ws[cellAddress].s = {
+              fill: { fgColor: { rgb: 'D9E1F2' } },
+              font: { bold: true },
               alignment: { horizontal: 'center' },
             };
-          } else {
-            ws[cellAddress].s = { alignment: { horizontal: 'center' } };
-          }
-        } else if (R > 6 + items.length + 1 && R <= 6 + items.length + 5) {
-          // Summary rows
-          if (C === 0 || C === 1) {
+          } else if (R > 6 && R <= 6 + items.length && C > 2) {
+            // Check if cell is below threshold
+            let isBelow = false;
+            if (viewMode === 'student-wise') {
+              const studentIdx = R - 7;
+              const gaIdx = C - 3;
+              const student = items[studentIdx] as StudentReport;
+              if (student && !student.is_dropped && !student.is_frozen) {
+                const ga = reportData.gas[gaIdx];
+                const score = student.ga_scores.find((s) => s.ga_id === ga?.ga_id);
+                isBelow = score?.is_below_threshold ?? false;
+              }
+            } else {
+              const courseIdx = R - 7;
+              const gaIdx = C - 3;
+              const course = items[courseIdx] as CourseReport;
+              const gaScore = course.ga_scores.find((s) => s.ga_id === reportData.gas[gaIdx].ga_id);
+              isBelow = gaScore?.is_below_threshold ?? false;
+            }
+
+            if (isBelow) {
+              ws[cellAddress].s = {
+                fill: { fgColor: { rgb: 'FFC7CE' } },
+                font: { color: { rgb: '9C0006' }, bold: true },
+                alignment: { horizontal: 'center' },
+              };
+            } else {
+              ws[cellAddress].s = { alignment: { horizontal: 'center' } };
+            }
+          } else if (R > 6 + items.length + 1 && R < cqiSectionStart) {
             ws[cellAddress].s = {
               fill: { fgColor: { rgb: 'E2EFDA' } },
               font: { bold: true },
-              alignment: { horizontal: 'left' },
-            };
-          } else if (R === 6 + items.length + 5) {
-            // Status row
-            const summaryIdx = C - 3;
-            const summary = reportData.cohort_summary[summaryIdx];
-            if (summary) {
-              ws[cellAddress].s = {
-                fill: { fgColor: { rgb: summary.status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
-                font: {
-                  color: { rgb: summary.status === 'ACHIEVED' ? '006100' : '9C0006' },
-                  bold: true,
-                },
-                alignment: { horizontal: 'center' },
-              };
-            }
-          } else {
-            ws[cellAddress].s = {
-              font: { bold: true },
               alignment: { horizontal: 'center' },
             };
+          } else if (R === cqiSectionStart + 1) {
+            ws[cellAddress].s = {
+              fill: { fgColor: { rgb: 'DBEAFE' } },
+              font: { bold: true, color: { rgb: '1E3A8A' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+            };
+          } else if (R === cqiSectionStart + 2) {
+            ws[cellAddress].s = {
+              fill: { fgColor: { rgb: 'DBEAFE' } },
+              font: { bold: true, color: { rgb: '1E3A8A' } },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            };
+          } else if (R > cqiSectionStart + 2) {
+            ws[cellAddress].s = {
+              alignment: { horizontal: 'left', vertical: 'top', wrapText: true },
+            };
+          } else if (R > 6 + items.length + 1 && R <= 6 + items.length + 5) {
+            // Summary rows
+            if (C === 0 || C === 1) {
+              ws[cellAddress].s = {
+                fill: { fgColor: { rgb: 'E2EFDA' } },
+                font: { bold: true },
+                alignment: { horizontal: 'left' },
+              };
+            } else if (R === 6 + items.length + 5) {
+              // Status row
+              const summaryIdx = C - 3;
+              const summary = reportData.cohort_summary[summaryIdx];
+              if (summary) {
+                ws[cellAddress].s = {
+                  fill: { fgColor: { rgb: summary.status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
+                  font: {
+                    color: { rgb: summary.status === 'ACHIEVED' ? '006100' : '9C0006' },
+                    bold: true,
+                  },
+                  alignment: { horizontal: 'center' },
+                };
+              }
+            } else {
+              ws[cellAddress].s = {
+                  bold: true,
+                  alignment: { horizontal: 'center' },
+                };
+            }
+          } else {
+            ws[cellAddress].s = { alignment: { horizontal: 'center' } };
           }
-        } else {
-          ws[cellAddress].s = { alignment: { horizontal: 'center' } };
         }
       }
+
+      XLSX.utils.book_append_sheet(wb, ws, 'GA Report');
+
+      const filename = `${viewMode === 'student-wise' ? 'Student_Wise' : 'Course_Wise'}_GA_Report_${selectedBatch?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date()
+        .toISOString()
+        .split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      toast.success('Report exported successfully');
+    } catch (error) {
+      console.error('Failed to export GA report:', error);
+      toast.error('Failed to export report');
     }
-
-    XLSX.utils.book_append_sheet(wb, ws, 'GA Report');
-
-    const filename = `${viewMode === 'student-wise' ? 'Student_Wise' : 'Course_Wise'}_GA_Report_${selectedBatch?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}_${new Date()
-      .toISOString()
-      .split('T')[0]}.xlsx`;
-    XLSX.writeFile(wb, filename);
-    toast.success('Report exported successfully');
   };
 
   return (
