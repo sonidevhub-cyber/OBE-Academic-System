@@ -25,8 +25,9 @@ import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import StudentFeedbackPopup from '../pages/StudentFeedbackPopup';
 import StudentResults from '../pages/StudentResults';
+import StudentRetakeHistory from '../../features/retake/StudentRetakeHistory';
 
-type TabId = 'dashboard' | 'results';
+type TabId = 'dashboard' | 'results' | 'retakes';
 
 const ModularStudentDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -139,6 +140,13 @@ const ModularStudentDashboard: React.FC = () => {
   const headerProfile = studentProfile || currentUser;
   const headerImageUrl = getProfileImageUrl(headerProfile);
   const headerName = (headerProfile?.full_name || headerProfile?.name || headerProfile?.username || 'Student').trim();
+  const retakeStudentId =
+    studentProfile?.student_id ||
+    studentProfile?.id ||
+    currentUser?.student_profile?.student_id ||
+    currentUser?.student_id ||
+    currentUser?.id ||
+    '';
 
   const sidebarGradient = "from-purple-800 via-indigo-800 to-blue-800";
   const headerGradient = "from-pink-500 via-purple-500 to-indigo-500";
@@ -146,6 +154,7 @@ const ModularStudentDashboard: React.FC = () => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'results', label: 'My Results', icon: FileText },
+    { id: 'retakes', label: 'Retakes', icon: Award },
   ];
 
   const renderDashboard = () => {
@@ -621,8 +630,19 @@ const ModularStudentDashboard: React.FC = () => {
               transition={{ duration: 0.25 }}
             >
               {activeTab === 'dashboard' && renderDashboard()}
-              {activeTab === 'results' && renderResults()}
-            </motion.div>
+            {activeTab === 'results' && renderResults()}
+            {activeTab === 'retakes' && (
+              <div className="space-y-6">
+                {retakeStudentId ? (
+                  <StudentRetakeHistory studentId={String(retakeStudentId)} />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-white p-6 text-sm text-gray-500">
+                    Retake history is loading for your profile.
+                  </div>
+                )}
+              </div>
+            )}
+          </motion.div>
           </AnimatePresence>
         </div>
       </div>

@@ -32,6 +32,8 @@ from .services import (
     calculate_ga_attainment_semester_student,
     calculate_ga_attainment_cumulative_student,
     check_and_trigger_ga_cqi,
+    get_students_for_batch,
+    get_effective_course_sessions,
     get_teacher_ga_context
 )
 from core.models import Batch, Semester
@@ -1207,16 +1209,7 @@ class BatchGAReportView(APIView):
                 return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
             print("student_obj found:", student_obj)
         elif scope == 'all_students':
-            # Get all students in the batch
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            users = User.objects.filter(batch=batch, role='student', is_active=True)
-            for user in users:
-                try:
-                    student_obj = Student.objects.get(user=user)
-                    student_objs.append(student_obj)
-                except Student.DoesNotExist:
-                    pass
+            student_objs = list(get_students_for_batch(batch))
             print("student_objs count:", len(student_objs))
 
         # Readiness gate (only when scope=cohort)
@@ -1240,7 +1233,7 @@ class BatchGAReportView(APIView):
                 user = student_obj.user
                 student_ga_scores = []
                 for ga in gas:
-                    ga_attainment = calculate_ga_attainment_cumulative_student(student_obj, ga)
+                    ga_attainment = calculate_ga_attainment_cumulative_student(student_obj, ga, batch=batch)
                     is_below = False
                     if ga_attainment is not None:
                         is_below = float(ga_attainment) < float(ga.kpi_threshold)
@@ -1300,15 +1293,18 @@ class BatchGAReportView(APIView):
                 allowed_course_ids = batch.curriculum_version.version_courses.filter(
                     is_active=True
                 ).values_list('course_id', flat=True)
-            cs_query = CourseSession.objects.filter(
-                batch=batch,
-                is_active=True,
-                assessment_status='ASSESSMENT_DONE'
+            course_sessions = get_effective_course_sessions(
+                batch,
+                upto_semester=batch.current_semester,
+                require_assessment_done=False,
             )
             if allowed_course_ids:
-                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-            course_sessions = cs_query.select_related('course', 'semester')
-            course_reports = []
+                allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+                course_sessions = [
+                    session for session in course_sessions
+                    if str(session.course_id) in allowed_course_ids
+                ]
+            course_reports_by_code = {}
             for session in course_sessions:
                 course_ga_scores = []
                 for ga in gas:
@@ -1331,13 +1327,14 @@ class BatchGAReportView(APIView):
                             'score': None,
                             'is_below_threshold': False
                         })
-                course_reports.append({
+                course_reports_by_code[session.course.code] = {
                     'course_id': str(session.course.id),
                     'course_code': session.course.code,
                     'course_title': session.course.name,
                     'semester': session.semester.number if session.semester else None,
                     'ga_scores': course_ga_scores
-                })
+                }
+            course_reports = list(course_reports_by_code.values())
             # Calculate cohort-level summary for footer (same as all_students)
             cohort_summary = []
             for ga in gas:
@@ -1389,9 +1386,13 @@ class BatchGAReportView(APIView):
                     check_and_trigger_ga_cqi(batch, ga, 'CUMULATIVE')
 
                 # Contributing courses: show course_ga_score per course session (only <= current semester)
-                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
+                cs_qs = get_effective_course_sessions(
+                    batch,
+                    upto_semester=batch.current_semester,
+                    require_assessment_done=True,
+                )
 
-                for session in cs_qs.select_related('course', 'semester'):
+                for session in cs_qs:
                     score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
                     if score:
                         contributing_courses.append({
@@ -1412,14 +1413,18 @@ class BatchGAReportView(APIView):
             else:
                 # scope=student
                 print("=== Processing student scope for", ga_code)
-                ga_attainment = calculate_ga_attainment_cumulative_student(student_objs[0], ga)
+                ga_attainment = calculate_ga_attainment_cumulative_student(student_objs[0], ga, batch=batch)
 
                 # Contributing courses: show student's course_ga_score derived from StudentCLOScore (only <= current semester)
-                cs_qs = CourseSession.objects.filter(batch=batch, is_active=True, assessment_status='ASSESSMENT_DONE', semester__number__lte=batch.current_semester)
-                print("cs_qs count for student scope:", cs_qs.count())
+                cs_qs = get_effective_course_sessions(
+                    batch,
+                    upto_semester=batch.current_semester,
+                    require_assessment_done=True,
+                )
+                print("cs_qs count for student scope:", len(cs_qs))
 
                 # For each course, compute one course_ga_score per student's course by using StudentCLOScore weighted sum.
-                for session in cs_qs.select_related('course', 'semester'):
+                for session in cs_qs:
                     mappings = CLOGAMapping.objects.filter(clo__course=session.course, ga=ga, is_active=True, clo__is_active=True)
                     print(f"session:", session.course.code, "mappings count:", mappings.count())
                     if not mappings.exists():

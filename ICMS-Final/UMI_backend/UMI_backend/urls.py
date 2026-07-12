@@ -39,6 +39,7 @@ urlpatterns += [
     path('api/curriculum-versions/', include('curriculum.urls')),
     path('api/assessments/', include('assessments.urls')),
     path('api/noticeboard/', include('noticeboard.urls')),
+    path('api/retakes/', include('retake.urls')),
     path('api/', include('ga_cqi_cohort.urls')),
     path('api/clo-master/', include('clo_master.urls')),
 ]

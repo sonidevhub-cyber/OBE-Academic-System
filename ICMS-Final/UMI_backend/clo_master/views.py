@@ -9,6 +9,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from assessments.models import CQI as CLOCQI
 from core.models import Batch, Program, Semester
+from retake.models import CourseRetake
 
 from .models import CourseCLOMasterEntry, SemesterCLOMasterCache
 from .serializers import SemesterCLOMasterCacheSerializer
@@ -28,10 +29,33 @@ def get_clo_master_report(request, program_id, semester_id):
     Optional format=xlsx for Excel export.
     """
     batch_id = request.query_params.get("batch_id")
+    force_refresh = request.query_params.get("refresh") == "1"
 
     program = Program.objects.get(id=program_id)
     semester = Semester.objects.get(id=semester_id)
     batch = Batch.objects.get(id=batch_id) if batch_id else None
+
+    # Get the curriculum version and valid courses for this batch & semester.
+    # We intentionally use the curriculum as the source of truth so courses that
+    # have been promoted but not finalized yet still appear in the report with
+    # zeroed scores.
+    valid_course_ids = []
+    course_catalog = []
+    if batch and batch.curriculum_version:
+        from curriculum.models import CurriculumVersionCourse
+        curriculum_version_courses = CurriculumVersionCourse.objects.filter(
+            version=batch.curriculum_version,
+            semester_no=semester.number,
+            is_active=True
+        ).select_related('course').order_by('semester_no', 'course__code', 'course__name')
+        valid_course_ids = [cvc.course.id for cvc in curriculum_version_courses]
+        course_catalog = [
+            {
+                "course": cvc.course,
+                "semester_no": cvc.semester_no,
+            }
+            for cvc in curriculum_version_courses
+        ]
 
     # Get or create master cache when batch context is available.
     master_cache = None
@@ -41,12 +65,27 @@ def get_clo_master_report(request, program_id, semester_id):
             batch=batch,
             semester=semester,
             defaults={
-                "total_courses_expected": 0,
+                "total_courses_expected": len(valid_course_ids),
                 "total_courses_finalized": 0,
             },
         )
 
-        if cache_created:
+        if cache_created or master_cache.total_courses_expected != len(valid_course_ids):
+            master_cache.total_courses_expected = len(valid_course_ids)
+            master_cache.save()
+
+        # Refresh the cache whenever a retake has been updated more recently
+        # than the last cached master row for this batch/semester.
+        latest_retake = (
+            CourseRetake.objects.filter(current_batch=batch, is_active=True)
+            .order_by("-updated_at")
+            .first()
+        )
+        should_refresh = cache_created or force_refresh
+        if latest_retake and master_cache.last_updated and latest_retake.updated_at > master_cache.last_updated:
+            should_refresh = True
+
+        if should_refresh:
             # Trigger cache population for all already finalized courses.
             from obe.models import CourseSession
             from .signals import append_course_to_clo_master
@@ -58,6 +97,8 @@ def get_clo_master_report(request, program_id, semester_id):
                 assessment_status="ASSESSMENT_DONE",
                 is_active=True,
             )
+            if valid_course_ids:
+                finalized_sessions = finalized_sessions.filter(course__id__in=valid_course_ids)
             for session in finalized_sessions:
                 append_course_to_clo_master(
                     sender=CourseSession,
@@ -77,9 +118,16 @@ def get_clo_master_report(request, program_id, semester_id):
     )
     if batch_id:
         all_course_sessions = all_course_sessions.filter(batch_id=batch_id)
+    if valid_course_ids:
+        all_course_sessions = all_course_sessions.filter(course__id__in=valid_course_ids)
     pending_course_sessions = all_course_sessions.exclude(
         assessment_status="ASSESSMENT_DONE"
     )
+
+    sessions_by_course_id = {
+        session.course_id: session
+        for session in all_course_sessions.select_related("course", "instructor")
+    }
 
     # Get all students for this batch.
     from students.models import Student
@@ -93,10 +141,13 @@ def get_clo_master_report(request, program_id, semester_id):
     # Get all active course entries from cache.
     course_entries = []
     if master_cache:
-        course_entries = (
-            CourseCLOMasterEntry.objects.filter(master_cache=master_cache, is_active=True)
-            .select_related("student", "clo", "clo__course", "course_session")
-        )
+        course_entries_query = CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            is_active=True
+        ).select_related("student", "clo", "clo__course", "course_session")
+        if valid_course_ids:
+            course_entries_query = course_entries_query.filter(course__id__in=valid_course_ids)
+        course_entries = course_entries_query
 
     # Precompute lookups for O(1) access.
     course_entry_lookup = {}
@@ -127,23 +178,30 @@ def get_clo_master_report(request, program_id, semester_id):
     for cqi in approved_cqis:
         cqi_lookup[(cqi.course.id, cqi.clo.id)] = cqi
 
-    # Build course -> CLO map from cache entries.
-    course_clos_map = {}
-    for entry in course_entries:
-        course = entry.course
-        course_id = course.id
-        if course_id not in course_clos_map:
-            course_clos_map[course_id] = {
-                "course": course,
-                "clos": set(),
-            }
-        course_clos_map[course_id]["clos"].add(entry.clo)
+    # Build course -> CLO catalog from the curriculum so planned but not yet
+    # finalized courses still render.
+    from obe.models import CLO
+    if not course_catalog and course_entries:
+        # Fallback for legacy batches without a curriculum mapping.
+        distinct_courses = {}
+        for entry in course_entries:
+            distinct_courses[entry.course.id] = entry.course
+        course_catalog = [
+            {"course": course, "semester_no": semester.number}
+            for course in sorted(distinct_courses.values(), key=lambda c: c.code)
+        ]
 
     sorted_courses = []
-    for course_id in sorted(course_clos_map.keys(), key=lambda x: course_clos_map[x]["course"].code):
-        course_info = course_clos_map[course_id]
-        course_info["clos"] = sorted(course_info["clos"], key=lambda clo: clo.order_number)
-        sorted_courses.append(course_info)
+    for course_item in course_catalog:
+        course = course_item["course"]
+        course_clos = list(
+            CLO.objects.filter(course=course, is_active=True).order_by("order_number")
+        )
+        sorted_courses.append({
+            "course": course,
+            "semester_no": course_item["semester_no"],
+            "clos": course_clos,
+        })
 
     # Prepare student data.
     students_data = []
@@ -169,7 +227,10 @@ def get_clo_master_report(request, program_id, semester_id):
                         "achieved": entry_obj.is_kpi_achieved,
                     }
                 else:
-                    row["courses"][course_key][clo_key] = None
+                    row["courses"][course_key][clo_key] = {
+                        "score": 0.0,
+                        "achieved": False,
+                    }
 
         students_data.append(row)
 
@@ -192,11 +253,35 @@ def get_clo_master_report(request, program_id, semester_id):
         for cs in pending_course_sessions
     ]
 
-    finalized_count = master_cache.total_courses_finalized if master_cache else 0
-    total_count = all_course_sessions.count()
-    is_fully_compiled = (
-        master_cache.is_fully_compiled if master_cache else finalized_count == total_count
-    )
+    # Include curriculum courses that do not yet have a CourseSession row at all.
+    pending_course_ids = {cs.course.id for cs in pending_course_sessions}
+    for course_info in sorted_courses:
+        course = course_info["course"]
+        if course.id in pending_course_ids:
+            continue
+        pending_courses_info.append(
+            {
+                "course_id": course.id,
+                "course_code": course.code,
+                "course_name": course.name,
+                "instructor_name": "Not Assigned",
+                "status": "Pending",
+            }
+        )
+
+    # Calculate finalized count from valid course entries (not just cache)
+    finalized_count = 0
+    if master_cache:
+        finalized_entries_query = CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            is_active=True
+        )
+        if valid_course_ids:
+            finalized_entries_query = finalized_entries_query.filter(course__id__in=valid_course_ids)
+        finalized_course_sessions = finalized_entries_query.values_list('course_session_id', flat=True).distinct()
+        finalized_count = finalized_course_sessions.count()
+    total_count = len(sorted_courses) if sorted_courses else all_course_sessions.count()
+    is_fully_compiled = finalized_count >= total_count if total_count else False
 
     response_data = {
         "program": {

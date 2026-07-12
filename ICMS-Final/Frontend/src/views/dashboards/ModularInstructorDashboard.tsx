@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { api } from "../../api/api";
 
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAllocations } from '../../context/AllocationContext';
 import OBEModule from '../modules/OBEModule';
@@ -11,17 +11,22 @@ import MyCoursesModule from '../modules/MyCoursesModule';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole } from '../../utils/profileHelpers';
+import AssignedRetakesPanel from '../../features/retake/AssignedRetakesPanel';
+import RetakeResultEntryPage from '../pages/RetakeResultEntryPage';
+import { getRetakeAssessmentContext } from '../../features/retake/retakeApi';
 
 
-type TabId = 'dashboard' | 'courses' | 'attendance' | 'schedule' | 'obe';
+type TabId = 'dashboard' | 'courses' | 'attendance' | 'schedule' | 'obe' | 'retakes';
 
 const ModularInstructorDashboard: React.FC = () => {
   const { getInstructorAllocations } = useAllocations();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>('courses');
   const [instructorProfile, setInstructorProfile] = useState<any>(null);
   const [cqiPopup, setCqiPopup] = useState<any[]>([]);
+  const retakeIdFromQuery = searchParams.get('retake_id');
   const currentInstructorId = String(
     currentUser?.instructor_id ??
     currentUser?.instructor_profile?.id ??
@@ -54,8 +59,14 @@ const ModularInstructorDashboard: React.FC = () => {
     };
   }, [currentUser]);
   useEffect(() => {
-   loadNextBatchCQI();
-}, []);
+    loadNextBatchCQI();
+  }, []);
+  
+  useEffect(() => {
+    if (retakeIdFromQuery) {
+      setActiveTab('retakes');
+    }
+  }, [retakeIdFromQuery]);
 const loadNextBatchCQI = async () => {
    try {
       const res = await api.get("/feedback/next-batch-cqi/");
@@ -79,7 +90,8 @@ const loadNextBatchCQI = async () => {
     { id: 'courses', label: 'My Courses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
     { id: 'attendance', label: 'Mark Attendance', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
     { id: 'schedule', label: 'Schedule', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
-    { id: 'obe', label: 'OBE Management', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' }
+    { id: 'obe', label: 'OBE Management', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { id: 'retakes', label: 'Assigned Retakes', icon: 'M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z' }
   ];
 
   const renderMyCourses = () => (
@@ -308,6 +320,27 @@ const loadNextBatchCQI = async () => {
         return renderDashboard();
       case 'obe':
         return <OBEModule />;
+      case 'retakes':
+        if (retakeIdFromQuery) {
+          return <RetakeResultEntryPage />;
+        }
+        return (
+          <AssignedRetakesPanel
+            onOpenResults={async (retakeId) => {
+              try {
+                const assessmentContext = await getRetakeAssessmentContext(retakeId);
+                navigate(`/teacher?retake_id=${encodeURIComponent(retakeId)}&tab=retakes`, {
+                  state: {
+                    assessmentContext,
+                  },
+                });
+              } catch (error) {
+                console.error('Failed to load retake assessment context before navigation', error);
+                navigate(`/teacher?retake_id=${encodeURIComponent(retakeId)}&tab=retakes`);
+              }
+            }}
+          />
+        );
       default:
         return renderDashboard();
     }

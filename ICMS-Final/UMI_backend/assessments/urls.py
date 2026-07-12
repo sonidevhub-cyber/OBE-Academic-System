@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AssessmentHistoryView, AssessmentMarksView, CQIView, CheckCQIStatusView, CreateAssessmentView, CoordinatorCQIView, UpdateStudentMarksView,student_result, CheckCQIView,EnterMarksView, ResubmitCQIView, UpdateCQIStatusView,PreviousCQIView, UpdateStudentMarksView, AssessmentListView
+from .views import AssessmentHistoryView, AssessmentMarksView, CQIView, CheckCQIStatusView, CreateAssessmentView, CoordinatorCQIView, UpdateStudentMarksView,student_result, CheckCQIView,EnterMarksView, ResubmitCQIView, UpdateCQIStatusView,PreviousCQIView, UpdateStudentMarksView, AssessmentListView, HODCQIListView
 from .services.view import CLOReportView
 
 urlpatterns = [
@@ -22,6 +22,7 @@ urlpatterns = [
     path("cqi/resubmit/<uuid:cqi_id>/", ResubmitCQIView.as_view()),
 
     
+    path("hod-cqi/", HODCQIListView.as_view()),
     path("hod-cqi/update/<int:cqi_id>/", UpdateCQIStatusView.as_view()),
 
     # ✅ Student

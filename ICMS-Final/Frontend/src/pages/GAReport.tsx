@@ -92,6 +92,7 @@ const GAReport: React.FC = () => {
   const [issueStatement, setIssueStatement] = useState('');
   const [hodActionPlan, setHodActionPlan] = useState('');
   const [saving, setSaving] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -126,9 +127,8 @@ const GAReport: React.FC = () => {
     }
 
     const fetchReport = async () => {
-      setLoading(true);
-      setReadinessInfo(null);
-      setReportData(null);
+      const hasVisibleData = Boolean(reportData || readinessInfo);
+      setLoading(!hasVisibleData);
       
       try {
         const data = await obeService.getBatchGAReport(selectedBatchId, {
@@ -141,6 +141,7 @@ const GAReport: React.FC = () => {
           setReadinessInfo(data);
         } else {
           setReportData(data as unknown as AllStudentsReportData);
+          setReadinessInfo(null);
         }
       } catch (error) {
         console.error('Failed to fetch GA report:', error);
@@ -151,7 +152,7 @@ const GAReport: React.FC = () => {
     };
 
     fetchReport();
-  }, [selectedBatchId, viewMode]);
+  }, [selectedBatchId, viewMode, refreshTick]);
 
   // Fetch GA Status Row when program and batch are selected
   useEffect(() => {
@@ -168,7 +169,33 @@ const GAReport: React.FC = () => {
       }
     };
     fetchGAStatusRow();
-  }, [selectedProgramId, selectedBatchId]);
+  }, [selectedProgramId, selectedBatchId, refreshTick]);
+
+  useEffect(() => {
+    if (!selectedBatchId) {
+      return;
+    }
+
+    const bumpRefresh = () => setRefreshTick((tick) => tick + 1);
+    const intervalId = window.setInterval(bumpRefresh, 30000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        bumpRefresh();
+      }
+    };
+
+    const handleFocus = () => bumpRefresh();
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [selectedBatchId]);
 
   // Handle Trigger CQI button click
   const handleTriggerCQI = async (ga: GAStatusRow) => {
@@ -311,7 +338,7 @@ const GAReport: React.FC = () => {
           course.course_title,
           ...reportData.gas.map((g) => {
             const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
-            return score != null ? `${score.toFixed(1)}%` : '';
+            return `${(score ?? 0).toFixed(1)}%`;
           }),
         ];
         rows.push(row);
@@ -685,7 +712,7 @@ const GAReport: React.FC = () => {
                                 : 'text-gray-900'
                             }`}
                           >
-                            {gaScore?.score != null ? `${gaScore.score.toFixed(1)}%` : '-'}
+                            {`${(gaScore?.score ?? 0).toFixed(1)}%`}
                           </td>
                         );
                       })}

@@ -19,17 +19,90 @@ from .models import (
     GAReport
 )
 from django.db import transaction
-from django.db.models import Avg, Count, Sum, Max
+from django.db.models import Avg, Count, Sum, Max, Q
 from assessments.models import Assessment, Question, StudentQuestionMark
 from students.models import Student
 from core.models import Batch, Semester
 from django.utils import timezone
 
 
+def get_students_for_batch(batch: Batch):
+    """
+    Return students that should count toward a batch report.
+
+    Retake students can remain attached to their original user.batch / student.batch
+    while still participating in a retake for the target batch, so we include them
+    via the retake relation too.
+    """
+    return (
+        Student.objects.filter(
+            Q(user__batch=batch)
+            | Q(batch=batch)
+            | Q(retakes__current_batch=batch, retakes__is_active=True)
+        )
+        .select_related('user')
+        .distinct()
+    )
+
+
+def get_effective_course_sessions(
+    batch: Batch,
+    *,
+    semester: Semester | None = None,
+    upto_semester: int | None = None,
+    require_assessment_done: bool = False,
+):
+    """
+    Return one effective course session per course code for a batch.
+
+    Retake flows can leave multiple sessions around for the same course code.
+    For reporting we want the latest effective session, even if it is still in
+    progress, so the UI can show the current semester row with zero placeholders.
+    When multiple rows exist for the same timestamp window, a finalized session
+    wins over an unfinished one.
+    """
+    sessions = CourseSession.objects.filter(batch=batch, is_active=True)
+    if semester is not None:
+        sessions = sessions.filter(semester=semester)
+    elif upto_semester is not None:
+        sessions = sessions.filter(semester__number__lte=upto_semester)
+
+    if require_assessment_done:
+        sessions = sessions.filter(assessment_status='ASSESSMENT_DONE')
+
+    sessions = sessions.select_related('course', 'semester').order_by(
+        'course__code',
+        'semester__number',
+        'created_at',
+        'id',
+    )
+
+    def _session_rank(session):
+        return (
+            session.semester.number if session.semester else 0,
+            session.created_at,
+            1 if session.assessment_status == 'ASSESSMENT_DONE' else 0,
+            session.id,
+        )
+
+    effective_sessions = {}
+    for session in sessions:
+        course_code = (session.course.code or str(session.course_id)).strip().upper()
+        current = effective_sessions.get(course_code)
+        if current is None or _session_rank(session) >= _session_rank(current):
+            effective_sessions[course_code] = session
+
+    return list(effective_sessions.values())
+
+
 def calculate_course_ga_score(course_session: CourseSession, ga: GA):
     """
     Calculate and save CourseGAScore for a specific GA in a course session.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[calculate_course_ga_score] Starting for course_session={course_session.id}, course={course_session.course.code}, batch={course_session.batch.name}, ga=GA-{ga.order_number}")
+
     # Get the batch's curriculum version if available
     target_curriculum_version = None
     if course_session.batch and course_session.batch.curriculum_version:
@@ -47,38 +120,133 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
         mappings = mappings.filter(clo__curriculum_version=target_curriculum_version)
 
     if not mappings.exists():
+        logger.debug(
+            f"[calculate_course_ga_score] No CLO-GA mappings found for "
+            f"course_session={course_session.id}, course={course_session.course.code}, ga=GA-{ga.order_number}; returning None"
+        )
         return None
 
     total_score = Decimal('0.00')
     total_weight = Decimal('0.00')
 
-    # Get students via User model, which has the correct batch
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    user_students = User.objects.filter(batch=course_session.batch, role='student')
-    students = [Student.objects.get(user=user) for user in user_students if hasattr(user, 'student_profile')]
+    students = list(get_students_for_batch(course_session.batch))
     enrolled_students_count = len(students)
+    logger.info(f"[calculate_course_ga_score] Found {enrolled_students_count} enrolled students")
+
+    # Pre-fetch all active retakes for this course and either failed_batch OR current_batch
+    from retake.models import CourseRetake
+    student_retakes = {}
+    retake_qs = CourseRetake.objects.filter(
+        failed_course=course_session.course,
+        is_active=True
+    ).filter(
+        Q(failed_batch=course_session.batch) | Q(current_batch=course_session.batch)
+    ).select_related('student')
+    logger.info(f"[calculate_course_ga_score] Found {retake_qs.count()} active retakes")
+    for retake in retake_qs:
+        if retake.student_id not in student_retakes:
+            student_retakes[retake.student_id] = []
+        student_retakes[retake.student_id].append(retake)
+    
+    # Get latest retake per student
+    latest_retake_per_student = {}
+    for student_id, retakes in student_retakes.items():
+        latest_retake_per_student[student_id] = max(retakes, key=lambda r: r.attempt_number)
+    
+    # Get all active CLOs for the course (any curriculum version), grouped by order number!
+    from collections import defaultdict
+    all_clos = CLO.objects.filter(course=course_session.course, is_active=True)
+    clos_by_order = defaultdict(list)
+    for clo in all_clos:
+        clos_by_order[clo.order_number].append(clo)
 
     for mapping in mappings:
-        # Calculate real CLO attainment
-        clo = mapping.clo
+        # Get clo order number!
+        clo_order = mapping.clo.order_number
         
-        # Get Assessments and Questions for this course, batch, semester
-        assessments = Assessment.objects.filter(
-            course=course_session.course,
-            batch=course_session.batch,
-            semester=course_session.semester,
-            is_finalized=True
+        # Now, find all clos with that order number!
+        clo_list = clos_by_order.get(clo_order, [])
+        
+        # Find which CLO in this order number is linked to original questions!
+        original_clo = None
+        total_marks = 0
+        original_questions = []
+        for clo in clo_list:
+            oqs = Question.objects.filter(
+                clo=clo,
+                assessment__course=course_session.course,
+                assessment__batch=course_session.batch,
+                assessment__semester=course_session.semester,
+                assessment__is_finalized=True,
+                assessment__course_retake__isnull=True
+            )
+            if oqs.exists():
+                original_clo = clo
+                original_questions = oqs
+                total_marks = sum(q.marks for q in original_questions)
+                break
+        
+        retake_assessments = Assessment.objects.filter(
+            course_retake__failed_course=course_session.course,
+            course_retake__is_active=True,
+            course_retake__current_batch=course_session.batch,
+            is_finalized=True,
         )
-        questions = Question.objects.filter(clo=clo, assessment__in=assessments)
-        
-        total_marks = sum(q.marks for q in questions)
-        if total_marks == 0:
-            continue
+        retake_questions = Question.objects.filter(clo__in=clo_list, assessment__in=retake_assessments)
+        retake_total = sum(q.marks for q in retake_questions)
+
+        if not original_clo or total_marks == 0:
+            if retake_questions.exists() and retake_total > 0:
+                original_clo = clo_list[0]
+                total_marks = retake_total
+            else:
+                continue
             
         total_obtained = Decimal('0')
-        student_marks = StudentQuestionMark.objects.filter(question__in=questions)
-        total_obtained = sum(sm.marks_obtained for sm in student_marks)
+        
+        # For each student, use retake marks if available
+        for student in students:
+            latest_retake = latest_retake_per_student.get(student.student_id)
+            logger.debug(f"[calculate_course_ga_score] Processing student={student.student_id} has_latest_retake={bool(latest_retake)}")
+            
+            if latest_retake:
+                logger.debug(f"[calculate_course_ga_score] retake_questions count={retake_questions.count()} for clo_list order={clo_order}")
+                if retake_questions.exists():
+                    # Use retake's marks
+                    student_marks = StudentQuestionMark.objects.filter(
+                        student=student,
+                        question__in=retake_questions
+                    )
+                    logger.debug(f"[calculate_course_ga_score] student_marks count={student_marks.count()}")
+                    student_total = sum(sm.marks_obtained for sm in student_marks)
+                    
+                    # Scale to original total
+                    if retake_total > 0:
+                        student_total_scaled = (student_total / retake_total) * total_marks
+                    else:
+                        student_total_scaled = 0
+                    logger.debug(f"[calculate_course_ga_score] Using retake marks: total={student_total}, retake_total={retake_total}, scaled={student_total_scaled}")
+                else:
+                    # Fallback to original
+                    student_marks = StudentQuestionMark.objects.filter(
+                        student=student,
+                        question__in=original_questions,
+                        course_retake__isnull=True
+                    )
+                    student_total_scaled = sum(sm.marks_obtained for sm in student_marks)
+                    logger.debug(f"[calculate_course_ga_score] Using original marks (no retake questions): total={student_total_scaled}")
+            else:
+                # No retake, use original
+                student_marks = StudentQuestionMark.objects.filter(
+                    student=student,
+                    question__in=original_questions,
+                    course_retake__isnull=True
+                )
+                student_total_scaled = sum(sm.marks_obtained for sm in student_marks)
+                logger.debug(f"[calculate_course_ga_score] No retake, using original marks: total={student_total_scaled}")
+                
+            total_obtained += student_total_scaled
+        
         total_possible = total_marks * enrolled_students_count
         
         if total_possible > 0:
@@ -112,6 +280,10 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
     """
     Calculate and save all CourseGAScores and StudentCLOScores for a course session.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[calculate_all_course_ga_scores] Starting for course_session={course_session.id}, course={course_session.course.code}")
+
     with transaction.atomic():
         # Get the batch's curriculum version if available
         target_curriculum_version = None
@@ -124,24 +296,54 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
             is_active=True
         )
 
+        ga_ids = list(gas.values_list('id', flat=True))
+        mapped_ga_ids = set(
+            CLOGAMapping.objects.filter(
+                clo__course=course_session.course,
+                ga_id__in=ga_ids,
+                is_active=True,
+                clo__is_active=True,
+            )
+            .values_list('ga_id', flat=True)
+            .distinct()
+        )
+        if target_curriculum_version:
+            mapped_ga_ids = set(
+                CLOGAMapping.objects.filter(
+                    clo__course=course_session.course,
+                    ga_id__in=ga_ids,
+                    is_active=True,
+                    clo__is_active=True,
+                    clo__curriculum_version=target_curriculum_version,
+                )
+                .values_list('ga_id', flat=True)
+                .distinct()
+            )
+
+        if not mapped_ga_ids:
+            logger.warning(
+                f"[calculate_all_course_ga_scores] No CLO-GA mappings found for "
+                f"course_session={course_session.id}, course={course_session.course.code}; "
+                f"skipping GA score recalculation"
+            )
+
         scores = []
-        for ga in gas:
+        for ga in gas.filter(id__in=mapped_ga_ids):
+            logger.info(f"[calculate_all_course_ga_scores] Processing ga=GA-{ga.order_number}")
             score = calculate_course_ga_score(course_session, ga)
             if score:
                 scores.append(score)
+                logger.info(f"[calculate_all_course_ga_scores] Added ga score={score.score} for ga=GA-{ga.order_number}")
 
         # Now calculate StudentCLOScores
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        user_students = User.objects.filter(batch=course_session.batch, role='student')
-        students = [Student.objects.get(user=user) for user in user_students if hasattr(user, 'student_profile')]
-        # Get all CLOs for this course, filtered by curriculum version if available
-        clos = CLO.objects.filter(
+        students = list(get_students_for_batch(course_session.batch))
+        logger.info(f"[calculate_all_course_ga_scores] Found {len(students)} students for StudentCLOScore calculation")
+
+        # Get all active CLOs for this course, regardless of curriculum version!
+        all_clos = CLO.objects.filter(
             course=course_session.course,
             is_active=True
         )
-        if target_curriculum_version:
-            clos = clos.filter(curriculum_version=target_curriculum_version)
         # Get all assessments for this course session
         assessments = Assessment.objects.filter(
             course=course_session.course,
@@ -149,32 +351,155 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
             semester=course_session.semester,
             is_finalized=True
         )
+        logger.info(f"[calculate_all_course_ga_scores] Found {assessments.count()} finalized assessments")
+        
+        # Group all CLOs by order number
+        from collections import defaultdict
+        clos_by_order = defaultdict(list)
+        for clo in all_clos:
+            clos_by_order[clo.order_number].append(clo)
+        
+        # Pre-fetch retakes for all students in this batch/course!
+        from retake.models import CourseRetake
+        student_retakes = {}
+        retake_qs = CourseRetake.objects.filter(
+            failed_course=course_session.course,
+            is_active=True
+        ).filter(
+            Q(failed_batch=course_session.batch) | Q(current_batch=course_session.batch)
+        ).select_related('student')
+        logger.info(f"[calculate_all_course_ga_scores] Found {retake_qs.count()} retakes for StudentCLOScore calculation")
+        for retake in retake_qs:
+            if retake.student_id not in student_retakes:
+                student_retakes[retake.student_id] = []
+            student_retakes[retake.student_id].append(retake)
+        
+        # Get latest retake per student
+        latest_retake_per_student = {}
+        for student_id, retakes in student_retakes.items():
+            latest_retake_per_student[student_id] = max(retakes, key=lambda r: r.attempt_number)
+        
+        # For each order number, determine appropriate CLOs:
+        for order_number, clo_list in clos_by_order.items():
+            pass
         
         for student in students:
-            for clo in clos:
-                questions = Question.objects.filter(
-                    clo=clo,
-                    assessment__in=assessments
-                )
-                total_marks = sum(q.marks for q in questions)
-                if total_marks == 0:
-                    continue
-                    
-                student_marks = StudentQuestionMark.objects.filter(
-                    student=student,
-                    question__in=questions
-                )
-                total_obtained = sum(sm.marks_obtained for sm in student_marks)
-                attainment = (total_obtained / total_marks) * 100
+            # Get latest active retake for this student and course if exists
+            latest_retake = latest_retake_per_student.get(student.student_id)
+            
+            for order_number, clo_list in clos_by_order.items():
+                logger.debug(f"[calculate_all_course_ga_scores] Processing order_number={order_number}")
+                # Step Find which CLO in this order number has original questions
+                original_clo = None
+                total_marks = 0
+                for clo in clo_list:
+                    original_questions = Question.objects.filter(
+                        clo=clo,
+                        assessment__in=assessments,
+                        assessment__course_retake__isnull=True
+                    )
+                    if original_questions.exists():
+                        original_clo = clo
+                        total_marks = sum(q.marks for q in original_questions)
+                        logger.debug(f"[calculate_all_course_ga_scores] Found original_clo={original_clo.id}, total_marks={total_marks}")
+                        break
                 
+                if not original_clo or total_marks == 0:
+                    if latest_retake:
+                        retake_assessments = Assessment.objects.filter(
+                            course_retake=latest_retake,
+                            is_finalized=True
+                        )
+                        retake_questions = Question.objects.filter(clo__in=clo_list, assessment__in=retake_assessments)
+                        retake_total = sum(q.marks for q in retake_questions)
+                        if retake_questions.exists() and retake_total > 0:
+                            original_clo = clo_list[0]
+                            total_marks = retake_total
+                        else:
+                            logger.debug(f"[calculate_all_course_ga_scores] No original_clo found for order_number={order_number}, skipping")
+                            continue
+                    else:
+                        logger.debug(f"[calculate_all_course_ga_scores] No original_clo found for order_number={order_number}, skipping")
+                        continue
+                
+                # Calculate student's obtained marks
+                if latest_retake:
+                    logger.debug(f"[calculate_all_course_ga_scores] Student={student.student_id} has retake, checking retake questions")
+                    # Check retake questions for this order number (any CLO in clo_list)
+                    retake_assessments = Assessment.objects.filter(
+                        course_retake=latest_retake,
+                        is_finalized=True
+                    )
+                    logger.debug(f"[calculate_all_course_ga_scores] retake_assessments count={retake_assessments.count()}")
+                    retake_questions = Question.objects.filter(clo__in=clo_list, assessment__in=retake_assessments)
+                    logger.debug(f"[calculate_all_course_ga_scores] retake_questions count={retake_questions.count()}")
+                    
+                    if retake_questions.exists():
+                        # Use retake's marks
+                        student_marks = StudentQuestionMark.objects.filter(
+                            student=student,
+                            question__in=retake_questions
+                        )
+                        logger.debug(f"[calculate_all_course_ga_scores] student_marks count={student_marks.count()}")
+                        student_total = sum(sm.marks_obtained for sm in student_marks)
+                        retake_total = sum(q.marks for q in retake_questions)
+                        
+                        if retake_total > 0:
+                            attainment = (student_total / retake_total) * 100
+                        else:
+                            attainment = 0
+                        logger.debug(f"[calculate_all_course_ga_scores] Using retake marks: student_total={student_total}, retake_total={retake_total}, attainment={attainment}")
+                    else:
+                        # Fallback to original marks
+                        logger.debug(f"[calculate_all_course_ga_scores] No retake questions, falling back to original")
+                        original_questions = Question.objects.filter(
+                            clo=original_clo,
+                            assessment__in=assessments,
+                            assessment__course_retake__isnull=True
+                        )
+                        student_marks = StudentQuestionMark.objects.filter(
+                            student=student,
+                            question__in=original_questions,
+                            course_retake__isnull=True
+                        )
+                        total_obtained = sum(sm.marks_obtained for sm in student_marks)
+                        attainment = (total_obtained / total_marks) * 100
+                        logger.debug(f"[calculate_all_course_ga_scores] Using original marks: total_obtained={total_obtained}, attainment={attainment}")
+                else:
+                    # No retake, use original marks
+                    logger.debug(f"[calculate_all_course_ga_scores] Student={student.student_id} no retake, using original marks")
+                    original_questions = Question.objects.filter(
+                        clo=original_clo,
+                        assessment__in=assessments,
+                        assessment__course_retake__isnull=True
+                    )
+                    student_marks = StudentQuestionMark.objects.filter(
+                        student=student,
+                        question__in=original_questions,
+                        course_retake__isnull=True
+                    )
+                    total_obtained = sum(sm.marks_obtained for sm in student_marks)
+                    attainment = (total_obtained / total_marks) * 100
+                    logger.debug(f"[calculate_all_course_ga_scores] Using original marks: total_obtained={total_obtained}, attainment={attainment}")
+                
+                logger.info(f"[calculate_all_course_ga_scores] Creating StudentCLOScore for student={student.student_id}, clo={original_clo.id}, attainment={round(attainment, 2)}")
                 StudentCLOScore.objects.update_or_create(
                     student=student,
-                    clo=clo,
+                    clo=original_clo,
                     course_session=course_session,
                     defaults={
                         'attainment': round(attainment, 2)
                     }
                 )
+
+        # Any retake or mark edit that recalculates a course session should
+        # invalidate locked GA reports for the same batch so the next GA view
+        # can rebuild from the refreshed CourseGAScore rows.
+        GAReport.objects.filter(
+            ga__program=course_session.course.program,
+            batch=course_session.batch,
+            is_locked=True,
+        ).update(is_locked=False)
 
         return scores
 
@@ -190,15 +515,17 @@ def calculate_ga_attainment_semester_cohort(batch: Batch, semester: Semester, ga
             is_active=True
         ).values_list('course_id', flat=True)
         
-    cs_query = CourseSession.objects.filter(
-        batch=batch,
+    course_sessions = get_effective_course_sessions(
+        batch,
         semester=semester,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE'
+        require_assessment_done=True,
     )
     if allowed_course_ids:
-        cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-    course_sessions = cs_query
+        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
 
     course_scores = CourseGAScore.objects.filter(
         course_session__in=course_sessions,
@@ -235,14 +562,17 @@ def calculate_ga_attainment_cumulative_cohort(batch: Batch, ga: GA):
             is_active=True
         ).values_list('course_id', flat=True)
         
-    cs_query = CourseSession.objects.filter(
-        batch=batch,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE'
+    course_sessions = get_effective_course_sessions(
+        batch,
+        upto_semester=batch.current_semester,
+        require_assessment_done=True,
     )
     if allowed_course_ids:
-        cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-    course_sessions = cs_query
+        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
 
     course_scores = CourseGAScore.objects.filter(
         course_session__in=course_sessions,
@@ -268,27 +598,33 @@ def calculate_ga_attainment_cumulative_cohort(batch: Batch, ga: GA):
     return round(total_weighted_score / total_student_credits, 2)
 
 
-def calculate_ga_attainment_semester_student(student: Student, semester: Semester, ga: GA):
+def calculate_ga_attainment_semester_student(student: Student, semester: Semester, ga: GA, batch: Batch | None = None):
     """
     Calculate semester-wise student GA attainment: weighted sum of their CLO scores
     """
-    # Get all course sessions for this student in this semester
-    batch = student.user.batch
+    # Use the batch from the report context when provided.
+    # This matters for retake students who may still belong to their original batch.
+    batch = batch or getattr(student.user, 'batch', None) or getattr(student, 'batch', None)
+    if batch is None:
+        return Decimal('0')
+
     allowed_course_ids = []
     if batch.curriculum_version:
         allowed_course_ids = batch.curriculum_version.version_courses.filter(
             is_active=True
         ).values_list('course_id', flat=True)
         
-    cs_query = CourseSession.objects.filter(
-        batch=batch,
+    course_sessions = get_effective_course_sessions(
+        batch,
         semester=semester,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE'
+        require_assessment_done=True,
     )
     if allowed_course_ids:
-        cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-    course_sessions = cs_query
+        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
 
     total_attainment = Decimal('0')
     total_weight = Decimal('0')
@@ -320,25 +656,31 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
     return round(total_attainment / total_weight, 2)
 
 
-def calculate_ga_attainment_cumulative_student(student: Student, ga: GA):
+def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: Batch | None = None):
     """
     Calculate cumulative student GA attainment: all semesters
     """
-    batch = student.user.batch
+    batch = batch or getattr(student.user, 'batch', None) or getattr(student, 'batch', None)
+    if batch is None:
+        return Decimal('0')
+
     allowed_course_ids = []
     if batch.curriculum_version:
         allowed_course_ids = batch.curriculum_version.version_courses.filter(
             is_active=True
         ).values_list('course_id', flat=True)
         
-    cs_query = CourseSession.objects.filter(
-        batch=batch,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE'
-    ).select_related('course')  # Optimize by pre-fetching related course
+    course_sessions = get_effective_course_sessions(
+        batch,
+        upto_semester=batch.current_semester,
+        require_assessment_done=True,
+    )
     if allowed_course_ids:
-        cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-    course_sessions = cs_query
+        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
 
     # Fetch all relevant mappings in one query and group by course session
     session_ids = [cs.id for cs in course_sessions]
@@ -410,17 +752,34 @@ def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str, semester: int
     if attainment is None:
         return None
 
-    # Check if already has a non-fully-approved CQI for this (ga, batch, cqi_level, semester)
-    existing_cqi = GACQIRecord.objects.filter(
-        ga=ga,
-        batch=batch,
-        cqi_level=cqi_level,
-        semester=semester if cqi_level == 'SEMESTER' else None,
-        status__in=['PENDING', 'SENT_BACK']
-    ).exists()
+    # Reuse any existing CQI row for this GA/batch scope to respect DB uniqueness.
+    cqi_filter = {
+        'ga': ga,
+        'batch': batch,
+        'cqi_level': cqi_level,
+    }
+    if cqi_level == 'SEMESTER':
+        cqi_filter['semester'] = semester
+    else:
+        cqi_filter['semester__isnull'] = True
 
+    existing_cqi = GACQIRecord.objects.filter(**cqi_filter).order_by('-updated_at').first()
     if existing_cqi:
-        return None
+        # Keep the existing record and refresh the trigger values if needed.
+        updated = False
+        new_attainment = attainment
+        if new_attainment is not None and existing_cqi.attainment_value != new_attainment:
+            existing_cqi.attainment_value = new_attainment
+            updated = True
+        if existing_cqi.kpi_threshold_at_trigger != ga.kpi_threshold:
+            existing_cqi.kpi_threshold_at_trigger = ga.kpi_threshold
+            updated = True
+        if existing_cqi.status == 'NOT_TRIGGERED':
+            existing_cqi.status = 'PENDING'
+            updated = True
+        if updated:
+            existing_cqi.save()
+        return existing_cqi
 
     # Check if below threshold
     if attainment < ga.kpi_threshold:
@@ -630,7 +989,7 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
     """
     # Check for existing locked report first
     existing_report = GAReport.objects.filter(ga=ga, batch=batch, is_locked=True).first()
-    if existing_report and not force_recalculate:
+    if existing_report and not force_recalculate and not existing_report.needs_recalculation:
         return {
             'final_score': float(existing_report.final_score) if existing_report.final_score is not None else None,
             'direct_score': float(existing_report.direct_score) if existing_report.direct_score is not None else None,
@@ -769,8 +1128,8 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
         'exit': float(exit_coverage) if exit_coverage is not None else None
     }
     # Calculate direct coverage (percentage of courses with ASSESSMENT_DONE)
-    if course_sessions.exists():
-        total_courses = course_sessions.count()
+    if course_sessions:
+        total_courses = len(course_sessions)
         courses_with_ga = course_scores.values('course_session').distinct().count()
         coverage['direct'] = round((courses_with_ga / total_courses) * 100, 2)
     
@@ -802,6 +1161,7 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
             'formula_applied': result['formula_applied'],
             'breakdown': result['breakdown'],
             'coverage': result['coverage'],
+            'needs_recalculation': False,
             # Only lock if we have a final score? Or let it be unlocked by default?
             # Let's keep it unlocked by default for now, so it can be recalculated until manually locked
             # 'is_locked': True if result['final_score'] is not None else False
@@ -830,7 +1190,7 @@ def calculate_ga_report(batch):
         ga_id_str = str(ga.id)
         existing_report = report_map.get(ga_id_str)
         
-        if existing_report and existing_report.is_locked:
+        if existing_report and existing_report.is_locked and not existing_report.needs_recalculation:
             # Use locked existing report
             weighted_result = {
                 'final_score': float(existing_report.final_score) if existing_report.final_score is not None else None,
@@ -870,7 +1230,7 @@ def calculate_ga_report(batch):
             
     # Lock all relevant reports at once (bulk update)
     if gas_to_lock:
-        GAReport.objects.filter(ga_id__in=gas_to_lock, batch=batch).update(is_locked=True)
+            GAReport.objects.filter(ga_id__in=gas_to_lock, batch=batch).update(is_locked=True, needs_recalculation=False)
         
     return report_rows
 
@@ -911,14 +1271,19 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
     total_eligible_students = Student.objects.filter(batch=batch).count()
     target_curriculum_version = batch.curriculum_version
 
-    course_sessions = CourseSession.objects.filter(
-        batch=batch,
+    course_sessions = get_effective_course_sessions(
+        batch,
         semester=semester,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE',
+        require_assessment_done=False,
     )
     if allowed_course_ids:
-        course_sessions = course_sessions.filter(course_id__in=allowed_course_ids)
+        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
+
+    enrolled_students_count = get_students_for_batch(batch).count()
 
     for ga in gas:
         direct_score = calculate_ga_attainment_semester_cohort(batch, semester, ga)
@@ -926,11 +1291,12 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
         contributing_courses = []
         cf_scores = []
         cf_coverages = []
+        assessed_course_count = 0
 
-        for session in course_sessions.select_related('course', 'semester'):
+        for session in course_sessions:
             score_obj = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
-            if not score_obj:
-                continue
+            if score_obj:
+                assessed_course_count += 1
 
             mappings = CLOGAMapping.objects.filter(
                 clo__course=session.course,
@@ -949,8 +1315,8 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
                     total_weighted_score += Decimal(str(attainment)) * mapping.weight
                     total_weight += mapping.weight
 
-            course_feedback_score = None
-            course_feedback_coverage = None
+            course_feedback_score = Decimal('0')
+            course_feedback_coverage = Decimal('0')
             if total_weight > 0:
                 course_feedback_score = round(total_weighted_score / total_weight, 2)
                 respondent_count = responses.filter(course_id=session.course_id).values('student').distinct().count()
@@ -964,11 +1330,12 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
             contributing_courses.append({
                 'course_code': session.course.code,
                 'course_name': session.course.name,
-                'course_ga_score': float(score_obj.score),
-                'course_feedback_score': float(course_feedback_score) if course_feedback_score is not None else None,
-                'enrolled_students': score_obj.enrolled_students,
+                'course_ga_score': float(score_obj.score) if score_obj else 0.0,
+                'course_feedback_score': float(course_feedback_score) if course_feedback_score is not None else 0.0,
+                'enrolled_students': score_obj.enrolled_students if score_obj else enrolled_students_count,
                 'semester': session.semester.number if session.semester else None,
                 'credits': session.course.credit_hours,
+                'assessment_status': session.assessment_status,
             })
 
         cf_score = round(sum(cf_scores) / len(cf_scores), 2) if cf_scores else None
@@ -1037,10 +1404,9 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
             'cf': float(cf_coverage) if cf_coverage is not None else None,
             'exit': float(exit_coverage) if exit_coverage is not None else None,
         }
-        if course_sessions.exists():
-            total_courses = course_sessions.count()
-            courses_with_ga = len(contributing_courses)
-            coverage['direct'] = round((courses_with_ga / total_courses) * 100, 2) if total_courses > 0 else None
+        if course_sessions:
+            total_courses = len(course_sessions)
+            coverage['direct'] = round((assessed_course_count / total_courses) * 100, 2) if total_courses > 0 else None
 
         ga_cqi_records = []
         semester_cqis = GACQIRecord.objects.filter(

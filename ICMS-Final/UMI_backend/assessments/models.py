@@ -54,6 +54,9 @@ class Assessment(models.Model):
     # 🔥 IMPORTANT (OBE FLOW)
     is_finalized = models.BooleanField(default=False)
     
+    # 🔥 RETAKE SUPPORT
+    course_retake = models.ForeignKey('retake.CourseRetake', on_delete=models.CASCADE, null=True, blank=True, related_name='assessments')
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
@@ -98,9 +101,12 @@ class StudentQuestionMark(models.Model):
     )
 
     marks_obtained = models.DecimalField(max_digits=6, decimal_places=2)
+    
+    # 🔥 RETAKE SUPPORT
+    course_retake = models.ForeignKey('retake.CourseRetake', on_delete=models.CASCADE, null=True, blank=True, related_name='student_question_marks')
 
     class Meta:
-        unique_together = ('student', 'question')
+        unique_together = ('student', 'question', 'course_retake')
 
     def __str__(self):
         return f"{self.student} - {self.question}"
@@ -124,6 +130,9 @@ class StudentAssessment(models.Model):
 
     marks_obtained = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    
+    # 🔥 RETAKE SUPPORT
+    course_retake = models.ForeignKey('retake.CourseRetake', on_delete=models.CASCADE, null=True, blank=True, related_name='student_assessments')
 
     def save(self, *args, **kwargs):
         total = self.assessment.total_marks
@@ -259,6 +268,7 @@ class CQI(models.Model):
     )
 
     coordinator_comment = models.TextField(null=True, blank=True)
+    hod_comment = models.TextField(null=True, blank=True)
     show_next_offering = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

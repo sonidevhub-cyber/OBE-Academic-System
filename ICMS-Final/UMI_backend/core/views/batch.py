@@ -62,7 +62,7 @@ class BatchDetailView(generics.RetrieveUpdateAPIView):
                 pass
         
         self.perform_update(serializer)
-        return Response(BatchListSerializer(instance).data, status=status.HTTP_200_OK)
+        return Response(BatchListSerializer(instance, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
 
 
 class BatchStudentListView(generics.ListAPIView):

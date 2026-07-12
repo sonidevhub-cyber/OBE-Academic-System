@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'ga_cqi_cohort',
     'teacher_alerts',
     'clo_master',
+    'retake.apps.RetakeConfig',
 
 ]
 

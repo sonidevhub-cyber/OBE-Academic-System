@@ -8,7 +8,8 @@ from core.models import Batch, Semester, Program
 from students.models import Student
 from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score, CourseFeedbackGAScore
 from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
-from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report
+from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions
+from retake.report_access_wrapper import get_ga_report_with_invalidation_check
 
 
 def ensure_exit_survey_questions_for_program(program, *, lock_questions=False):
@@ -716,24 +717,31 @@ class BatchGAReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get_readiness_for_cumulative_cohort(self, batch: Batch):
-        # Only consider courses where semester number <= batch's current semester AND in curriculum version (if any)
+        # Only consider one effective course session per course code so a retake
+        # or re-finalized course does not double count readiness.
         allowed_course_ids = []
         if batch.curriculum_version:
             allowed_course_ids = batch.curriculum_version.version_courses.filter(
                 is_active=True
             ).values_list('course_id', flat=True)
 
-        sessions_query = CourseSession.objects.filter(
-            batch=batch,
-            is_active=True,
-            semester__number__lte=batch.current_semester,
+        sessions = get_effective_course_sessions(
+            batch,
+            upto_semester=batch.current_semester,
+            require_assessment_done=False,
         )
         if allowed_course_ids:
-            sessions_query = sessions_query.filter(course_id__in=allowed_course_ids)
-        
-        sessions = sessions_query.select_related('course', 'instructor', 'semester')
-        courses_total = sessions.count()
-        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+            allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+            sessions = [
+                session for session in sessions
+                if str(session.course_id) in allowed_course_ids
+            ]
+
+        courses_total = len(sessions)
+        courses_assessment_done = sum(
+            1 for session in sessions
+            if session.assessment_status == 'ASSESSMENT_DONE'
+        )
 
         pending_courses_list = []
         finalized_courses_list = []
@@ -809,7 +817,7 @@ class BatchGAReportView(APIView):
         
         # Refresh indirect source tables first so the report can show real component percentages.
         from feedback.views import FeedbackService
-        from ..services import calculate_ga_report, calculate_exit_survey_ga_score
+        from ..services import calculate_exit_survey_ga_score
         FeedbackService.calculate(batch)
 
         # Calculate Exit Survey scores for all GAs before building the report
@@ -827,14 +835,16 @@ class BatchGAReportView(APIView):
                 allowed_course_ids = batch.curriculum_version.version_courses.filter(
                     is_active=True
                 ).values_list('course_id', flat=True)
-            cs_query = CourseSession.objects.filter(
-                batch=batch,
-                is_active=True,
-                assessment_status='ASSESSMENT_DONE'
+            course_sessions = get_effective_course_sessions(
+                batch,
+                require_assessment_done=False,
             )
             if allowed_course_ids:
-                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-            course_sessions = cs_query.select_related('course')
+                allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+                course_sessions = [
+                    session for session in course_sessions
+                    if str(session.course_id) in allowed_course_ids
+                ]
             session_ids = [cs.id for cs in course_sessions]
             
             # Get all mappings for these courses and GAs
@@ -953,14 +963,18 @@ class BatchGAReportView(APIView):
                 allowed_course_ids = batch.curriculum_version.version_courses.filter(
                     is_active=True
                 ).values_list('course_id', flat=True)
-            cs_query = CourseSession.objects.filter(
-                batch=batch,
-                is_active=True,
-                assessment_status='ASSESSMENT_DONE'
+            cs_query = get_effective_course_sessions(
+                batch,
+                upto_semester=batch.current_semester,
+                require_assessment_done=False,
             )
             if allowed_course_ids:
-                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-            course_sessions = cs_query.select_related('course', 'semester')
+                allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+                cs_query = [
+                    session for session in cs_query
+                    if str(session.course_id) in allowed_course_ids
+                ]
+            course_sessions = cs_query
             
             # Bulk fetch all CourseGAScores for these sessions and GAs
             course_session_ids = [cs.id for cs in course_sessions]
@@ -1040,7 +1054,7 @@ class BatchGAReportView(APIView):
             })
         
         # Get GA report using the updated calculation function
-        ga_report_rows = calculate_ga_report(batch)
+        ga_report_rows = get_ga_report_with_invalidation_check(batch)
         
         response_items = []
         for ga_row in ga_report_rows:
@@ -1057,39 +1071,49 @@ class BatchGAReportView(APIView):
                     is_active=True
                 ).values_list('course_id', flat=True)
 
-            cs_query = CourseSession.objects.filter(
-                batch=batch, 
-                is_active=True, 
-                assessment_status='ASSESSMENT_DONE', 
-                semester__number__lte=batch.current_semester
+            cs_query = get_effective_course_sessions(
+                batch,
+                upto_semester=batch.current_semester,
+                require_assessment_done=False,
             )
             if allowed_course_ids:
-                cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-                
+                allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+                cs_query = [
+                    session for session in cs_query
+                    if str(session.course_id) in allowed_course_ids
+                ]
+
+            enrolled_students_count = get_students_for_batch(batch).count()
             contributing_courses = []
-            for session in cs_query.select_related('course', 'semester'):
+            for session in cs_query:
                 score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
-                if score:
-                    # Get Course Feedback (Indirect) score for this course & GA & batch
-                    cf_score = None
-                    cf_score_obj = CourseFeedbackGAScore.objects.filter(
-                        course=session.course,
-                        ga=ga,
-                        batch=batch,
-                        is_active=True
-                    ).first()
-                    if cf_score_obj:
-                        cf_score = float(cf_score_obj.score)
-                        
-                    contributing_courses.append({
-                        'course_code': session.course.code,
-                        'course_name': session.course.name,
-                        'course_ga_score': float(score.score),  # Direct score
-                        'course_feedback_score': cf_score,  # Indirect (CF) score for this course
-                        'enrolled_students': score.enrolled_students,
-                        'semester': session.semester.number if session.semester else None,
-                        'credits': session.course.credit_hours,
-                    })
+                # Keep the course visible even if it has not been finalized yet.
+                course_ga_score = float(score.score) if score else 0.0
+                enrolled_students = score.enrolled_students if score else enrolled_students_count
+
+                # Get Course Feedback (Indirect) score for this course & GA & batch.
+                # If the course has not been finalized yet, expose a zero placeholder
+                # so the UI can still render the row.
+                cf_score = 0.0
+                cf_score_obj = CourseFeedbackGAScore.objects.filter(
+                    course=session.course,
+                    ga=ga,
+                    batch=batch,
+                    is_active=True
+                ).first()
+                if cf_score_obj and cf_score_obj.score is not None:
+                    cf_score = float(cf_score_obj.score)
+
+                contributing_courses.append({
+                    'course_code': session.course.code,
+                    'course_name': session.course.name,
+                    'course_ga_score': course_ga_score,
+                    'course_feedback_score': cf_score,
+                    'enrolled_students': enrolled_students,
+                    'semester': session.semester.number if session.semester else None,
+                    'credits': session.course.credit_hours,
+                    'assessment_status': session.assessment_status,
+                })
 
             # GA CQI records: cohort only, and only if program end is ready
             ga_cqi_records = []

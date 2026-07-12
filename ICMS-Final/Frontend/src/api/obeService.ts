@@ -714,31 +714,45 @@ class OBEService {
     programId: string,
     semesterId: string,
     batchId?: string,
-    format?: 'json'
+    format?: 'json',
+    forceRefresh?: boolean
   ): Promise<CLOMasterCompilationResponse>;
   async getCLOMasterCompilation(
     programId: string,
     semesterId: string,
     batchId?: string,
-    format?: 'xlsx'
+    format?: 'xlsx',
+    forceRefresh?: boolean
   ): Promise<Blob>;
   async getCLOMasterCompilation(
     programId: string,
     semesterId: string,
     batchId?: string,
-    format?: 'json' | 'xlsx'
+    format?: 'json' | 'xlsx',
+    forceRefresh?: boolean
   ): Promise<CLOMasterCompilationResponse | Blob> {
     const params: Record<string, any> = {};
     if (batchId) params['batch_id'] = batchId;
+    if (forceRefresh) params['refresh'] = '1';
     if (format === 'xlsx') {
-      params['format'] = 'xlsx';
-      const response = await api.get(`clo-master/report/${programId}/${semesterId}/`, {
+      const response = await api.get(`clo-master/report/${programId}/${semesterId}/export/`, {
         params,
         responseType: 'blob'
       });
       return response.data;
     }
     const response = await api.get(`clo-master/report/${programId}/${semesterId}/`, { params });
+    return response.data;
+  }
+
+  async recalculateRetakeReports(
+    batchId?: string,
+    semesterId?: string
+  ): Promise<{ message: string; processed_count: number }> {
+    const payload: Record<string, string> = {};
+    if (batchId) payload.batch_id = batchId;
+    if (semesterId) payload.semester_id = semesterId;
+    const response = await api.post('/retakes/recalculate-reports/', payload);
     return response.data;
   }
 

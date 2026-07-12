@@ -35,6 +35,7 @@ import HODPEOCQI from './views/pages/HODPEOCQI';
 import CoordinatorExitSurveySetup from './views/modules/coordinator/CoordinatorExitSurveySetup';
 import StudentExitSurvey from './views/modules/student/StudentExitSurvey';
 import SACExitSurveyDashboard from './views/modules/sac/SACExitSurveyDashboard';
+import RetakeResultEntryPage from './views/pages/RetakeResultEntryPage';
 
 const Dashboard = () => <AdminDashboard />;
 
@@ -104,6 +105,8 @@ const AppRoutes: React.FC = () => {
       <Route element={<ProtectedRoute allowedRoles={['instructor']} />}>
         <Route path="/teacher" element={<ModularInstructorDashboard />} />
         <Route path="/instructor-dashboard" element={<ModularInstructorDashboard />} />
+        <Route path="/teacher/assessment" element={<RetakeResultEntryPage />} />
+        <Route path="/teacher/retakes/:retakeId/results" element={<RetakeResultEntryPage />} />
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['coordinator']} />}>

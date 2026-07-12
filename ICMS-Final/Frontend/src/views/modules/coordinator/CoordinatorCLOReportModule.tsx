@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FileBarChart, ArrowLeft, Download, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileBarChart, ArrowLeft, Download, RotateCw, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import obeService, {
   CLOMasterCompilationResponse,
   CLOMasterCompilationCourse,
@@ -83,28 +83,59 @@ const CoordinatorCLOReportModule: React.FC = () => {
         return true;
       });
 
-  // Fetch report when selections change
-  useEffect(() => {
+  const loadReport = async (forceRefresh = false) => {
     if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) return;
 
-    const fetchReport = async () => {
-      setLoading(true);
-      try {
-        const data = await obeService.getCLOMasterCompilation(
-          selectedProgramId,
-          selectedSemesterId,
-          selectedBatchId
-        );
-        setReport(data as CLOMasterCompilationResponse);
-      } catch (error) {
-        console.error(error);
-        toast.error('Failed to load CLO Master Compilation');
-      } finally {
-        setLoading(false);
+    setLoading(!report);
+    try {
+      const data = await obeService.getCLOMasterCompilation(
+        selectedProgramId,
+        selectedSemesterId,
+        selectedBatchId,
+        'json',
+        forceRefresh
+      );
+      setReport(data as CLOMasterCompilationResponse);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to load CLO Master Compilation');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch report when selections change
+  useEffect(() => {
+    loadReport(false);
+  }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
+
+  useEffect(() => {
+    if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadReport(false);
+    }, 30000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void loadReport(false);
       }
     };
 
-    fetchReport();
+    const handleFocus = () => {
+      void loadReport(false);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
   // Handle export to Excel
@@ -133,6 +164,26 @@ const CoordinatorCLOReportModule: React.FC = () => {
     }
   };
 
+  const handleRefresh = () => {
+    if (!selectedBatchId || !selectedSemesterId) return;
+
+    const runRefresh = async () => {
+      try {
+        setLoading(true);
+        await obeService.recalculateRetakeReports(selectedBatchId, selectedSemesterId);
+        await loadReport(true);
+        toast.success('Retake reports refreshed');
+      } catch (error) {
+        console.error(error);
+        toast.error('Failed to refresh retake reports');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void runRefresh();
+  };
+
   return (
     <div className="space-y-6 w-full">
       {/* Header */}
@@ -147,15 +198,24 @@ const CoordinatorCLOReportModule: React.FC = () => {
               Semester-level live append of CLO attainment
             </p>
           </div>
-          {report && (
+          <div className="flex items-center gap-3">
             <button
-              onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
+              onClick={handleRefresh}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition"
             >
-              <Download className="w-4 h-4" />
-              Export to Excel
+              <RotateCw className="w-4 h-4" />
+              Refresh
             </button>
-          )}
+            {report && (
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
+              >
+                <Download className="w-4 h-4" />
+                Export to Excel
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Selection Area */}

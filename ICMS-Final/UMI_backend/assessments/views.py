@@ -57,6 +57,13 @@ class CreateAssessmentView(APIView):
 
         data = serializer.validated_data
         questions = data.get('questions', [])
+        
+        # ✅ RETAKE ID (optional)
+        retake_id = request.data.get('retake_id')
+        course_retake = None
+        if retake_id:
+            from retake.models import CourseRetake
+            course_retake = CourseRetake.objects.get(id=retake_id)
 
         # ✅ EMPTY CHECK
         if not questions:
@@ -79,33 +86,47 @@ class CreateAssessmentView(APIView):
         # ✅ SEMESTER AUTO
         try:
             semester = Semester.objects.get(
-                name=f"Semester {batch.current_semester}"
+                program=batch.program,
+                number=batch.current_semester
             )
         except Semester.DoesNotExist:
             return Response({"error": "Semester not found"}, status=400)
 
-        # ✅ CHECK IF FINAL IS ALREADY FINALIZED
-        if Assessment.objects.filter(
+        # ✅ CHECK IF FINAL IS ALREADY FINALIZED (for retake and non-retake)
+        final_check_query = Assessment.objects.filter(
             course_id=data['course'],
-            batch=batch,
-            semester=semester,
             assessment_type='final',
             is_finalized=True
-        ).exists():
+        )
+        if course_retake:
+            final_check_query = final_check_query.filter(course_retake=course_retake)
+        else:
+            final_check_query = final_check_query.filter(
+                batch=batch,
+                semester=semester
+            )
+            
+        if final_check_query.exists():
             return Response({"error": "Final exam already submitted, no more assessments allowed"}, status=400)
 
-        # ✅ DUPLICATE CHECK
+        # ✅ DUPLICATE CHECK (for retake and non-retake)
         if data['type'] in ['midterm', 'final']:
-
-             if Assessment.objects.filter(
-        course_id=data['course'],
-        batch=batch,
-        semester=semester,
-        assessment_type=data['type']
-    ).exists():
-               return Response({
-            "error": f"{data['type']} already exists"
-        }, status=400)
+            duplicate_check_query = Assessment.objects.filter(
+                course_id=data['course'],
+                assessment_type=data['type']
+            )
+            if course_retake:
+                duplicate_check_query = duplicate_check_query.filter(course_retake=course_retake)
+            else:
+                duplicate_check_query = duplicate_check_query.filter(
+                    batch=batch,
+                    semester=semester
+                )
+                
+            if duplicate_check_query.exists():
+                return Response({
+                    "error": f"{data['type']} already exists"
+                }, status=400)
     
         # ✅ CLO VALIDATION: get CLOs for the course and the batch's curriculum version (if any)
         from django.db.models import Q
@@ -132,7 +153,8 @@ class CreateAssessmentView(APIView):
             title=data['title'],
             assessment_type=data['type'],
             total_marks=data['total_marks'],
-            assessment_date=data['date']
+            assessment_date=data['date'],
+            course_retake=course_retake
         )
 
         # ✅ CREATE QUESTIONS
@@ -147,15 +169,18 @@ class CreateAssessmentView(APIView):
             for q in questions
         ])
 
-        # ✅ STUDENTS
-        students = Student.objects.filter(
-            user__batch=batch,
-            # status='enrolled'
-        )
+        # ✅ STUDENTS (only retake student if course_retake exists)
+        if course_retake:
+            students = [course_retake.student]
+        else:
+            students = Student.objects.filter(
+                user__batch=batch,
+                # status='enrolled'
+            )
 
-        if not students.exists():
+        if not students:
             return Response({
-                "error": "No enrolled students found"
+                "error": "No students found"
             }, status=400)
 
         # ✅ STUDENT TOTAL RECORD
@@ -163,7 +188,8 @@ class CreateAssessmentView(APIView):
             StudentAssessment(
                 student=s,
                 assessment=assessment,
-                marks_obtained=0
+                marks_obtained=0,
+                course_retake=course_retake
             )
             for s in students
         ])
@@ -173,7 +199,8 @@ class CreateAssessmentView(APIView):
             StudentQuestionMark(
                 student=s,
                 question=q,
-                marks_obtained=0
+                marks_obtained=0,
+                course_retake=course_retake
             )
             for s in students
             for q in questions_objs
@@ -193,8 +220,9 @@ class CreateAssessmentView(APIView):
 from assessments.services.clo_service import CLOService
 from obe.views.ga_views import mark_existing_sessions_as_done
 from obe.services import calculate_all_course_ga_scores, check_and_trigger_ga_cqi
-from obe.models import CourseSession
+from obe.models import CourseSession, GA
 from assessments.models import CLOAttainment
+from retake.invalidation_service import sync_retake_reports_from_assessment
 
 class EnterMarksView(APIView):
     permission_classes = [IsAuthenticated]
@@ -228,27 +256,42 @@ class EnterMarksView(APIView):
                     "error": "Marks already finalized. Admin must enable editing."
                 }, status=400)
 
-        # ✅ Step 4: Marks save karo
+        # ✅ Step 3: Marks save karo
         for entry in data:
             StudentQuestionMark.objects.update_or_create(
                 student_id=entry['student_id'],
                 question_id=entry['question_id'],
+                course_retake=assessment.course_retake,
                 defaults={'marks_obtained': entry['marks']}
             )
 
         # ✅ Step 5: Total marks update karo
-        students = Student.objects.filter(user__batch=assessment.batch)
+        if assessment.course_retake:
+            students = [assessment.course_retake.student]
+        else:
+            students = Student.objects.filter(user__batch=assessment.batch)
 
         for s in students:
-            total = StudentQuestionMark.objects.filter(
+            query = StudentQuestionMark.objects.filter(
                 student=s,
                 question__assessment=assessment
-            ).aggregate(total=Sum('marks_obtained'))['total'] or 0
+            )
+            if assessment.course_retake:
+                query = query.filter(course_retake=assessment.course_retake)
+                
+            total = query.aggregate(total=Sum('marks_obtained'))['total'] or 0
 
-            StudentAssessment.objects.filter(
+            student_assessment_query = StudentAssessment.objects.filter(
                 student=s,
                 assessment=assessment
-            ).update(marks_obtained=total)
+            )
+            if assessment.course_retake:
+                student_assessment_query = student_assessment_query.filter(course_retake=assessment.course_retake)
+            
+            student_assessment = student_assessment_query.first()
+            if student_assessment:
+                student_assessment.marks_obtained = total
+                student_assessment.save(update_fields=["marks_obtained", "percentage"])
 
         # ✅ Step 6: Assessment finalize karo
         assessment.is_finalized = True
@@ -259,89 +302,107 @@ class EnterMarksView(APIView):
             course_session.allow_result_editing = False
             course_session.save()
 
-        # ✅ Step 8: Check karo sab assessments finalize hue ya nahi
-        all_assessments = Assessment.objects.filter(
-            course_id=assessment.course_id,
-            batch=assessment.batch,
-            semester=assessment.semester
-        )
-        all_finalized = all(a.is_finalized for a in all_assessments)
+        # ✅ Step 8: Check if this is a retake assessment OR it's a normal final assessment (case-insensitive)
+        is_retake_assessment = assessment.course_retake is not None
+        is_normal_final_assessment = assessment.assessment_type.strip().lower() == "final" and assessment.course_retake is None
 
-        is_course_session_finalized = all_finalized
+        is_course_session_finalized = is_normal_final_assessment
         has_weak_clo = False  # default
 
-        if is_course_session_finalized:
-            print(f"[EnterMarksView] All assessments finalized for course {assessment.course_id}, "
+        # If it's a retake assessment OR it's a normal final assessment, recalculate everything
+        if is_course_session_finalized or is_retake_assessment:
+            print(f"[EnterMarksView] Recalculating because {'it\'s a retake' if is_retake_assessment else 'all normal assessments are finalized'} for course {assessment.course_id}, "
                   f"batch {assessment.batch_id}, semester {assessment.semester_id}")
 
-            # ✅ Step 9: CLO report generate karo
-            CLOService.generate_student_report(
-                course_id=assessment.course_id,
-                batch_id=assessment.batch_id,
-                semester_id=assessment.semester_id
-            )
+            if is_retake_assessment:
+                # ✅ For retake: Use the existing sync function that handles CourseRetake update
+                print(f"[EnterMarksView] Using sync_retake_reports_from_assessment for retake")
+                processed_retake = sync_retake_reports_from_assessment(assessment)
+                print(f"[EnterMarksView] Processed retake: {processed_retake.id if processed_retake else None}")
 
-            # ✅ Step 10: Weak CLOs check karo
-            weak_clos = CLOAttainment.objects.filter(
-                course=assessment.course,
-                batch=assessment.batch,
-                semester=assessment.semester,
-                is_achieved=False
-            )
-            has_weak_clo = weak_clos.exists()
+                # Weak CLOs check
+                weak_clos = CLOAttainment.objects.filter(
+                    course=assessment.course,
+                    batch=assessment.batch,
+                    semester=assessment.semester,
+                    is_achieved=False
+                )
+                has_weak_clo = weak_clos.exists()
+            else:
+                # ✅ Step 9: CLO report generate karo
+                CLOService.generate_student_report(
+                    course_id=assessment.course_id,
+                    batch_id=assessment.batch_id,
+                    semester_id=assessment.semester_id
+                )
 
-            # ✅ Step 11: CourseSession update karo
-            course_session, created = CourseSession.objects.update_or_create(
-                course_id=assessment.course_id,
-                batch_id=assessment.batch_id,
-                semester_id=assessment.semester_id,
-                defaults={
-                    'instructor': assessment.instructor,
-                    'is_active': True,
-                    'assessment_done': True,
-                    'assessment_status': "ASSESSMENT_DONE"
-                }
-            )
-            print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: "
-                  f"{course_session.id} - status set to ASSESSMENT_DONE")
+                # ✅ Step 10: Weak CLOs check karo
+                weak_clos = CLOAttainment.objects.filter(
+                    course=assessment.course,
+                    batch=assessment.batch,
+                    semester=assessment.semester,
+                    is_achieved=False
+                )
+                has_weak_clo = weak_clos.exists()
 
-            # ✅ Step 12: GA scores calculate karo
-            calculate_all_course_ga_scores(course_session)
+                # ✅ Step 11: Get or create CourseSession first (without finalizing yet)
+                course_session, created = CourseSession.objects.update_or_create(
+                    course_id=assessment.course_id,
+                    batch_id=assessment.batch_id,
+                    semester_id=assessment.semester_id,
+                    defaults={
+                        'instructor': assessment.instructor,
+                        'is_active': True
+                    }
+                )
+                
+                # ✅ Step 12: Calculate GA scores (which creates StudentCLOScore records) FIRST!
+                calculate_all_course_ga_scores(course_session)
+                
+                print(f"[EnterMarksView] Calculated GA scores for CourseSession: {course_session.id}")
+                
+                # ✅ Step 13: Now set CourseSession to ASSESSMENT_DONE and save to trigger signals!
+                course_session.assessment_done = True
+                course_session.assessment_status = "ASSESSMENT_DONE"
+                course_session.save()
+                
+                print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: "
+                      f"{course_session.id} - status set to ASSESSMENT_DONE")
 
-            # ✅ Step 13: Existing sessions mark as done
-            mark_existing_sessions_as_done(assessment.batch, assessment.semester)
+                # ✅ Step 13: Existing sessions mark as done
+                mark_existing_sessions_as_done(assessment.batch, assessment.semester)
 
-            # ✅ Step 14: Semester-level CQI check
-            all_sessions_in_semester = CourseSession.objects.filter(
-                batch=assessment.batch,
-                semester=assessment.semester,
-                is_active=True
-            )
-            done_sessions_in_semester = all_sessions_in_semester.filter(
-                assessment_status='ASSESSMENT_DONE'
-            )
-
-            if (
-                all_sessions_in_semester.exists() and
-                all_sessions_in_semester.count() == done_sessions_in_semester.count()
-            ):
-                gas = GA.objects.filter(
-                    program=assessment.batch.program,
+                # ✅ Step 14: Semester-level CQI check
+                all_sessions_in_semester = CourseSession.objects.filter(
+                    batch=assessment.batch,
+                    semester=assessment.semester,
                     is_active=True
                 )
-                for ga in gas:
-                    check_and_trigger_ga_cqi(
-                        assessment.batch, ga, 'SEMESTER', assessment.semester.number
+                done_sessions_in_semester = all_sessions_in_semester.filter(
+                    assessment_status='ASSESSMENT_DONE'
+                )
+
+                if (
+                    all_sessions_in_semester.exists() and
+                    all_sessions_in_semester.count() == done_sessions_in_semester.count()
+                ):
+                    gas = GA.objects.filter(
+                        program=assessment.batch.program,
+                        is_active=True
                     )
+                    for ga in gas:
+                        check_and_trigger_ga_cqi(
+                            assessment.batch, ga, 'SEMESTER', assessment.semester.number
+                        )
 
-            # ✅ Step 15: Cumulative-level CQI check
-            if assessment.batch.is_program_end_ready:
-                gas = GA.objects.filter(
-                    program=assessment.batch.program,
-                    is_active=True
-                )
-                for ga in gas:
-                    check_and_trigger_ga_cqi(assessment.batch, ga, 'CUMULATIVE')
+                # ✅ Step 15: Cumulative-level CQI check
+                if assessment.batch.is_program_end_ready:
+                    gas = GA.objects.filter(
+                        program=assessment.batch.program,
+                        is_active=True
+                    )
+                    for ga in gas:
+                        check_and_trigger_ga_cqi(assessment.batch, ga, 'CUMULATIVE')
 
         return Response({
             "message": "Marks saved and finalized",
@@ -539,7 +600,12 @@ class UpdateCQIStatusView(APIView):
         # Update status
         cqi.status = status
         cqi.reviewed_by = request.user
-        cqi.coordinator_comment = request.data.get("coordinator_comment", "")
+        
+        # Accept both coordinator_comment and hod_comment for backwards compatibility
+        if "coordinator_comment" in request.data:
+            cqi.coordinator_comment = request.data.get("coordinator_comment", "")
+        if "hod_comment" in request.data:
+            cqi.hod_comment = request.data.get("hod_comment", "")
 
         # ✅ If Coordinator approves
         if status == "approved":
@@ -554,6 +620,35 @@ class UpdateCQIStatusView(APIView):
         return Response({
             "message": f"CQI {status} successfully"
         })
+
+
+class HODCQIListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Get all CQI records
+        cqis = CQI.objects.select_related(
+            'course', 'batch', 'semester', 'clo', 'instructor'
+        ).order_by('-created_at')
+
+        data = []
+        for cqi in cqis:
+            clo_display = f"CLO-{cqi.clo.order_number}: {cqi.clo.description}" if cqi.clo else "Unknown CLO"
+            instructor_name = cqi.instructor.full_name if hasattr(cqi.instructor, 'full_name') else cqi.instructor.username
+            data.append({
+                "id": cqi.id,
+                "clo_display": clo_display,
+                "status": cqi.status,
+                "instructor_name": instructor_name,
+                "reason": cqi.reason,
+                "action_plan": cqi.action_plan,
+                "hod_comment": cqi.hod_comment,
+                "coordinator_comment": cqi.coordinator_comment,
+                "created_at": cqi.created_at,
+                "updated_at": cqi.updated_at
+            })
+
+        return Response(data)
 import uuid
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -883,36 +978,63 @@ class AssessmentHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        from core.models import Course, Semester
+        from retake.models import CourseRetake
 
-        course = request.GET.get("course")
-        batch = request.GET.get("batch")
-        semester = request.GET.get("semester")
+        course_id = request.GET.get("course")
+        batch_id = request.GET.get("batch")
+        semester_number = request.GET.get("semester")
+        retake_id = request.GET.get("retake_id")
+        
+        logger.info(f"[AssessmentHistoryView] Called with course_id: {course_id}, batch_id: {batch_id}, semester_number: {semester_number}, retake_id: {retake_id}")
 
-        assessments = Assessment.objects.filter(
-            course_id=course,
-            batch_id=batch,
-            semester_id=semester,
-            is_finalized=True
-        ).order_by("-created_at")
+        assessments_query = Assessment.objects.all()
+
+        if retake_id:
+            # If retake_id is provided, filter for that specific retake
+            logger.info(f"[AssessmentHistoryView] Filtering by retake_id: {retake_id}")
+            try:
+                retake = CourseRetake.objects.get(id=retake_id)
+                logger.info(f"[AssessmentHistoryView] Found retake: {retake.id}")
+                assessments_query = Assessment.objects.filter(
+                    course_retake=retake
+                ).order_by("-created_at")
+                logger.info(f"[AssessmentHistoryView] Found {assessments_query.count()} assessments for retake")
+            except CourseRetake.DoesNotExist:
+                logger.warning(f"[AssessmentHistoryView] Retake {retake_id} not found, returning none")
+                assessments_query = Assessment.objects.none()
+        else:
+            # Normal case: filter by course, batch, semester, no retake
+            # Get course to get program
+            logger.info(f"[AssessmentHistoryView] Normal case, no retake")
+            course = Course.objects.get(id=course_id)
+            
+            # Get semester by program and number
+            semester = Semester.objects.get(program=course.program, number=semester_number)
+
+            assessments_query = Assessment.objects.filter(
+                course_id=course_id,
+                batch_id=batch_id,
+                semester=semester,
+                course_retake__isnull=True
+            ).order_by("-created_at")
 
         data = []
 
-        for ass in assessments:
-
+        for ass in assessments_query:
             data.append({
-
                 "id": ass.id,
-
                 "title": ass.title,
-
                 "type": ass.assessment_type,
-
                 "date": ass.assessment_date,
-
                 "total_marks": ass.total_marks,
-
+                "is_finalized": ass.is_finalized,
             })
-
+        
+        logger.info(f"[AssessmentHistoryView] Returning {len(data)} assessments")
         return Response(data)
 from decimal import Decimal
 
@@ -949,9 +1071,12 @@ class AssessmentMarksView(APIView):
 
         ).first()
 
-        students = Student.objects.filter(
-            user__batch=assessment.batch
-        )
+        if assessment.course_retake:
+            students = [assessment.course_retake.student]
+        else:
+            students = Student.objects.filter(
+                user__batch=assessment.batch
+            )
 
         questions = Question.objects.filter(
             assessment=assessment
@@ -974,14 +1099,13 @@ class AssessmentMarksView(APIView):
             total = Decimal("0")
 
             for q in questions:
-
-                mark = StudentQuestionMark.objects.filter(
-
+                mark_query = StudentQuestionMark.objects.filter(
                     student=student,
-
                     question=q
-
-                ).first()
+                )
+                if assessment.course_retake:
+                    mark_query = mark_query.filter(course_retake=assessment.course_retake)
+                mark = mark_query.first()
 
                 obtained = mark.marks_obtained if mark else 0
 

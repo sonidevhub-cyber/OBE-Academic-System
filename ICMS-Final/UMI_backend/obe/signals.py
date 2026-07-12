@@ -2,6 +2,7 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.db import transaction
+from django.db import models
 from django.utils import timezone
 from decimal import Decimal
 
@@ -50,12 +51,8 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
         master_cache.total_courses_expected = sessions_query.count()
         master_cache.save()
 
-        # Deactivate any existing entries for students that are enrolled in this course's program
-        # Wait, actually better to just recompute for all students in the batch
-        # But to avoid full recompute every time, let's only process students in this session?
-        # Or, since GA is cumulative, when any course session is updated, we need to recompute all students?
-        # Let's do that. Let's deactivate all existing entries for this cache and rebuild them.
-        StudentGAEntry.objects.filter(master_cache=master_cache).update(is_active=False)
+        # Delete all existing entries for this master cache to avoid unique constraint violations
+        StudentGAEntry.objects.filter(master_cache=master_cache).delete()
 
         # Get all students or alumni in batch
         student_objs = Student.objects.filter(
@@ -151,4 +148,5 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
         master_cache.is_fully_compiled = (
             master_cache.total_courses_finalized >= master_cache.total_courses_expected
         )
+        master_cache.needs_recalculation = False
         master_cache.save()

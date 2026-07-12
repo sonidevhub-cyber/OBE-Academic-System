@@ -463,6 +463,14 @@ class CourseSession(models.Model):
 
     def __str__(self): 
         return f"{self.course} - {self.batch} ({self.instructor})"
+    
+    def save(self, *args, **kwargs):
+        # Keep assessment_done and assessment_status in sync!
+        if self.assessment_done:
+            self.assessment_status = "ASSESSMENT_DONE"
+        if self.assessment_status == "ASSESSMENT_DONE":
+            self.assessment_done = True
+        super().save(*args, **kwargs)
 
 
 class CourseGAScore(models.Model):
@@ -548,6 +556,7 @@ class GACQIRecord(models.Model):
     )
     is_audit_visible = models.BooleanField(default=True)
     is_locked = models.BooleanField(default=False)
+    needs_recalculation = models.BooleanField(default=False)
     # NEW fields for GA-CQI Cohort
     issue_statement = models.TextField(blank=True, null=True)
     hod_action_plan = models.TextField(blank=True, null=True)
@@ -827,6 +836,7 @@ class GAReport(models.Model):
     breakdown = models.JSONField(null=True, blank=True)
     coverage = models.JSONField(null=True, blank=True)
     is_locked = models.BooleanField(default=False)
+    needs_recalculation = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -927,6 +937,7 @@ class GAMasterCache(models.Model):
     total_courses_finalized = models.IntegerField(default=0)
     last_updated = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
+    needs_recalculation = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('batch',)

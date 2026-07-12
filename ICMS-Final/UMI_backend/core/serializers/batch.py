@@ -13,9 +13,18 @@ class BatchCreateSerializer(serializers.ModelSerializer):
         model = Batch
         fields = ['name', 'start_year', 'end_year', 'session_type', 'program_id', 'curriculum_version_id']
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # If this is an update (instance exists), make start_year, end_year, session_type read-only
+        if self.instance is not None:
+            for field_name in ['start_year', 'end_year', 'session_type']:
+                self.fields[field_name].read_only = True
+
     def validate(self, attrs):
-        if attrs['end_year'] <= attrs['start_year']:
-            raise serializers.ValidationError('End year must be greater than start year')
+        # Check if both start_year and end_year are provided before validating
+        if 'start_year' in attrs and 'end_year' in attrs:
+            if attrs['end_year'] <= attrs['start_year']:
+                raise serializers.ValidationError('End year must be greater than start year')
         return attrs
 
     def create(self, validated_data):

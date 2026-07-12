@@ -97,7 +97,13 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   });
   
   const [showEditBatchForm, setShowEditBatchForm] = useState(false);
-  const [editBatchForm, setEditBatchForm] = useState<{ curriculum_version_id?: number }>({});
+  const [editBatchForm, setEditBatchForm] = useState<{ 
+    curriculum_version_id?: number;
+    name?: string;
+    start_year?: number;
+    end_year?: number;
+    session_type?: 'fall' | 'spring';
+  }>({});
   
 
   // Fetch Programs
@@ -262,13 +268,25 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   
   const handleEditBatch = (batch: Batch) => {
     setEditingBatch(batch);
-    setEditBatchForm({ curriculum_version_id: undefined });
+    setEditBatchForm({ 
+      curriculum_version_id: batch.curriculum_version_id,
+      name: batch.name,
+      start_year: batch.start_year,
+      end_year: batch.end_year,
+    });
     setShowEditBatchForm(true);
   };
   
   const handleUpdateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProgram || !editingBatch) return;
+    
+    // Validate end year > start year if both provided
+    if (editBatchForm.end_year && editBatchForm.start_year && editBatchForm.end_year <= editBatchForm.start_year) {
+      setError('End year must be greater than start year');
+      return;
+    }
+    
     setSubmitting(true);
     try {
       await batchService.updateBatch(selectedProgram.id, editingBatch.id, editBatchForm);
@@ -564,11 +582,39 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                       <h3 className="text-lg font-bold text-gray-800 mb-4">Edit Batch: {editingBatch?.name}</h3>
                       <form onSubmit={handleUpdateBatch} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1 md:col-span-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Batch Name</label>
+                          <input 
+                            type="text"
+                            value={editBatchForm.name || ''}
+                            onChange={e => setEditBatchForm({...editBatchForm, name: e.target.value})}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-purple-500"
+                            placeholder="e.g. BSCS-2022"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Start Year (Read Only)</label>
+                          <input 
+                            type="number"
+                            value={editBatchForm.start_year || ''}
+                            disabled
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-500 outline-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">End Year (Read Only)</label>
+                          <input 
+                            type="number"
+                            value={editBatchForm.end_year || ''}
+                            disabled
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-500 outline-none"
+                          />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
                           <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Update Master Curriculum</label>
                           <select
                             value={editBatchForm.curriculum_version_id || ''}
                             onChange={e => setEditBatchForm({...editBatchForm, curriculum_version_id: e.target.value ? parseInt(e.target.value) : undefined})}
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-purple-500"
                           >
                             <option value="">Do Not Use Master Curriculum</option>
                             {masterCurricula
