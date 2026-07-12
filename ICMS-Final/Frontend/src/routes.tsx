@@ -22,6 +22,7 @@ import TeacherManagement from './views/pages/TeacherManagement';
 import CurriculumVersionDetailPage from './views/modules/curriculum/CurriculumVersionDetailPage';
 import GAReport from './pages/GAReport';
 import PEOReport from './pages/PEOReport';
+import PEOReportDashboard from './features/peoReport/PEOReportDashboard';
 import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
 import { AlumniDashboard, AlumniSurvey } from './pages/alumni';
@@ -132,6 +133,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/sac/students/pending-transfers" element={<PendingTransfers />} />
         <Route path="/reports/ga-attainment" element={<GAReport />} />
         <Route path="/reports/peo-attainment" element={<PEOReport />} />
+        <Route path="/reports/peo-report/:programId/:year" element={<PEOReportDashboard />} />
         <Route path="/reports/student-obe" element={<StudentOBEList />} />
         <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
         <Route path="/sac/batches/:batchId/exit-survey-status" element={<SACExitSurveyDashboard />} />

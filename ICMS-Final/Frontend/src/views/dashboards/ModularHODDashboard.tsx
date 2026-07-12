@@ -24,8 +24,7 @@ import HODFeedbackControl from "../pages/HODFeedbackControl";
 import EnableResultEditing from "../pages/EnableResultEditing";
 import HODExitSurveyControl from "../pages/HODExitSurveyControl";
 import HODAlumniFeedbackControl from "../pages/HODAlumniFeedbackControl";
-import HODPEOCQI from "../pages/HODPEOCQI";
-import HODGACQIAdvisory from "../pages/HODGACQIAdvisory";
+import HODCQIAdvisoryExport from "../pages/HODCQIAdvisoryExport";
 
 import {
   LayoutDashboard,
@@ -109,7 +108,6 @@ const ModularHODDashboard: React.FC = () => {
     { id: "ga-report", label: "GA Reports", icon: FileBarChart },
     { id: "ga-cqi-advisory", label: "CQI Advisory Export", icon: ClipboardCheck },
     { id: "peo-report", label: "PEO Reports", icon: TrendingUp },
-    { id: "peo-cqi", label: "PEO CQI", icon: ClipboardCheck },
     { id: "obe-report", label: "OBE Report", icon: FileSpreadsheet },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "feedback", label: "Feedback", icon: MessageSquare },
@@ -279,13 +277,10 @@ const ModularHODDashboard: React.FC = () => {
         return <CoordinatorGAReportModule />;
 
       case 'ga-cqi-advisory':
-        return <HODGACQIAdvisory />;
+        return <HODCQIAdvisoryExport />;
 
       case 'peo-report':
         return <PEOReport />;
-
-      case 'peo-cqi':
-        return <HODPEOCQI />;
 
       case 'obe-report':
         return <OBEReportDashboard />;
