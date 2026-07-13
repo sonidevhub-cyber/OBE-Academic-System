@@ -259,8 +259,6 @@ const TeacherDashboard = () => {
   // Navigation tabs for instructor - limited access
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-    { id: 'schedule', label: 'My Classes', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { id: 'attendance', label: 'Mark Attendance', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
     { id: 'results', label: 'Upload Results', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
     { id: 'retakes', label: 'Assigned Retakes', icon: 'M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z' },
   ];
@@ -633,72 +631,6 @@ const TeacherDashboard = () => {
                       </div>
                     ))}
                   </div>
-                </div>
-              </motion.div>
-            )}
-
-            {activeTab === 'schedule' && (
-              <motion.div
-                key="schedule"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.3 }}
-                className="space-y-6"
-              >
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-800">My Allocated Courses</h2>
-                  <div className="flex items-center text-sm text-gray-500 bg-white px-3 py-1 rounded-full border border-gray-100 shadow-sm">
-                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    {instructorData.courses.length} Active Courses
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {instructorData.courses.length > 0 ? (
-                      instructorData.courses.map((course: any) => (
-                        <div key={course.course_id || course.id} className="bg-white rounded-2xl p-6 shadow-lg border border-gray-50 hover:shadow-xl transition-all duration-300 group">
-                          <div className="flex justify-between items-start mb-4">
-                            <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-600 transition-colors duration-300">
-                              <BookOpen className="h-6 w-6 text-indigo-600 group-hover:text-white transition-colors duration-300" />
-                            </div>
-                            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold uppercase tracking-wider">
-                              Active
-                            </span>
-                          </div>
-                          
-                          <h3 className="text-lg font-bold text-gray-900 mb-1">{course.course_name}</h3>
-                          <p className="text-sm font-medium text-indigo-600 mb-4">{course.course_code}</p>
-                          
-                          <div className="space-y-3 pt-4 border-t border-gray-50">
-                            <div className="flex items-center text-sm text-gray-600">
-                              <Users className="h-4 w-4 mr-3 text-gray-400" />
-                              <span>Batch: <span className="font-semibold text-gray-900">{course.batch_name}</span></span>
-                            </div>
-                            <div className="flex items-center text-sm text-gray-600">
-                              <Calendar className="h-4 w-4 mr-3 text-gray-400" />
-                              <span>Semester: <span className="font-semibold text-gray-900">{course.semester_no}</span></span>
-                            </div>
-                            <div className="flex items-center text-sm text-gray-600">
-                              <Clock className="h-4 w-4 mr-3 text-gray-400" />
-                              <span>Credits: <span className="font-semibold text-gray-900">{course.credit_hours} Cr. Hr</span></span>
-                            </div>
-                          </div>
-
-                          {renderGaWarnings(course)}
-
-                          <button className="w-full mt-6 py-2.5 bg-gray-50 text-gray-700 rounded-xl font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300">
-                            Manage Course
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                    <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-gray-100">
-                      <BookOpen className="h-16 w-16 text-gray-200 mx-auto mb-4" />
-                      <h3 className="text-xl font-bold text-gray-900">No Courses Allocated</h3>
-                      <p className="text-gray-500 mt-2">You haven't been assigned any courses for the current semester yet.</p>
-                    </div>
-                  )}
                 </div>
               </motion.div>
             )}

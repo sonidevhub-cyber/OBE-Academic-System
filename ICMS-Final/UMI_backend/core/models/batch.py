@@ -114,6 +114,10 @@ class Batch(models.Model):
 
     @property
     def is_program_end_ready(self):
+        # If already graduated, consider program end ready
+        if self.status == 'graduated':
+            return True
+        
         # Check if current_semester is equal to total_semesters of the program
         if self.current_semester != self.program.total_semesters:
             return False

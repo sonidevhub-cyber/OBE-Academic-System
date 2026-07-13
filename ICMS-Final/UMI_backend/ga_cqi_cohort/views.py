@@ -237,8 +237,7 @@ class GACQIAdvisoryExportPDFView(APIView):
             response['Content-Disposition'] = f'attachment; filename="ga-cqi-advisory-{batch.custom_id}.pdf"'
             return response
         except ImportError:
-            # Fallback if weasyprint not installed
-            return HttpResponse(
-                html_content, 
-                content_type='text/html'
+            return Response(
+                {'error': 'PDF generation is unavailable because WeasyPrint is not installed.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
             )

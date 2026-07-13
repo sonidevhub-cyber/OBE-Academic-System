@@ -17,12 +17,12 @@ import {
 type Box = { label: string; icon: React.ElementType; role: string };
 
 const boxes: Box[] = [
-  { label: "Admin Console", icon: AcademicCapIcon, role: "admin" },
-  { label: "Faculty Console", icon: UserGroupIcon, role: "faculty" },
+  { label: "SAC Console", icon: AcademicCapIcon, role: "SAC" },
+  { label: "HOD Console", icon: UserGroupIcon, role: "hod" },
   { label: "Coordinator Console", icon: UsersIcon, role: "coordinator" },
   { label: "Instructor Console", icon: ClipboardDocumentCheckIcon, role: "instructor" },
-  { label: "HOD Console", icon: GlobeAltIcon, role: "hod" },
   { label: "Student Console", icon: BuildingLibraryIcon, role: "student" },
+  { label: "Alumni Console", icon: GlobeAltIcon, role: "alumni" },
 ];
 
 export default function CUIPortalPage() {

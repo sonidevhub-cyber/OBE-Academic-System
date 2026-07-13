@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-
+import { toast } from 'react-hot-toast';
 import obeService, { Batch } from '../api/obeService';
 import PEOReportDashboard from '../features/peoReport/PEOReportDashboard';
-import { toast } from 'react-hot-toast';
 
 const PEOReport: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -12,11 +11,15 @@ const PEOReport: React.FC = () => {
   useEffect(() => {
     const fetchBatches = async () => {
       try {
-        const data = await obeService.getAlumniFeedbackBatches();
+        const data = await obeService.getAllBatches({ alumni_feedback: 'all' });
         setBatches(data);
+        
+        if (data.length > 0) {
+          setSelectedBatchId(data[0].id);
+        }
       } catch (error) {
-        console.error('Failed to fetch alumni batches:', error);
-        toast.error('Failed to load alumni batches');
+        console.error('Failed to fetch batches:', error);
+        toast.error('Failed to fetch batches');
       } finally {
         setLoading(false);
       }
@@ -28,24 +31,12 @@ const PEOReport: React.FC = () => {
   const alumniBatches = useMemo(
     () =>
       batches
-        .filter((batch) => batch.is_alumni_feedback_eligible || batch.status === 'graduated')
+        .filter((b) => b.status === 'graduated')
         .sort((a, b) => String(b.name || '').localeCompare(String(a.name || ''))),
     [batches]
   );
 
-  useEffect(() => {
-    if (alumniBatches.length === 0) {
-      setSelectedBatchId('');
-      return;
-    }
-
-    const stillAvailable = alumniBatches.some((batch) => batch.id === selectedBatchId);
-    if (!stillAvailable) {
-      setSelectedBatchId(alumniBatches[0].id);
-    }
-  }, [alumniBatches, selectedBatchId]);
-
-  const selectedBatch = alumniBatches.find((batch) => batch.id === selectedBatchId) || alumniBatches[0];
+  const selectedBatch = alumniBatches.find((b) => b.id === selectedBatchId) || alumniBatches[0];
   const programId = String(selectedBatch?.program?.id || '');
   const reportYear = useMemo(() => {
     const baseDate = selectedBatch?.graduated_at || selectedBatch?.alumni_feedback_enabled_at;
@@ -61,36 +52,23 @@ const PEOReport: React.FC = () => {
     );
   }
 
-  if (!selectedBatch || !programId) {
-    return (
-      <div className="mx-auto mt-10 max-w-3xl rounded-3xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
-        No alumni-eligible batch found yet.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.3em] text-blue-600">PEO Report</p>
-            <h1 className="mt-2 text-3xl font-black text-slate-900">Alumni batch report</h1>
-            <p className="mt-2 text-sm text-slate-500">
-              Select an alumni batch to view its real employment status, organization data, and CQI form.
-            </p>
-          </div>
-
-          <div className="min-w-[280px]">
-            <label className="mb-2 block text-xs font-black uppercase tracking-[0.2em] text-slate-400">
-              Alumni Batch
+      {/* Filters and Header */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <h2 className="text-2xl font-black text-gray-900 mb-6">PEO Attainment Report</h2>
+        <div className="grid gap-4 md:grid-cols-3">
+          {/* Batch Select */}
+          <div className="md:col-span-2">
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Alumni Batch
             </label>
             <select
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
               value={selectedBatchId}
               onChange={(e) => setSelectedBatchId(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-400 focus:bg-white"
             >
-              <option value="">Select alumni batch</option>
+              <option value="">Select a batch</option>
               {alumniBatches.map((batch) => (
                 <option key={batch.id} value={batch.id}>
                   {batch.name}
@@ -98,15 +76,22 @@ const PEOReport: React.FC = () => {
               ))}
             </select>
           </div>
+
+          {/* Placeholder for future use (if needed) */}
+          <div className="flex items-end">
+          </div>
         </div>
       </div>
 
-      <PEOReportDashboard
-        programId={programId}
-        year={reportYear}
-        batchName={selectedBatch.name}
-        batchId={selectedBatch.id}
-      />
+      {/* Report Dashboard */}
+      {selectedBatch && programId && (
+        <PEOReportDashboard
+          programId={programId}
+          year={reportYear}
+          batchId={selectedBatch.id}
+          batchName={selectedBatch.name}
+        />
+      )}
     </div>
   );
 };

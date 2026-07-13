@@ -99,6 +99,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (enforceRole) {
         const hasPermission =
           response.user.role === enforceRole ||
+          (response.user.role === 'SAC' && ['admin', 'hod', 'coordinator', 'instructor'].includes(enforceRole)) ||
           (response.user.role === 'super_admin' && enforceRole === 'admin') ||
           (response.user.role === 'admin' && ['hod', 'coordinator', 'instructor'].includes(enforceRole)) ||
           (response.user.is_superuser && enforceRole === 'admin') ||
@@ -301,7 +302,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return aliasList.some((alias) => granted.has(alias));
   };
 
-  const isSAC = currentUser?.rbac_role === 'SAC';
+  const isSAC = currentUser?.rbac_role === 'SAC' || currentUser?.role === 'SAC';
 
   return (
     <AuthContext.Provider value={{

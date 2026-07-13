@@ -18,11 +18,12 @@ const Login = () => {
   // Role display mapping
   const roleDisplayNames: { [key: string]: string } = {
     admin: "Admin",
-    allumini: "Allumini",
+    SAC: "SAC",
+    hod: "HOD",
     coordinator: "Coordinator",
     instructor: "Instructor",
-    hod: "HOD",
-    student: "Student"
+    student: "Student",
+    alumni: "Alumni"
   };
   
   // Sync auth context error with local error state
