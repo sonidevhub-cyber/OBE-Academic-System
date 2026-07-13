@@ -31,6 +31,7 @@ import SacProgramSetup from '../pages/SacProgramSetup';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
+import PEOReport from '../../pages/PEOReport';
 import CoordinatorExitSurveySetup from '../modules/coordinator/CoordinatorExitSurveySetup';
 
 import { api } from '../../api/api';
@@ -51,6 +52,10 @@ const ModularCoordinatorDashboard: React.FC = () => {
   const [allCourses, setAllCourses] = useState<any[]>([]);
   const [filteredCourses, setFilteredCourses] = useState<any[]>([]);
   const [allocations, setAllocations] = useState<any[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    reports: true,
+    feedback: true,
+  });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -148,16 +153,34 @@ const ModularCoordinatorDashboard: React.FC = () => {
   const headerImageUrl = getProfileImageUrl(headerProfile);
   const headerName = (headerProfile?.full_name || headerProfile?.name || headerProfile?.username || 'Coordinator').trim();
 
-  const menuItems = [
+  const mainItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
-    { id: 'clo-reports', label: 'CLO Reports', icon: FileBarChart },
-    { id: 'ga-reports', label: 'GA Reports', icon: Award },
-    { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
     { id: 'instructors', label: 'Instructors', icon: Users },
     { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
-    { id: "feedback", label: "Feedback", icon: MessageSquare }
+  ];
+
+  const sidebarGroups = [
+    {
+      id: 'reports',
+      label: 'Reports',
+      icon: FileBarChart,
+      children: [
+        { id: 'clo-reports', label: 'CLO Reports', icon: FileBarChart },
+        { id: 'ga-reports', label: 'GA Reports', icon: Award },
+        { id: 'peo-report', label: 'PEO Report', icon: FileSpreadsheet },
+        { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      id: 'feedback',
+      label: 'Feedback',
+      icon: MessageSquare,
+      children: [
+        { id: 'feedback', label: 'Feedback', icon: MessageSquare },
+      ],
+    },
   ];
 
   const renderContent = () => {
@@ -217,6 +240,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <CoordinatorGAReportModule />;
       case 'obe-report':
         return <OBEReportDashboard />;
+      case 'peo-report':
+        return <PEOReport />;
       case 'instructors':
         return <TeacherManagement activeTab={activeTab} />;
       case 'programs':
@@ -247,7 +272,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
 
         <nav className="flex-1">
           <ul className="space-y-1">
-            {menuItems.map((item) => {
+            {mainItems.map((item) => {
               const Icon = item.icon;
               return (
                 <li key={item.id}>
@@ -269,6 +294,65 @@ const ModularCoordinatorDashboard: React.FC = () => {
               );
             })}
           </ul>
+
+          <div className="mt-4 space-y-2">
+            {sidebarGroups.map((group) => {
+              const GroupIcon = group.icon;
+              const isOpen = expandedGroups[group.id] ?? false;
+              const groupActive = group.children.some((child) => child.id === activeTab);
+
+              return (
+                <div key={group.id} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedGroups((prev) => ({
+                        ...prev,
+                        [group.id]: !prev[group.id],
+                      }))
+                    }
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-all duration-200 ${
+                      groupActive
+                        ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
+                        : 'text-green-100 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <span className="flex items-center">
+                      <GroupIcon className="h-4 w-4 mr-2" />
+                      <span className="flex-1 text-left font-semibold text-sm">{group.label}</span>
+                    </span>
+                    <span className="text-xs">{isOpen ? '−' : '+'}</span>
+                  </button>
+
+                  {isOpen && (
+                    <div className="ml-3 space-y-1 border-l border-white/10 pl-2">
+                      {group.children.map((item) => {
+                        const ItemIcon = item.icon;
+                        const isActive = activeTab === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              setActiveTab(item.id as TabId);
+                              setSelectedVersionId(null);
+                            }}
+                            className={`w-full flex items-center px-3 py-2 rounded-lg transition-all duration-200 ${
+                              isActive
+                                ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
+                                : 'text-green-100 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <ItemIcon className="h-4 w-4 mr-2" />
+                            <span className="flex-1 text-left font-semibold text-sm">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </nav>
 
         <div className="mt-6 pt-4 border-t border-white/10">

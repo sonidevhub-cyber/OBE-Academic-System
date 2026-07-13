@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import obeService from '../../api/obeService';
 import { toast } from 'react-hot-toast';
 
@@ -19,6 +21,9 @@ const HODGACQIAdvisory: React.FC = () => {
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [records, setRecords] = useState<GACQIAdvisoryRecord[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const selectedProgram = programs.find((program) => program.id === selectedProgramId);
+  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId);
 
   // Load initial data
   useEffect(() => {
@@ -66,16 +71,75 @@ const HODGACQIAdvisory: React.FC = () => {
   // Handle download PDF
   const handleDownloadPDF = async () => {
     try {
-      const blob = await obeService.downloadGACQIAdvisoryExportPDF(selectedProgramId, selectedBatchId);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ga-cqi-advisory-${batches.find(b => b.id === selectedBatchId)?.name || 'batch'}.pdf`;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const generatedAt = new Date().toLocaleString();
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(16);
+      pdf.text('GA-CQI Advisory Report', pageWidth / 2, 14, { align: 'center' });
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.text(
+        `Program: ${selectedProgram?.name || 'N/A'} | Batch: ${selectedBatch?.name || 'N/A'}`,
+        14,
+        22
+      );
+      pdf.text(`Generated on: ${generatedAt}`, 14, 28);
+
+      autoTable(pdf, {
+        startY: 34,
+        head: [[
+          'GA Code',
+          'GA Title',
+          'Issue Statement',
+          'Attainment',
+          'HOD Action Plan',
+          'Approved On',
+        ]],
+        body: records.map((record) => [
+          record.ga_code,
+          record.ga_title,
+          record.issue_statement || '-',
+          formatAttainment(record.attainment_value),
+          record.hod_action_plan || '-',
+          record.saved_at ? new Date(record.saved_at).toLocaleDateString() : '-',
+        ]),
+        theme: 'grid',
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [31, 41, 55],
+          textColor: 255,
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+        columnStyles: {
+          0: { cellWidth: 24 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 72 },
+          3: { cellWidth: 24, halign: 'center' },
+          4: { cellWidth: 72 },
+          5: { cellWidth: 28, halign: 'center' },
+        },
+        margin: { top: 34, left: 10, right: 10, bottom: 12 },
+      });
+
+      pdf.save(`ga-cqi-advisory-${selectedBatch?.name || 'batch'}.pdf`);
       toast.success('PDF downloaded successfully');
     } catch (error) {
-      console.error('Failed to download PDF', error);
+      console.error('Failed to generate GA-CQI advisory PDF:', error);
+      if (error instanceof Error) {
+        toast.error(error.message);
+        return;
+      }
       toast.error('Failed to download PDF');
     }
   };

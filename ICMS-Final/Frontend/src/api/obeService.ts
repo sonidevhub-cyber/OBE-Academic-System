@@ -704,10 +704,25 @@ class OBEService {
   }
 
   async downloadGACQIAdvisoryExportPDF(programId: string, batchId: string): Promise<Blob> {
-    const response = await api.get(`/ga-cqi/advisory-export/${programId}/${batchId}/pdf/`, {
-      responseType: 'blob'
-    });
-    return response.data;
+    try {
+      const response = await api.get(`/ga-cqi/advisory-export/${programId}/${batchId}/pdf/`, {
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error: any) {
+      const responseData = error?.response?.data;
+      if (responseData instanceof Blob) {
+        try {
+          const text = await responseData.text();
+          const parsed = JSON.parse(text);
+          throw new Error(parsed.error || parsed.detail || 'PDF generation is currently unavailable.');
+        } catch {
+          throw new Error('PDF generation is currently unavailable.');
+        }
+      }
+
+      throw new Error(error?.response?.data?.error || error?.message || 'Failed to download PDF');
+    }
   }
 
   // --- CLO Master Compilation Methods ---

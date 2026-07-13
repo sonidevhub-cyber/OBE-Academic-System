@@ -180,14 +180,19 @@ def _build_alumni_employment_stats(batch: Batch, cycle: AlumniSurveyCycle | None
     }
 
 
-def resolve_peo_report_context(program_id: str, year: int) -> dict[str, Any]:
+def resolve_peo_report_context(program_id: str, year: int, batch_id: str | None = None) -> dict[str, Any]:
     program = Program.objects.filter(id=program_id, is_active=True).first()
     if not program:
         raise ValueError("Program not found")
 
-    batch = _resolve_batch_for_program_year(program, year)
-    if not batch:
-        raise ValueError("No active batch found for the requested program and year")
+    if batch_id:
+        batch = Batch.objects.filter(id=batch_id, program=program, is_active=True).first()
+        if not batch:
+            raise ValueError("Batch not found")
+    else:
+        batch = _resolve_batch_for_program_year(program, year)
+        if not batch:
+            raise ValueError("No active batch found for the requested program and year")
 
     peos = list(PEO.objects.filter(program=program, is_active=True).order_by("order_number"))
     cycle = _resolve_alumni_cycle(batch, year)
@@ -297,8 +302,8 @@ def _build_direct_score(
     return _to_float(direct_score), contributing_gas, mapped_questions
 
 
-def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
-    context = resolve_peo_report_context(program_id, year)
+def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None) -> dict[str, Any]:
+    context = resolve_peo_report_context(program_id, year, batch_id)
     program = context["program"]
     batch = context["batch"]
     cycle = context["cycle"]
@@ -307,12 +312,10 @@ def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
     cqi_by_peo = {str(record.peo_id): record for record in cqi_records}
 
     matrix: list[dict[str, Any]] = []
-    question_breakdown: list[dict[str, Any]] = []
-    cqi_sections: list[dict[str, Any]] = []
     chart_data: list[dict[str, Any]] = []
     triggered_count = 0
 
-    for peo in peos:
+    for idx, peo in enumerate(peos):
         direct_percentage, contributing_gas, mapped_questions = _build_direct_score(peo, batch)
         indirect_percentage, per_question_rows, total_responses = _build_indirect_breakdown(peo, cycle)
 
@@ -330,9 +333,10 @@ def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
         if status == "CQI Triggered":
             triggered_count += 1
 
+        cqi_record = cqi_by_peo.get(str(peo.id))
         matrix.append(
             {
-                "peoId": str(peo.id),
+                "peoId": str(peo.id),  # Keep this for key, but won't show in UI
                 "description": peo.description or peo.title or "",
                 "mappedQuestions": mapped_questions or [row["questionText"] for row in per_question_rows],
                 "directPercentage": direct_percentage,
@@ -340,34 +344,11 @@ def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
                 "combinedAttainmentPercentage": combined_percentage,
                 "targetPercentage": target_percentage,
                 "status": status,
+                "cqiRecordId": str(cqi_record.id) if cqi_record else None,
+                "cqiStatus": cqi_record.status if cqi_record else None,
+                "cqiIsLocked": cqi_record.is_locked if cqi_record else False,
             }
         )
-
-        if status == "CQI Triggered" and per_question_rows:
-            question_breakdown.append(
-                {
-                    "peoId": str(peo.id),
-                    "questions": per_question_rows,
-                }
-            )
-
-        record = cqi_by_peo.get(str(peo.id))
-        if record or status == "CQI Triggered":
-            cqi_sections.append(
-                {
-                    "peoId": str(peo.id),
-                    "identifiedWeakness": record.root_cause if record else "",
-                    "correctiveActionPlan": record.remedial_plan if record else "",
-                    "cqiStatus": "Closed" if record and record.status == "APPROVED" else "Open",
-                    "hodApprovedBy": record.submitted_by.full_name if record and record.submitted_by else None,
-                    "hodApprovedDate": (
-                        (record.updated_at or record.created_at).isoformat()
-                        if record and (record.updated_at or record.created_at)
-                        else None
-                    ),
-                    "cqiPending": record is None,
-                }
-            )
 
         chart_data.append(
             {
@@ -379,7 +360,6 @@ def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
 
     overall_status = "cqi_required" if triggered_count > 0 else "achieved"
     target_threshold = _get_target_threshold(peos)
-    hod_approved_by, hod_approved_date = _get_latest_hod_signature(cqi_records)
 
     return {
         "header": {
@@ -395,11 +375,4 @@ def calculate_peo_report(program_id: str, year: int) -> dict[str, Any]:
             "chartData": chart_data,
         },
         "matrix": matrix,
-        "questionBreakdown": question_breakdown,
-        "cqiSections": cqi_sections,
-        "signatures": {
-            "generatedBy": "OBE System (Automated)",
-            "hodApprovedBy": hod_approved_by,
-            "hodApprovedDate": hod_approved_date,
-        },
     }

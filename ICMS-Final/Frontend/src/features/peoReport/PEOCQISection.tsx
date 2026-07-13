@@ -43,7 +43,7 @@ const PEOCQISectionComponent: React.FC<PEOCQISectionProps> = ({ sections }) => {
                 Identified Weakness
               </p>
               <p className="text-slate-700">
-                {section.identifiedWeakness || 'Pending HOD submission'}
+                {section.rootCause || 'Pending HOD submission'}
               </p>
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
@@ -51,7 +51,7 @@ const PEOCQISectionComponent: React.FC<PEOCQISectionProps> = ({ sections }) => {
                 Corrective Action Plan
               </p>
               <p className="text-slate-700">
-                {section.correctiveActionPlan || 'Pending HOD submission'}
+                {section.remedialPlan || 'Pending HOD submission'}
               </p>
             </div>
           </div>

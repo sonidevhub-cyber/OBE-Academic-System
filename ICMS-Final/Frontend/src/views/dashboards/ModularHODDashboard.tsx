@@ -92,6 +92,11 @@ const ModularHODDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hodProfile, setHodProfile] = useState<any>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    reports: true,
+    cqi: true,
+    engagement: true,
+  });
   const canManageAnnouncements = Boolean(
     currentUser?.permissions?.includes('manage_announcements')
   );
@@ -100,20 +105,44 @@ const ModularHODDashboard: React.FC = () => {
   const auth = authData ? JSON.parse(authData) : {};
   const token = authData ? auth.access_token || auth.token : null;
 
-  const tabs = [
+  const sidebarGroups = [
+    {
+      id: 'reports',
+      label: 'Reports',
+      icon: FileBarChart,
+      children: [
+        { id: 'clo-report', label: 'CLO Reports', icon: BookOpen },
+        { id: 'ga-report', label: 'GA Reports', icon: FileBarChart },
+        { id: 'peo-report', label: 'PEO Reports', icon: TrendingUp },
+        { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      id: 'cqi',
+      label: 'CQI',
+      icon: ClipboardCheck,
+      children: [
+        { id: 'cqi', label: 'CLO CQI Control', icon: ClipboardCheck },
+        { id: 'ga-cqi-advisory', label: 'CQI Advisory Export', icon: ClipboardCheck },
+      ],
+    },
+    {
+      id: 'engagement',
+      label: 'Feedback & Surveys',
+      icon: MessageSquare,
+      children: [
+        { id: 'feedback', label: 'Feedback', icon: MessageSquare },
+        { id: 'exit-survey', label: 'Exit Survey', icon: GraduationCap },
+        { id: 'alumni-feedback', label: 'Alumni Feedback', icon: Users },
+      ],
+    },
+  ];
+
+  const mainItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "obe-management", label: "PEO/GA Management", icon: Settings },
-    { id: "cqi", label: "CLO CQI Control", icon: ClipboardCheck },
-    { id: "clo-report", label: "CLO Reports", icon: BookOpen },
-    { id: "ga-report", label: "GA Reports", icon: FileBarChart },
-    { id: "ga-cqi-advisory", label: "CQI Advisory Export", icon: ClipboardCheck },
-    { id: "peo-report", label: "PEO Reports", icon: TrendingUp },
-    { id: "obe-report", label: "OBE Report", icon: FileSpreadsheet },
     { id: "notice", label: "Notice Board", icon: Bell },
-    { id: "feedback", label: "Feedback", icon: MessageSquare },
-    { id: "exit-survey", label: "Exit Survey", icon: GraduationCap },
-    { id: "alumni-feedback", label: "Alumni Feedback", icon: Users },
-    { id: "result-editing",label: "Result lock",icon: Settings,},
+    { id: "result-editing", label: "Result lock", icon: Settings },
   ];
 
   useEffect(() => {
@@ -211,7 +240,7 @@ const ModularHODDashboard: React.FC = () => {
 
       <nav className="flex-1">
         <ul className="space-y-1">
-          {tabs.map((tab) => {
+          {mainItems.map((tab) => {
             const Icon = tab.icon;
             return (
               <li key={tab.id}>
@@ -230,18 +259,71 @@ const ModularHODDashboard: React.FC = () => {
             );
           })}
         </ul>
-      </nav>
-      
-      <div className="mt-auto pt-4 border-t border-white/20">
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center px-4 py-2 rounded-lg text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-all duration-200"
-        >
-          <LogOut className="w-5 h-5 mr-3" />
-          <span>Logout</span>
-        </button>
+
+        <div className="mt-4 space-y-2">
+          {sidebarGroups.map((group) => {
+            const GroupIcon = group.icon;
+            const isOpen = expandedGroups[group.id] ?? false;
+            const groupActive = group.children.some((child) => child.id === activeTab);
+
+            return (
+              <div key={group.id} className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedGroups((prev) => ({
+                      ...prev,
+                      [group.id]: !prev[group.id],
+                    }))
+                  }
+                  className={`w-full flex items-center justify-between px-4 py-2 rounded-lg transition-all duration-200 ${
+                    groupActive ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30' : 'text-purple-100 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center">
+                    <GroupIcon className="w-5 h-5 mr-3" />
+                    <span className="font-semibold text-sm">{group.label}</span>
+                  </span>
+                  <span className="text-xs">{isOpen ? '−' : '+'}</span>
+                </button>
+
+                {isOpen && (
+                  <div className="ml-3 space-y-1 border-l border-white/10 pl-2">
+                    {group.children.map((item) => {
+                      const ItemIcon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => setActiveTab(item.id as TabId)}
+                          className={`w-full flex items-center px-4 py-2 rounded-lg transition-all duration-200 ${
+                            isActive
+                              ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm border border-white/30'
+                              : 'text-purple-100 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <ItemIcon className="w-4 h-4 mr-3" />
+                          <span className="flex-1 text-left font-semibold text-sm">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          </div>
+          <div className="mt-4 pt-4 border-t border-white/20">
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center px-4 py-2 rounded-lg text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-all duration-200"
+            >
+              <LogOut className="w-5 h-5 mr-3" />
+              <span>Logout</span>
+            </button>
+          </div>
+        </nav>
       </div>
-    </div>
   );
 
   const renderContent = () => {

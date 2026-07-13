@@ -31,6 +31,17 @@ export interface PEOReportSummary {
   chartData: PEOReportSummaryItem[];
 }
 
+export interface PEOCQIRecord {
+  id: string;
+  peo_id: string;
+  batch_id: string;
+  root_cause: string | null;
+  remedial_plan: string | null;
+  status: string;
+  is_locked: boolean;
+  submitted_by: any;
+}
+
 export interface PEOReportMatrixItem {
   peoId: string;
   description: string;
@@ -40,6 +51,9 @@ export interface PEOReportMatrixItem {
   combinedAttainmentPercentage: number | null;
   targetPercentage: number;
   status: 'Achieved' | 'CQI Triggered';
+  cqiRecordId: string | null;
+  cqiStatus: string | null;
+  cqiIsLocked: boolean;
 }
 
 export interface PEOQuestionBreakdownItem {
@@ -56,8 +70,8 @@ export interface PEOReportQuestionBreakdown {
 
 export interface PEOCQISection {
   peoId: string;
-  identifiedWeakness: string;
-  correctiveActionPlan: string;
+  rootCause: string | null;
+  remedialPlan: string | null;
   cqiStatus: 'Closed' | 'Open';
   hodApprovedBy: string | null;
   hodApprovedDate: string | null;

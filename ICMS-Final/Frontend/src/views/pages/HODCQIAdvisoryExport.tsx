@@ -4,10 +4,8 @@ import { ClipboardCheck, FileBarChart2 } from 'lucide-react';
 import HODGACQIAdvisory from './HODGACQIAdvisory';
 import HODPEOCQI from './HODPEOCQI';
 
-type AdvisoryTab = 'ga' | 'peo';
-
 const HODCQIAdvisoryExport: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<AdvisoryTab>('ga');
+  const [activeTab, setActiveTab] = useState<'ga' | 'peo'>('ga');
 
   const tabs = [
     { id: 'ga' as const, label: 'GA CQI', icon: FileBarChart2 },

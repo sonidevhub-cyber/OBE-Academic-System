@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { toast } from 'react-toastify';
-import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, History, Save } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Download, History, LoaderCircle, Save } from 'lucide-react';
 
 import authService from '../../api/authService';
 import obeService, { Batch } from '../../api/obeService';
@@ -17,6 +19,7 @@ const HODPEOCQI: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const currentAuth = authService.getCurrentUser();
   const isHOD = currentAuth?.role === 'hod' || currentAuth?.user?.secondary_role === 'hod';
@@ -179,6 +182,115 @@ const HODPEOCQI: React.FC = () => {
   const getCqiRecordForPeo = (peoId: string) =>
     peoCqiRecords.find((record) => record.peo === peoId || record.peo_id === peoId);
 
+  const handleDownloadPdf = async () => {
+    if (!activeBatch) {
+      toast.error('Please select an alumni batch first');
+      return;
+    }
+
+    setPdfLoading(true);
+    try {
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const marginX = 12;
+      const generatedAt = new Date().toLocaleString();
+      const title = 'PEO CQI Advisory Export';
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(16);
+      pdf.text(title, pageWidth / 2, 14, { align: 'center' });
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.text(`Batch: ${activeBatch.name || 'N/A'}`, marginX, 22);
+      pdf.text(`Generated on: ${generatedAt}`, marginX, 28);
+      pdf.text(`Total PEOs: ${peoReports.length}`, marginX, 34);
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`CQI Records: ${peoCqiRecords.length}`, pageWidth - marginX, 22, { align: 'right' });
+      pdf.text(
+        `Approved CQIs: ${peoCqiRecords.filter((record) => record.status === 'APPROVED').length}`,
+        pageWidth - marginX,
+        28,
+        { align: 'right' }
+      );
+      pdf.text(`Pending CQIs: ${peoCqiRecords.filter((record) => record.status !== 'APPROVED').length}`, pageWidth - marginX, 34, {
+        align: 'right',
+      });
+
+      autoTable(pdf, {
+        startY: 40,
+        head: [[
+          'PEO Code',
+          'PEO Title',
+          'Final Score',
+          'CQI Status',
+          'Approved On',
+          'Root Cause',
+          'Corrective Action Plan',
+        ]],
+        body: peoReports.length
+          ? peoReports.map((peoReport) => {
+              const existingCqi = getCqiRecordForPeo(peoReport.peo_id);
+              const needsCqi = peoReport.final_score !== null && peoReport.final_score < 60;
+              const approvedOn = existingCqi?.updated_at || existingCqi?.created_at || '-';
+              const draft = localCqiData[existingCqi?.id || ''] || {
+                root_cause: existingCqi?.root_cause || '',
+                remedial_plan: existingCqi?.remedial_plan || '',
+              };
+
+              return [
+                peoReport.peo_code,
+                peoReport.peo_title,
+                peoReport.final_score === null ? 'N/A' : `${peoReport.final_score.toFixed(1)}%`,
+                existingCqi?.status || (needsCqi ? 'Needs CQI' : 'Achieved'),
+                approvedOn === '-' ? '-' : new Date(approvedOn).toLocaleDateString(),
+                needsCqi
+                  ? draft.root_cause || 'Pending HOD submission'
+                  : draft.root_cause || 'Not required',
+                needsCqi
+                  ? draft.remedial_plan || 'Pending HOD submission'
+                  : draft.remedial_plan || 'Not required',
+              ];
+            })
+          : [['-', 'No PEO records available', '-', '-', '-', '-', '-']],
+        theme: 'grid',
+        styles: {
+          fontSize: 6.5,
+          cellPadding: 1.5,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [31, 41, 55],
+          textColor: 255,
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+        columnStyles: {
+          0: { cellWidth: 24 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 22, halign: 'center' },
+          3: { cellWidth: 24, halign: 'center' },
+          4: { cellWidth: 24, halign: 'center' },
+          5: { cellWidth: 60 },
+          6: { cellWidth: 60 },
+        },
+        margin: { left: marginX, right: marginX, bottom: 12 },
+      });
+
+      pdf.save(`peo-cqi-advisory-${activeBatch.name || 'batch'}.pdf`);
+      toast.success('PEO CQI PDF downloaded');
+    } catch (error) {
+      console.error('Failed to generate PEO CQI PDF:', error);
+      toast.error('Failed to generate PEO CQI PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -212,7 +324,18 @@ const HODPEOCQI: React.FC = () => {
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h2 className="text-2xl font-black text-gray-900 mb-6">CQI Advisory Export</h2>
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <h2 className="text-2xl font-black text-gray-900">CQI Advisory Export</h2>
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={!activeBatch || loading || pdfLoading}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {pdfLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Download PDF
+          </button>
+        </div>
         <div className="flex flex-wrap gap-3">
           <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
             Batch: {activeBatch?.name || 'Select alumni batch'}
