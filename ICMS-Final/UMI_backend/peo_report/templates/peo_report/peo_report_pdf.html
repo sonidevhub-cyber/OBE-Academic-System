@@ -64,6 +64,61 @@
       gap: 10px 16px;
     }
 
+    .chart-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .chart-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 10px;
+      background: #ffffff;
+      page-break-inside: avoid;
+    }
+
+    .chart-panel h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: #0f172a;
+    }
+
+    .chart-image {
+      width: 100%;
+      max-height: 210px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .pie-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pie-legend {
+      display: grid;
+      gap: 6px;
+      margin-top: 2px;
+      font-size: 10px;
+      color: #334155;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 10px;
+    }
+
     .pill {
       display: inline-block;
       padding: 3px 8px;
@@ -158,10 +213,10 @@
       </table>
     </div>
 
-    <!-- Then summary and chart -->
+    <!-- Then charts -->
     <div class="card">
-      <h2>PEO Attainment Summary</h2>
-      <div class="grid">
+      <h2>PEO Attainment Visuals</h2>
+      <div class="grid" style="margin-bottom: 10px;">
         <div><strong>Target Threshold:</strong> {{ report.summary.targetThreshold }}%</div>
         <div>
           <strong>Overall Program Status:</strong>
@@ -172,11 +227,30 @@
           {% endif %}
         </div>
       </div>
-      {% if chart_image %}
-        <div class="chart">
-          <img alt="PEO attainment chart" src="data:image/png;base64,{{ chart_image }}" style="width:100%;" />
+      <div class="chart-grid">
+        <div class="chart-panel">
+          <h3>PEO Attainment vs Target</h3>
+          {% if chart_image %}
+            <img alt="PEO attainment chart" class="chart-image" src="data:image/png;base64,{{ chart_image }}" />
+          {% endif %}
         </div>
-      {% endif %}
+        <div class="chart-panel">
+          <h3>PEO Status Split</h3>
+          <div class="pie-wrap">
+            {{ pie_chart_svg|safe }}
+            <div class="pie-legend">
+              <div class="legend-row">
+                <span class="legend-swatch" style="background:#2563eb;"></span>
+                <span>Achieved PEOs</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-swatch" style="background:#f59e0b;"></span>
+                <span>CQI Required PEOs</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Then employment stats -->

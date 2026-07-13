@@ -10,7 +10,7 @@ import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
 import MyCoursesModule from '../modules/MyCoursesModule';
 import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import { fetchCurrentProfile } from '../../api/profileService';
-import { getEffectiveRole } from '../../utils/profileHelpers';
+import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import AssignedRetakesPanel from '../../features/retake/AssignedRetakesPanel';
 import RetakeResultEntryPage from '../pages/RetakeResultEntryPage';
 import { getRetakeAssessmentContext } from '../../features/retake/retakeApi';
@@ -23,7 +23,7 @@ const ModularInstructorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabId>('courses');
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [instructorProfile, setInstructorProfile] = useState<any>(null);
   const [cqiPopup, setCqiPopup] = useState<any[]>([]);
   const retakeIdFromQuery = searchParams.get('retake_id');
@@ -67,6 +67,16 @@ const ModularInstructorDashboard: React.FC = () => {
       setActiveTab('retakes');
     }
   }, [retakeIdFromQuery]);
+
+  const instructorHeaderProfile = instructorProfile || currentUser;
+  const instructorHeaderImageUrl = getProfileImageUrl(instructorHeaderProfile);
+  const instructorHeaderName = (
+    instructorHeaderProfile?.full_name ||
+    instructorHeaderProfile?.name ||
+    instructorHeaderProfile?.first_name ||
+    instructorHeaderProfile?.username ||
+    'Instructor'
+  ).trim();
 const loadNextBatchCQI = async () => {
    try {
       const res = await api.get("/feedback/next-batch-cqi/");
@@ -314,12 +324,156 @@ const loadNextBatchCQI = async () => {
     </motion.div>
   );
 
+  const renderInstructorDashboard = () => {
+    const uniqueBatches = new Set(instructorCourses.map((course) => course.batch_name || course.batch)).size;
+    const uniqueSemesters = new Set(instructorCourses.map((course) => String(course.semester_no ?? 'N/A'))).size;
+
+    return (
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+        <div className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-blue-700 via-indigo-700 to-violet-700 text-white shadow-2xl">
+          <div className="grid gap-6 p-6 lg:grid-cols-[1.25fr_0.75fr] lg:p-8">
+            <div className="space-y-4">
+              <div className="inline-flex items-center rounded-full bg-white/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.24em] text-blue-50 backdrop-blur-sm">
+                Instructor Dashboard
+              </div>
+              <div>
+                <h2 className="text-3xl font-black leading-tight md:text-4xl">Teaching dashboard at a glance</h2>
+                <p className="mt-3 max-w-2xl text-sm text-blue-50/90 md:text-base">
+                  Start here for your assigned courses, retakes, and OBE work. The landing page now opens on Dashboard by default.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('courses')}
+                  className="rounded-full bg-white px-4 py-2 text-sm font-bold text-indigo-800 shadow-lg transition-transform hover:-translate-y-0.5"
+                >
+                  Open My Courses
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('retakes')}
+                  className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-sm font-bold text-white backdrop-blur-sm transition-transform hover:-translate-y-0.5"
+                >
+                  View Retakes
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { label: 'Courses', value: instructorCourses.length, hint: 'Assigned to you' },
+                { label: 'Batches', value: uniqueBatches, hint: 'Active cohorts' },
+                { label: 'Semesters', value: uniqueSemesters, hint: 'Teaching spans' },
+                { label: 'CQI Alerts', value: cqiPopup.length, hint: 'Pending action' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-3xl bg-white/10 p-4 backdrop-blur-sm">
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-blue-100">{item.label}</p>
+                  <p className="mt-2 text-3xl font-black">{item.value}</p>
+                  <p className="mt-1 text-xs text-blue-50/90">{item.hint}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'My Courses', value: instructorCourses.length, accent: 'from-blue-600 to-indigo-500' },
+            { label: 'Active Classes', value: instructorCourses.length, accent: 'from-emerald-600 to-teal-500' },
+            { label: 'Batches', value: uniqueBatches, accent: 'from-violet-600 to-fuchsia-500' },
+            { label: 'CQI Alerts', value: cqiPopup.length, accent: 'from-amber-600 to-orange-500' },
+          ].map((card) => (
+            <div key={card.label} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className={`h-2 bg-gradient-to-r ${card.accent}`} />
+              <div className="p-5">
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-400">{card.label}</p>
+                <p className="mt-2 text-3xl font-black text-slate-900">{card.value}</p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {card.label === 'CQI Alerts'
+                    ? 'Previous batch quality items waiting for review'
+                    : 'Live data from your current assignments'}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Teaching Snapshot</p>
+                <h3 className="mt-2 text-xl font-black text-slate-900">Your recent course assignments</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('courses')}
+                className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600"
+              >
+                View all
+              </button>
+            </div>
+
+            {instructorCourses.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {instructorCourses.slice(0, 4).map((course) => (
+                  <div key={course.allocation_id} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                    <p className="text-sm font-black uppercase tracking-[0.18em] text-blue-600">{course.course_code}</p>
+                    <h4 className="mt-2 text-lg font-bold text-slate-900">{course.course_name}</h4>
+                    <p className="mt-2 text-sm text-slate-600">Batch: {course.batch_name}</p>
+                    <p className="mt-1 text-sm text-slate-600">Semester: {course.semester_no || 'N/A'}</p>
+                    <p className="mt-1 text-sm text-slate-600">Coordinator: {course.coordinator_name}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                No course assignments found yet.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-5">
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Quick Actions</p>
+              <h3 className="mt-2 text-xl font-black text-slate-900">Jump straight to work</h3>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={() => setActiveTab('courses')}
+                className="w-full rounded-2xl bg-blue-50 px-4 py-3 text-left transition hover:bg-blue-100"
+              >
+                <p className="font-bold text-slate-900">Open My Courses</p>
+                <p className="mt-1 text-sm text-slate-600">View full teaching load and course cards</p>
+              </button>
+              <button
+                onClick={() => setActiveTab('obe')}
+                className="w-full rounded-2xl bg-emerald-50 px-4 py-3 text-left transition hover:bg-emerald-100"
+              >
+                <p className="font-bold text-slate-900">OBE Management</p>
+                <p className="mt-1 text-sm text-slate-600">Handle CLOs, assessments, and mapping</p>
+              </button>
+              <button
+                onClick={() => setActiveTab('retakes')}
+                className="w-full rounded-2xl bg-violet-50 px-4 py-3 text-left transition hover:bg-violet-100"
+              >
+                <p className="font-bold text-slate-900">Assigned Retakes</p>
+                <p className="mt-1 text-sm text-slate-600">See pending result entry and retake work</p>
+              </button>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'courses':
         return <MyCoursesModule />;
       case 'dashboard':
-        return renderDashboard();
+        return renderInstructorDashboard();
       case 'obe':
         return <OBEModule />;
       case 'retakes':
@@ -344,7 +498,7 @@ const loadNextBatchCQI = async () => {
           />
         );
       default:
-        return renderDashboard();
+        return renderInstructorDashboard();
     }
   };
 
@@ -380,16 +534,20 @@ const loadNextBatchCQI = async () => {
 
     
       <div className="flex min-h-screen w-full bg-[#E8F5E8]">
-      {/* Sidebar */}
+        {/* Sidebar */}
       <div className='w-64 bg-gradient-to-b from-blue-600 via-indigo-700 to-purple-800 text-white p-4 space-y-2 min-h-screen shadow-xl flex flex-col'>
         <div className='mb-8 text-center'>
-          <div className='h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-2 flex items-center justify-center border border-white/30'>
-            <svg xmlns="http://www.w3.org/2000/svg" className='h-10 w-10 text-white' viewBox="0 0 20 20" fill="currentColor">
-              <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3z" />
-            </svg>
+          <div className='h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm mx-auto mb-3 flex items-center justify-center border border-white/30 overflow-hidden shadow-md'>
+            {instructorHeaderImageUrl ? (
+              <img src={instructorHeaderImageUrl} alt={instructorHeaderName} className='h-full w-full object-cover' />
+            ) : (
+              <span className='text-xl font-bold text-white'>
+                {instructorHeaderName.charAt(0).toUpperCase()}
+              </span>
+            )}
           </div>
-          <h3 className='text-lg font-semibold text-white'>Instructor Portal</h3>
-          <p className='text-xs text-blue-200'>{currentUser?.first_name || currentUser?.name || currentUser?.username || 'Instructor'}</p>
+          <h3 className='text-lg font-semibold text-white truncate px-2'>{instructorHeaderName}</h3>
+          <p className='text-xs text-blue-200 uppercase tracking-[0.18em]'>Instructor Portal</p>
         </div>
 
         <nav>

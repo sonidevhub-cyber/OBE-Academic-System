@@ -20,6 +20,7 @@ type GenericUser = Record<string, any> | null | undefined;
 interface TopbarProfileMenuProps {
   userData?: GenericUser;
   label?: string;
+  showAvatar?: boolean;
 }
 
 interface ProfileSection {
@@ -39,7 +40,7 @@ const addField = (
   }
 };
 
-const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }) => {
+const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label, showAvatar = true }) => {
   const [open, setOpen] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
@@ -133,16 +134,20 @@ const TopbarProfileMenu: React.FC<TopbarProfileMenuProps> = ({ userData, label }
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-3 rounded-2xl bg-white/15 px-3 py-2 text-left transition-all hover:bg-white/25 border border-white/20 backdrop-blur-sm"
+        className={`flex items-center gap-3 rounded-2xl bg-white/15 text-left transition-all hover:bg-white/25 border border-white/20 backdrop-blur-sm ${
+          showAvatar ? 'px-3 py-2' : 'px-4 py-2.5'
+        }`}
         title="View Profile"
       >
-        <div className="h-10 w-10 rounded-full bg-white/25 text-white flex items-center justify-center overflow-hidden border border-white/50 shadow-lg">
-          {imageUrl ? (
-            <img src={imageUrl} alt={displayName} className="h-full w-full object-cover" />
-          ) : (
-            <span className="font-semibold text-sm">{initials}</span>
-          )}
-        </div>
+        {showAvatar ? (
+          <div className="h-10 w-10 rounded-full bg-white/25 text-white flex items-center justify-center overflow-hidden border border-white/50 shadow-lg">
+            {imageUrl ? (
+              <img src={imageUrl} alt={displayName} className="h-full w-full object-cover" />
+            ) : (
+              <span className="font-semibold text-sm">{initials}</span>
+            )}
+          </div>
+        ) : null}
         <div className="hidden sm:block text-left">
           <p className="text-sm font-semibold text-white leading-tight">{displayName}</p>
           <p className="text-xs text-white/80">{label || resolvedRole}</p>

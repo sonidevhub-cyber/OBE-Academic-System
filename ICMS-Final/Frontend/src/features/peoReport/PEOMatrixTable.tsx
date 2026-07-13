@@ -21,25 +21,25 @@ const PEOMatrixTable: React.FC<PEOMatrixTableProps> = ({
 }) => {
   return (
     <div className="overflow-x-auto rounded-[2rem] border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full border-collapse text-left">
+      <table className="min-w-[1100px] table-fixed border-collapse text-left">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+            <th className="w-36 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
               PEO & Target
             </th>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+            <th className="w-1/4 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
               PEO Description
             </th>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
-              Survey Questions Mapped
+            <th className="w-2/5 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+              Mapped GAs / PLOs
             </th>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+            <th className="w-28 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
               Attainment Score (%)
             </th>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+            <th className="w-28 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
               Status
             </th>
-            <th className="px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
+            <th className="w-28 px-3 py-2 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
               CQI
             </th>
           </tr>
@@ -56,21 +56,36 @@ const PEOMatrixTable: React.FC<PEOMatrixTableProps> = ({
                     <div className="text-xs text-gray-500">(Target: {row.targetPercentage.toFixed(2)}%)</div>
                   </div>
                 </td>
-                <td className="px-3 py-2 text-sm text-gray-700 border border-gray-200">{row.description}</td>
-                <td className="px-3 py-2 text-sm text-gray-700 border border-gray-200">
-                  {row.mappedQuestions.length > 0 ? row.mappedQuestions.join(', ') : 'No mapped questions'}
+                <td className="px-3 py-2 text-sm text-gray-700 border border-gray-200 whitespace-normal break-words">
+                  {row.description}
                 </td>
-                <td className="px-3 py-2 text-sm font-bold text-gray-900 border border-gray-200">
+                <td className="px-3 py-2 text-sm text-gray-700 border border-gray-200 whitespace-normal break-words">
+                  {row.mappedQuestions.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {row.mappedQuestions.map((question) => (
+                        <span
+                          key={question}
+                          className="inline-flex max-w-full rounded-md bg-slate-50 px-2 py-1 text-xs leading-5 text-gray-700 whitespace-normal break-words"
+                        >
+                          {question}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    'No mapped questions'
+                  )}
+                </td>
+                <td className="px-3 py-2 text-sm font-bold text-gray-900 border border-gray-200 whitespace-nowrap">
                   {formatPercentage(row.combinedAttainmentPercentage)}
                 </td>
-                <td className="px-3 py-2 text-sm border border-gray-200">
+                <td className="px-3 py-2 text-sm border border-gray-200 whitespace-nowrap">
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-xs font-bold ${statusStyles[row.status]}`}
                   >
                     {displayStatus}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-sm border border-gray-200">
+                <td className="px-3 py-2 text-sm border border-gray-200 whitespace-nowrap">
                   {row.status === 'CQI Triggered' && onTriggerCQI && canManageCQI ? (
                     <button
                       onClick={() => onTriggerCQI(row)}

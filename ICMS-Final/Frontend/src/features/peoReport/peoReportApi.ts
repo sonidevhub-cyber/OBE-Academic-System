@@ -30,15 +30,30 @@ export async function downloadPEOReportPDF(
   batchId?: string
 ): Promise<Blob> {
   const params = batchId ? { batch_id: batchId } : {};
-  const response = await api.post(
-    `peo-report/${programId}/${year}/pdf/`,
-    { chart_image: chartImageBase64 },
-    { responseType: 'blob', params },
-  );
+  try {
+    const response = await api.post(
+      `peo-report/${programId}/${year}/pdf/`,
+      { chart_image: chartImageBase64 },
+      { responseType: 'blob', params },
+    );
 
-  const blob = response.data as Blob;
-  downloadBlobAsFile(blob, `peo-report-${programId}-${year}.pdf`);
-  return blob;
+    const blob = response.data as Blob;
+    downloadBlobAsFile(blob, `peo-report-${programId}-${year}.pdf`);
+    return blob;
+  } catch (error: any) {
+    const responseData = error?.response?.data;
+    if (responseData instanceof Blob) {
+      try {
+        const text = await responseData.text();
+        const parsed = JSON.parse(text);
+        throw new Error(parsed.error || parsed.detail || 'PDF generation is currently unavailable.');
+      } catch {
+        throw new Error('PDF generation is currently unavailable.');
+      }
+    }
+
+    throw new Error(error?.response?.data?.error || error?.message || 'Failed to download PEO report PDF');
+  }
 }
 
 export async function upsertPEOCQI(

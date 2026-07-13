@@ -89,7 +89,7 @@ export interface PEOReportData {
   employmentStats: PEOEmploymentStats;
   summary: PEOReportSummary;
   matrix: PEOReportMatrixItem[];
-  questionBreakdown: PEOReportQuestionBreakdown[];
-  cqiSections: PEOCQISection[];
+  questionBreakdown?: PEOReportQuestionBreakdown[];
+  cqiSections?: PEOCQISection[];
   signatures: PEOReportSignatures;
 }

@@ -7,7 +7,14 @@ import { Download, LoaderCircle } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
 import { useAuth } from '../../context/AuthContext';
-import { getPEOReport, getPEOCQIRecord, upsertPEOCQI, submitPEOCQIRecord, updatePEOCQIRecord } from './peoReportApi';
+import {
+  downloadPEOReportPDF,
+  getPEOReport,
+  getPEOCQIRecord,
+  upsertPEOCQI,
+  submitPEOCQIRecord,
+  updatePEOCQIRecord,
+} from './peoReportApi';
 import type { PEOReportData, PEOReportMatrixItem, PEOCQIRecord } from './types';
 import PEOEmploymentAnalytics from './PEOEmploymentAnalytics';
 import PEOAttainmentChart from './PEOAttainmentChart';
@@ -47,6 +54,145 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
 
   const currentRole = currentUser?.effective_role || currentUser?.active_role || currentUser?.role;
   const canDownloadPdf = isSAC || currentRole === 'hod';
+
+  const generatePdfLocally = (chartImage: string) => {
+    const cqiSections = reportData?.cqiSections ?? [];
+    const pdf = new jsPDF('landscape', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const marginX = 12;
+    const generatedAt = new Date().toLocaleString();
+    const chartWidth = pageWidth - marginX * 2;
+    const chartHeight = 78;
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(16);
+    pdf.text('PEO CQI Advisory Export', pageWidth / 2, 14, { align: 'center' });
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    pdf.text(
+      `${reportData?.header.program || 'N/A'} | Evaluation Cycle ${reportData?.header.evaluationCycleYear || year}`,
+      marginX,
+      22
+    );
+    pdf.text(`Department: ${reportData?.header.department || 'N/A'}`, marginX, 28);
+    pdf.text(`Generated on: ${generatedAt}`, marginX, 34);
+
+    const targetThreshold = reportData?.summary.targetThreshold?.toFixed(2) || '0.00';
+    const overallStatus =
+      reportData?.summary.overallStatus === 'achieved' ? 'All PEOs achieved' : 'CQI required';
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(`Target Threshold: ${targetThreshold}%`, pageWidth - marginX, 22, { align: 'right' });
+    pdf.text(`Status: ${overallStatus}`, pageWidth - marginX, 28, { align: 'right' });
+    pdf.text(`Survey Responses: ${reportData?.header.totalSurveyResponses || 0}`, pageWidth - marginX, 34, {
+      align: 'right',
+    });
+
+    const chartY = 40;
+    pdf.setDrawColor(229, 231, 235);
+    pdf.roundedRect(marginX, chartY, chartWidth, chartHeight, 3, 3, 'S');
+    pdf.addImage(chartImage, 'PNG', marginX + 2, chartY + 2, chartWidth - 4, chartHeight - 4);
+
+    autoTable(pdf, {
+      startY: chartY + chartHeight + 8,
+      head: [[
+        'PEO',
+        'Description',
+        'Mapped Questions',
+        'Direct %',
+        'Indirect %',
+        'Final %',
+        'Target %',
+        'Status',
+      ]],
+      body: reportData?.matrix.map((row, index) => [
+        `PEO ${index + 1}`,
+        row.description,
+        row.mappedQuestions.length > 0 ? row.mappedQuestions.join('\n') : 'No mapped questions',
+        row.directPercentage === null ? 'N/A' : `${row.directPercentage.toFixed(2)}%`,
+        row.indirectPercentage === null ? 'N/A' : `${row.indirectPercentage.toFixed(2)}%`,
+        row.combinedAttainmentPercentage === null ? 'N/A' : `${row.combinedAttainmentPercentage.toFixed(2)}%`,
+        `${row.targetPercentage.toFixed(2)}%`,
+        row.status === 'Achieved' ? 'Achieved' : 'Not Achieved',
+      ]) || [],
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: {
+        fillColor: [31, 41, 55],
+        textColor: 255,
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 18 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 58 },
+        3: { cellWidth: 18, halign: 'center' },
+        4: { cellWidth: 18, halign: 'center' },
+        5: { cellWidth: 18, halign: 'center' },
+        6: { cellWidth: 18, halign: 'center' },
+        7: { cellWidth: 24, halign: 'center' },
+      },
+      margin: { left: marginX, right: marginX, bottom: 12 },
+    });
+
+    autoTable(pdf, {
+      startY: (pdf as any).lastAutoTable?.finalY ? (pdf as any).lastAutoTable.finalY + 8 : pageHeight - 60,
+      head: [[
+        'PEO',
+        'CQI Status',
+        'Identified Weakness',
+        'Corrective Action Plan',
+        'Approved By',
+        'Approved Date',
+      ]],
+      body: cqiSections.length
+        ? cqiSections.map((section) => [
+            section.peoId,
+            section.cqiStatus,
+            section.rootCause || 'Pending HOD submission',
+            section.remedialPlan || 'Pending HOD submission',
+            section.hodApprovedBy || 'Pending HOD approval',
+            section.hodApprovedDate || '-',
+          ])
+        : [['-', 'No CQI records', 'No CQI records are available yet for this cycle.', '-', '-', '-']],
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 1.5,
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: {
+        fillColor: [31, 41, 55],
+        textColor: 255,
+        fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 68 },
+        3: { cellWidth: 82 },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 32 },
+      },
+      margin: { left: marginX, right: marginX, bottom: 12 },
+    });
+
+    pdf.save(`peo-cqi-advisory-${reportData?.header.program || 'peo'}-${reportData?.header.evaluationCycleYear || year}.pdf`);
+  };
 
   useEffect(() => {
     if (!programId || !year) {
@@ -92,146 +238,20 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
 
     setPdfLoading(true);
     try {
-      const pdf = new jsPDF('landscape', 'mm', 'a4');
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const marginX = 12;
-      const generatedAt = new Date().toLocaleString();
-      const chartWidth = pageWidth - marginX * 2;
-      const chartHeight = 78;
-
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(16);
-      pdf.text('PEO CQI Advisory Export', pageWidth / 2, 14, { align: 'center' });
-
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.text(
-        `${reportData.header.program} | Evaluation Cycle ${reportData.header.evaluationCycleYear}`,
-        marginX,
-        22
-      );
-      pdf.text(`Department: ${reportData.header.department}`, marginX, 28);
-      pdf.text(`Generated on: ${generatedAt}`, marginX, 34);
-
-      const targetThreshold = reportData.summary.targetThreshold.toFixed(2);
-      const overallStatus =
-        reportData.summary.overallStatus === 'achieved' ? 'All PEOs achieved' : 'CQI required';
-
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(`Target Threshold: ${targetThreshold}%`, pageWidth - marginX, 22, { align: 'right' });
-      pdf.text(`Status: ${overallStatus}`, pageWidth - marginX, 28, { align: 'right' });
-      pdf.text(`Survey Responses: ${reportData.header.totalSurveyResponses}`, pageWidth - marginX, 34, { align: 'right' });
-
-      const chartY = 40;
-      pdf.setDrawColor(229, 231, 235);
-      pdf.roundedRect(marginX, chartY, chartWidth, chartHeight, 3, 3, 'S');
-      pdf.addImage(chartImage, 'PNG', marginX + 2, chartY + 2, chartWidth - 4, chartHeight - 4);
-
-      autoTable(pdf, {
-        startY: chartY + chartHeight + 8,
-        head: [[
-          'PEO',
-          'Description',
-          'Mapped Questions',
-          'Direct %',
-          'Indirect %',
-          'Final %',
-          'Target %',
-          'Status',
-        ]],
-        body: reportData.matrix.map((row, index) => [
-          `PEO ${index + 1}`,
-          row.description,
-          row.mappedQuestions.length > 0 ? row.mappedQuestions.join(', ') : 'No mapped questions',
-          row.directPercentage === null ? 'N/A' : `${row.directPercentage.toFixed(2)}%`,
-          row.indirectPercentage === null ? 'N/A' : `${row.indirectPercentage.toFixed(2)}%`,
-          row.combinedAttainmentPercentage === null ? 'N/A' : `${row.combinedAttainmentPercentage.toFixed(2)}%`,
-          `${row.targetPercentage.toFixed(2)}%`,
-          row.status === 'Achieved' ? 'Achieved' : 'Not Achieved',
-        ]),
-        theme: 'grid',
-        styles: {
-          fontSize: 6.5,
-          cellPadding: 1.5,
-          overflow: 'linebreak',
-          valign: 'middle',
-        },
-        headStyles: {
-          fillColor: [31, 41, 55],
-          textColor: 255,
-          fontStyle: 'bold',
-        },
-        alternateRowStyles: {
-          fillColor: [248, 250, 252],
-        },
-        columnStyles: {
-          0: { cellWidth: 18 },
-          1: { cellWidth: 40 },
-          2: { cellWidth: 58 },
-          3: { cellWidth: 18, halign: 'center' },
-          4: { cellWidth: 18, halign: 'center' },
-          5: { cellWidth: 18, halign: 'center' },
-          6: { cellWidth: 18, halign: 'center' },
-          7: { cellWidth: 24, halign: 'center' },
-        },
-        margin: { left: marginX, right: marginX, bottom: 12 },
-      });
-
-      autoTable(pdf, {
-        startY: (pdf as any).lastAutoTable?.finalY ? (pdf as any).lastAutoTable.finalY + 8 : pageHeight - 60,
-        head: [[
-          'PEO',
-          'CQI Status',
-          'Identified Weakness',
-          'Corrective Action Plan',
-          'Approved By',
-          'Approved Date',
-        ]],
-        body: reportData.cqiSections.length
-          ? reportData.cqiSections.map((section) => [
-              section.peoId,
-              section.cqiStatus,
-              section.rootCause || 'Pending HOD submission',
-              section.remedialPlan || 'Pending HOD submission',
-              section.hodApprovedBy || 'Pending HOD approval',
-              section.hodApprovedDate || '-',
-            ])
-          : [['-', 'No CQI records', 'No CQI records are available yet for this cycle.', '-', '-', '-']],
-        theme: 'grid',
-        styles: {
-          fontSize: 6.5,
-          cellPadding: 1.5,
-          overflow: 'linebreak',
-          valign: 'middle',
-        },
-        headStyles: {
-          fillColor: [31, 41, 55],
-          textColor: 255,
-          fontStyle: 'bold',
-        },
-        alternateRowStyles: {
-          fillColor: [248, 250, 252],
-        },
-        columnStyles: {
-          0: { cellWidth: 20 },
-          1: { cellWidth: 20, halign: 'center' },
-          2: { cellWidth: 68 },
-          3: { cellWidth: 82 },
-          4: { cellWidth: 30 },
-          5: { cellWidth: 32 },
-        },
-        margin: { left: marginX, right: marginX, bottom: 12 },
-      });
-
-      pdf.save(`peo-cqi-advisory-${reportData.header.program}-${reportData.header.evaluationCycleYear}.pdf`);
+      await downloadPEOReportPDF(programId, year, chartImage, batchId);
       toast.success('PEO report PDF downloaded');
     } catch (err) {
-        console.error('Failed to download PEO report PDF:', err);
+      console.warn('Backend PDF export failed, falling back to local export:', err);
+      try {
+        generatePdfLocally(chartImage);
+        toast.success('PEO report PDF downloaded');
+      } catch (fallbackErr) {
+        console.error('Failed to download PEO report PDF:', fallbackErr);
         toast.error('Failed to download PEO report PDF');
-      } finally {
-        setPdfLoading(false);
       }
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
   const handleTriggerCQI = async (row: PEOReportMatrixItem) => {

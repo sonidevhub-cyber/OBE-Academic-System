@@ -397,7 +397,7 @@ const ModularAdminDashboard = () => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <TopbarProfileMenu userData={adminProfile || currentUser} />
+              <TopbarProfileMenu userData={adminProfile || currentUser} showAvatar={false} />
             </div>
           </motion.div>
         </header>

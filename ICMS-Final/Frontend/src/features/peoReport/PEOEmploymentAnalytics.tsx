@@ -130,7 +130,7 @@ const PEOEmploymentAnalytics: React.FC<PEOEmploymentAnalyticsProps> = ({ stats }
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-widest text-gray-400">Employment Status</p>
-              <h3 className="mt-1 text-lg font-bold text-gray-900">Who is doing what right now</h3>
+              <h3 className="mt-1 text-lg font-bold text-gray-900">Employment Distribution</h3>
             </div>
           </div>
           <div className="h-[320px]">
@@ -159,7 +159,7 @@ const PEOEmploymentAnalytics: React.FC<PEOEmploymentAnalyticsProps> = ({ stats }
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-widest text-gray-400">Top Employers</p>
-              <h3 className="mt-1 text-lg font-bold text-gray-900">Organizations with the most alumni</h3>
+              <h3 className="mt-1 text-lg font-bold text-gray-900">Top Recruiting Organizations</h3>
             </div>
           </div>
           {stats.topEmployers.length === 0 ? (
