@@ -404,7 +404,8 @@ class FeedbackService:
         )
 
         for g in grouped:
-            percent = (g["total"] / (g["count"] * 5)) * 100
+            # Normalize 1-5 scale to 0-100: ((avg -1)/4)*100 = ((total/count -1)/4)*100 = (total - count)/(4*count)*100
+            percent = ((Decimal(str(g["total"])) - Decimal(str(g["count"]))) / (Decimal(str(g["count"])) * Decimal("4"))) * Decimal("100")
             IndirectCLOAttainment.objects.update_or_create(
                 course_id=g["course"],
                 clo_id=g["clo"],

@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 
+
 class Student(models.Model):
     # STATUS_CHOICES = [
     #     ('active', 'Active'),
@@ -14,7 +15,7 @@ class Student(models.Model):
     registration_number = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=255)
     department = models.ForeignKey(
-        "core.Program", on_delete=models.SET_NULL, null=True, blank=True
+        "core.Department", on_delete=models.SET_NULL, null=True, blank=True
     )
     batch = models.ForeignKey(
         "core.Batch",
@@ -50,6 +51,14 @@ class Student(models.Model):
             if self.user:
                 self.user.custom_id = self.registration_number
                 self.user.save(update_fields=['custom_id'])
+        
+        # Auto-set CS Department if not provided
+        if not self.department:
+            try:
+                from core.models import Department
+                self.department = Department.objects.get(code='CS', is_active=True)
+            except Exception:
+                pass
                 
         super().save(*args, **kwargs)
 

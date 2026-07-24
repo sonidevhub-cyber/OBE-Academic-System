@@ -1263,7 +1263,7 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
     semester_attainment = {}
     for row in grouped_responses:
         if row['count'] and row['count'] > 0:
-            percent = (Decimal(str(row['total'])) / (Decimal(str(row['count'])) * Decimal('5'))) * Decimal('100')
+            percent = ((Decimal(str(row['total'])) - Decimal(str(row['count']))) / (Decimal(str(row['count'])) * Decimal('4'))) * Decimal('100')
             semester_attainment[(row['course'], row['clo'])] = round(percent, 2)
 
     gas = GA.objects.filter(program=batch.program, is_active=True)
@@ -1456,7 +1456,7 @@ def calculate_exit_survey_ga_score(ga, batch):
         return None
     
     avg_rating = responses.aggregate(avg=Avg('rating_value'))['avg']
-    score = round((Decimal(str(avg_rating)) / 5) * 100, 2)
+    score = round(((Decimal(str(avg_rating)) - Decimal('1')) / Decimal('4')) * 100, 2)
     
     from django.contrib.auth import get_user_model
     User = get_user_model()
