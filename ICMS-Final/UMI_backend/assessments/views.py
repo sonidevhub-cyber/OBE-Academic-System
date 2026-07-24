@@ -508,13 +508,16 @@ class CQIView(APIView):
                 }
             )
             if not created:
-                if cqi.status == "approved":
-                    return Response({"error": "Approved cqi cannot be edited"}, status=400)
-                
+                # No HOD approval needed, auto-approve
                 cqi.reason = data['reason']
                 cqi.action_plan = data['action_plan']
-                cqi.status = 'pending'
-                cqi.show_next_offering = False
+                cqi.status = 'approved'
+                cqi.show_next_offering = True
+                cqi.save()
+            else:
+                # Auto-approve new CQI
+                cqi.status = 'approved'
+                cqi.show_next_offering = True
                 cqi.save()
         except Exception as e:
             return Response({"error": str(e)}, status=400)
@@ -782,13 +785,9 @@ class ResubmitCQIView(APIView):
         cqi.reason = request.data.get("reason", cqi.reason)
         cqi.action_plan = request.data.get("action_plan", cqi.action_plan)
 
-        # 🔥 Reset status for re-review
-        cqi.status = "pending"
-        cqi.reviewed_by = None
-        cqi.coordinator_comment = None
-
-        # ✅ Important
-        cqi.show_next_offering = False
+        # 🔥 Auto-approve on resubmit
+        cqi.status = "approved"
+        cqi.show_next_offering = True
 
         cqi.save()
 

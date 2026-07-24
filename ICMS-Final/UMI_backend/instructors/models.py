@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 
+
 class Instructor(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, 
@@ -14,8 +15,13 @@ class Instructor(models.Model):
     phone = models.CharField(max_length=15, blank=True, null=True)
     gender = models.CharField(max_length=20, blank=True, null=True)
     blood_group = models.CharField(max_length=10, blank=True, null=True)
-    department = models.CharField(max_length=100)
-    department_name = models.CharField(max_length=100, blank=True, null=True)
+    department = models.ForeignKey(
+        "core.Department", 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='instructors'
+    )
     employment_type = models.CharField(
         max_length=20, 
         choices=[('PERMANENT', 'Permanent'), ('VISITING', 'Visiting'), ('INTERNEE', 'Internee')],
@@ -34,6 +40,16 @@ class Instructor(models.Model):
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # Auto-set CS Department if not provided
+        if not self.department:
+            try:
+                from core.models import Department
+                self.department = Department.objects.get(code='CS', is_active=True)
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name

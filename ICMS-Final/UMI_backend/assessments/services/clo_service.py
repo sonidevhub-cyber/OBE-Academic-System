@@ -78,9 +78,9 @@ class CLOService:
         for clo in all_clos:
             clos_by_order[clo.order_number].append(clo)
             
-        # Initialize class totals after each student's effective marks are known.
-        class_clo_obtained = {f"CLO-{order_num}": Decimal('0') for order_num in clos_by_order}
-        class_clo_total = {f"CLO-{order_num}": Decimal('0') for order_num in clos_by_order}
+        # Initialize class headcount totals for CLO attainment (>=50% criteria)
+        class_clo_pass_count = {f"CLO-{order_num}": 0 for order_num in clos_by_order}
+        total_students = len(students)
 
         for idx, student in enumerate(students, 1):
             row = {
@@ -231,20 +231,25 @@ class CLOService:
             row["percentage"] = float(round(percentage, 2))
             row["gpa"] = float(gpa)
             row["status"] = "PASS" if percentage >= 50 else "FAIL"
-            report.append(row)
-
+            # Update class pass count for each CLO if student attained ≥50%
             for order_num in clos_by_order:
                 clo_code = f"CLO-{order_num}"
-                class_clo_obtained[clo_code] += student_clo_obtained[clo_code]
-                class_clo_total[clo_code] += student_clo_total[clo_code]
+                total_clo = student_clo_total[clo_code]
+                if total_clo > 0:
+                    student_percent = (student_clo_obtained[clo_code] / total_clo) * 100
+                    if student_percent >= 50:
+                        class_clo_pass_count[clo_code] += 1
+
+            report.append(row)
 
         class_clo_attainment = {}
         for order_num in clos_by_order:
             clo_code = f"CLO-{order_num}"
-            total_clo = class_clo_total[clo_code]
-            avg = Decimal('0')
-            if total_clo > 0:
-                avg = (class_clo_obtained[clo_code] / total_clo) * 100
+            # Calculate class-level attainment using headcount KPI
+            if total_students > 0:
+                class_percent = (Decimal(class_clo_pass_count[clo_code]) / Decimal(total_students)) * 100
+            else:
+                class_percent = Decimal('0')
             
             # Find which clo in this order number is the "original" one to use for CLOAttainment!
             target_clo = None
@@ -271,7 +276,7 @@ class CLOService:
                 kpi = getattr(target_clo, "kpi_target", 60)
                 level = getattr(target_clo, "bloom_level", "K1").replace("K", "")
 
-            is_achieved = avg >= kpi
+            is_achieved = class_percent >= kpi
 
             CLOAttainment.objects.update_or_create(
                 clo=target_clo,
@@ -279,14 +284,14 @@ class CLOService:
                 batch_id=batch_id,
                 semester_id=semester_id,
                 defaults={
-                    "attained_percentage": round(avg, 2),
+                    "attained_percentage": round(class_percent, 2),
                     "kpi_target": kpi,
                     "is_achieved": is_achieved
                 }
             )
 
             class_clo_attainment[clo_code] = {
-                "percentage": float(round(avg, 2)),
+                "percentage": float(round(class_percent, 2)),
                 "kpi": kpi,
                 "level": level,
                 "status": "Achieved" if is_achieved else "Not Achieved"

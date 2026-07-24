@@ -212,7 +212,10 @@ def get_peo_indirect_score(peo_id, batch_id, survey_window=None):
     if responses_qs.exists():
         avg_score = responses_qs.aggregate(avg=models.Avg('score'))['avg']
         print(f"  avg_score from responses: {avg_score}")
-        normalized_score = (avg_score / 5) * 100 if avg_score else 0
+        if avg_score:
+            normalized_score = ((Decimal(str(avg_score)) - Decimal('1')) / Decimal('4')) * Decimal('100')
+        else:
+            normalized_score = Decimal('0')
         sources.append({
             'source': 'Alumni Survey',
             'survey_window': survey_window,

@@ -233,58 +233,13 @@ const HODCQI: React.FC = () => {
                   <h3 className="font-bold text-red-600 text-lg">
                     {item.clo_display}
                   </h3>
-                  <span className={`px-3 py-1 rounded text-white text-sm ${
-                    item.status === "approved"
-                      ? "bg-green-600"
-                      : item.status === "rejected"
-                      ? "bg-red-600"
-                      : "bg-yellow-500"
-                  }`}>
-                    {item.status || "pending"}
-                  </span>
                 </div>
                 <p><b>Instructor:</b> {item.instructor_name}</p>
                 <p><b>Reason:</b> {item.reason}</p>
                 <p><b>Action Plan:</b> {item.action_plan}</p>
-                {item.hod_comment && (
-                  <p className="text-blue-600 mt-1">
-                    <b>HOD Comment:</b> {item.hod_comment}
-                  </p>
-                )}
-                {item.status === "pending" && (
-                  <textarea
-                    placeholder="Write comment (optional)"
-                    className="w-full border p-2 mt-3 rounded"
-                    value={cloComments[item.id] || ""}
-                    onChange={(e) =>
-                      setCloComments({
-                        ...cloComments,
-                        [item.id]: e.target.value
-                      })
-                    }
-                  />
-                )}
                 <p className="text-sm text-gray-500 mt-2">
                   {new Date(item.created_at).toLocaleString()}
                 </p>
-                {item.status === "pending" && (
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      onClick={() => handleCloAction(item.id, "approved")}
-                      disabled={cloLoadingId === item.id}
-                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded"
-                    >
-                      {cloLoadingId === item.id ? "..." : "Approve"}
-                    </button>
-                    <button
-                      onClick={() => handleCloAction(item.id, "rejected")}
-                      disabled={cloLoadingId === item.id}
-                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-1 rounded"
-                    >
-                      {cloLoadingId === item.id ? "..." : "Reject"}
-                    </button>
-                  </div>
-                )}
               </div>
             ))
           )}
