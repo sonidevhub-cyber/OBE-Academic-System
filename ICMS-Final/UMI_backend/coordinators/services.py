@@ -25,13 +25,15 @@ def allocate_teacher(curriculum_version, course, teacher, batch, allocated_by, s
                 semester_no=semester_no if semester_no else course.semester.number if hasattr(course, 'semester') else 1
             )
             
-        # Get existing active allocation for THIS batch
-        existing = TeacherAllocation.objects.filter(
+        existing_query = TeacherAllocation.objects.filter(
             curriculum_version=curriculum_version,
             course=course,
             batch=batch,
             status='active'
-        ).first()
+        )
+        if semester_no is not None:
+            existing_query = existing_query.filter(semester_no=semester_no)
+        existing = existing_query.first()
         
         if existing:
             # If the teacher is the same, no need to do anything
@@ -83,7 +85,19 @@ def allocate_teacher(curriculum_version, course, teacher, batch, allocated_by, s
         
         # Find the semester object
         semester = None
-        if batch.current_semester:
+        if final_semester_no:
+            try:
+                semester = Semester.objects.get(
+                    number=final_semester_no,
+                    program=batch.program
+                )
+            except Semester.DoesNotExist:
+                pass
+
+        if not semester and course.semester:
+            semester = course.semester
+
+        if not semester and batch.current_semester:
             try:
                 semester = Semester.objects.get(
                     number=batch.current_semester,
@@ -92,20 +106,8 @@ def allocate_teacher(curriculum_version, course, teacher, batch, allocated_by, s
             except Semester.DoesNotExist:
                 pass
                 
-        if not semester and course.semester:
-            semester = course.semester
-            
-        if not semester and final_semester_no:
-            try:
-                semester = Semester.objects.get(
-                    number=final_semester_no,
-                    program=batch.program
-                )
-            except Semester.DoesNotExist:
-                pass
-                
         # Create or update CourseSession
-        CourseSession.objects.update_or_create(
+        course_session, _ = CourseSession.objects.get_or_create(
             course=course,
             batch=batch,
             semester=semester,
@@ -115,6 +117,10 @@ def allocate_teacher(curriculum_version, course, teacher, batch, allocated_by, s
                 'assessment_status': 'IN_PROGRESS'
             }
         )
+        if course_session.instructor_id != teacher.id or not course_session.is_active:
+            course_session.instructor = teacher
+            course_session.is_active = True
+            course_session.save(update_fields=['instructor', 'is_active'])
             
         return new_allocation
 

@@ -50,6 +50,11 @@ class InstructorViewSet(viewsets.ModelViewSet):
             last_completed_semester = None
             # Find max semester number that has courses with assessment_status='ASSESSMENT_DONE'
             from obe.models import CourseSession
+            from assessments.workflows import (
+                derive_batch_semester_status,
+                get_permitted_actions,
+                sync_course_session_workflow_from_assessments,
+            )
             completed_semesters = CourseSession.objects.filter(
                 batch=alloc.batch,
                 is_active=True,
@@ -71,6 +76,14 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     status__in=['SAVED', 'EXPORTED', 'FULLY_APPROVED', 'PENDING', 'SENT_BACK'],
                     is_active=True
                 ).order_by('-created_at').first()
+            course_session = CourseSession.objects.filter(
+                course=alloc.course,
+                batch=alloc.batch,
+                semester=core_semester,
+                is_active=True,
+            ).first()
+            course_session = sync_course_session_workflow_from_assessments(course_session)
+            semester_status = derive_batch_semester_status(alloc.batch, core_semester) if core_semester else 'ONGOING'
             data.append({
                 'id': alloc.id,
                 'allocation_id': alloc.id,
@@ -85,6 +98,12 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'last_completed_semester': last_completed_semester,
                 'semester_no': alloc.semester_no,
                 'semester_id': core_semester.id if core_semester else None,
+                'course_session_id': course_session.id if course_session else None,
+                'internals_locked': bool(course_session and course_session.internals_locked),
+                'internal_complete_awaiting_final': bool(course_session and course_session.internal_complete_awaiting_final),
+                'final_submitted': bool(course_session and course_session.final_submitted),
+                'semester_status': semester_status,
+                'permitted_actions': get_permitted_actions(semester_status),
                 'semester_name': f"Semester {alloc.semester_no}",
                 'program_name': alloc.batch.program.name,
                 'program_code': alloc.batch.program.code,

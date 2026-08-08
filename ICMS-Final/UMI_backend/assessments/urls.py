@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AssessmentHistoryView, AssessmentMarksView, CQIView, CheckCQIStatusView, CreateAssessmentView, CLOCoverageView, CoordinatorCQIView, UpdateStudentMarksView,student_result, CheckCQIView,EnterMarksView, ResubmitCQIView, UpdateCQIStatusView,PreviousCQIView, UpdateStudentMarksView, AssessmentListView, HODCQIListView
+from .views import AssessmentHistoryView, AssessmentMarksView, CQIView, CheckCQIStatusView, CreateAssessmentView, CLOCoverageView, CoordinatorCQIView, CourseSessionStatusView, LockInternalAssessmentsView, UpdateStudentMarksView,student_result, CheckCQIView,EnterMarksView, ResubmitCQIView, UpdateCQIStatusView,PreviousCQIView, UpdateStudentMarksView, AssessmentListView, HODCQIListView
 from .services.view import CLOReportView
 
 urlpatterns = [
@@ -8,6 +8,9 @@ urlpatterns = [
     path('', AssessmentListView.as_view()),
     path('create/', CreateAssessmentView.as_view()),
     path('clo-coverage/', CLOCoverageView.as_view()),
+    path('course-session-status/', CourseSessionStatusView.as_view()),
+    path('course-sessions/<uuid:course_session_id>/lock-internals/', LockInternalAssessmentsView.as_view()),
+    path('lock-internals/', LockInternalAssessmentsView.as_view()),
     path('<uuid:assessment_id>/enter-marks/', EnterMarksView.as_view()),
 
     # 🔥 OBE Report

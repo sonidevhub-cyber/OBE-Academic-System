@@ -11,7 +11,15 @@ from obe.services import get_students_for_batch
 class CLOService:
 
     @staticmethod
-    def generate_student_report(course_id, batch_id, semester_id, course_retake=None):
+    def generate_student_report(
+        course_id,
+        batch_id,
+        semester_id,
+        course_retake=None,
+        assessment_types=None,
+        report_status="FINAL",
+        lock_attainment=False,
+    ):
         session = CourseSession.objects.filter(
             course_id=course_id,
             batch_id=batch_id,
@@ -23,13 +31,16 @@ class CLOService:
                 Q(user__batch_id=batch_id) | Q(batch_id=batch_id)
             ).distinct()
         )
-        assessments = list(Assessment.objects.filter(
+        assessments_query = Assessment.objects.filter(
             course_id=course_id,
             batch_id=batch_id,
             semester_id=semester_id,
             is_finalized=True,
             course_retake__isnull=True  # Only original assessments
-        ).order_by('assessment_type', 'id'))
+        )
+        if assessment_types is not None:
+            assessments_query = assessments_query.filter(assessment_type__in=assessment_types)
+        assessments = list(assessments_query.order_by('assessment_type', 'id'))
 
         if not assessments:
             return {"error": "No finalized assessments found"}
@@ -98,7 +109,7 @@ class CLOService:
 
         def build_type_groups(source_assessments, source_questions):
             formatted = []
-            assessment_types = ["quiz", "assignment", "midterm", "presentation", "final"]
+            assessment_types = ["quiz", "assignment", "presentation", "sessional", "midterm", "final"]
             for type_name in assessment_types:
                 type_assessments = []
                 for assessment in source_assessments:
@@ -485,7 +496,7 @@ class CLOService:
                     assessment__course_id=course_id,
                     assessment__batch_id=batch_id,
                     assessment__semester_id=semester_id,
-                    assessment__is_finalized=True,
+                    assessment__in=assessments,
                     assessment__course_retake__isnull=True
                 ).exists()
                 if has_original:
@@ -509,7 +520,9 @@ class CLOService:
                 defaults={
                     "attained_percentage": round(class_percent, 2),
                     "kpi_target": kpi,
-                    "is_achieved": is_achieved
+                    "is_achieved": is_achieved,
+                    "report_status": report_status,
+                    "is_locked": lock_attainment,
                 }
             )
 
@@ -540,6 +553,7 @@ class CLOService:
             "class_clo_attainment": class_clo_attainment,
             "all_clos": all_clos,
             "allow_result_editing": session.allow_result_editing if session else False,
+            "report_status": report_status,
             "course": {
                 "code": course.code if course else "",
                 "name": course.name if course else ""

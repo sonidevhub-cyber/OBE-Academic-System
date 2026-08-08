@@ -32,6 +32,8 @@ WEIGHTAGE_MAP = {
     'final': 50,
 }
 
+INTERNAL_ASSESSMENT_TYPES = {'quiz', 'assignment', 'presentation', 'midterm'}
+
 
 # 🔥 MAIN ASSESSMENT MODEL
 class Assessment(models.Model):
@@ -53,6 +55,7 @@ class Assessment(models.Model):
 
     # 🔥 IMPORTANT (OBE FLOW)
     is_finalized = models.BooleanField(default=False)
+    is_locked = models.BooleanField(default=False)
     
     # 🔥 RETAKE SUPPORT
     course_retake = models.ForeignKey('retake.CourseRetake', on_delete=models.CASCADE, null=True, blank=True, related_name='assessments')
@@ -174,6 +177,10 @@ class StudentRubricScore(models.Model):
 
 # 🔥 CLO ATTAINMENT (COURSE LEVEL)
 class CLOAttainment(models.Model):
+    REPORT_STATUS_CHOICES = [
+        ('PROVISIONAL', 'Provisional'),
+        ('FINAL', 'Final'),
+    ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     clo = models.ForeignKey('obe.CLO', on_delete=models.CASCADE)
@@ -187,6 +194,8 @@ class CLOAttainment(models.Model):
     kpi_target = models.DecimalField(max_digits=5, decimal_places=2, default=60)
 
     is_achieved = models.BooleanField(default=False)
+    is_locked = models.BooleanField(default=False)
+    report_status = models.CharField(max_length=20, choices=REPORT_STATUS_CHOICES, default='FINAL')
 
     created_at = models.DateTimeField(auto_now_add=True)
 

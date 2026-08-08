@@ -9,6 +9,7 @@ from core.permissions import IsSAC, IsSACOrCoordinator
 from core.serializers.batch import BatchCreateSerializer, BatchListSerializer
 from core.serializers.user import UserListSerializer
 from django.contrib.auth import get_user_model
+from rest_framework.views import APIView
 
 
 User = get_user_model()
@@ -156,4 +157,44 @@ class AllBatchesView(generics.ListAPIView):
         if program_id:
             queryset = queryset.filter(program_id=program_id)
         return queryset
+
+
+class BatchSemesterSelectorView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, batch_id):
+        from assessments.workflows import derive_batch_semester_status, get_permitted_actions
+        from core.models import Semester
+
+        try:
+            batch = Batch.objects.select_related('program').get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        semesters = Semester.objects.filter(
+            program=batch.program,
+            is_active=True,
+            number__lte=batch.current_semester,
+        ).order_by('-number')
+
+        data = []
+        for semester in semesters:
+            status_value = derive_batch_semester_status(batch, semester)
+            data.append({
+                'id': str(semester.id),
+                'number': semester.number,
+                'name': semester.name,
+                'status': status_value,
+                'is_current': semester.number == batch.current_semester,
+                'permitted_actions': get_permitted_actions(status_value),
+            })
+
+        return Response({
+            'batch': {
+                'id': str(batch.id),
+                'name': batch.name,
+                'current_semester': batch.current_semester,
+            },
+            'semesters': data,
+        })
 

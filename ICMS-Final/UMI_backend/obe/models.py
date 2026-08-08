@@ -481,6 +481,9 @@ class CourseSession(models.Model):
         null=True, blank=True
     ) 
     assessment_done = models.BooleanField(default=False)
+    internals_locked = models.BooleanField(default=False)
+    internal_complete_awaiting_final = models.BooleanField(default=False)
+    final_submitted = models.BooleanField(default=False)
     allow_result_editing = models.BooleanField(default=False)
     locked_at = models.DateTimeField(null=True, blank=True)
     unlocked_by = models.ForeignKey(
@@ -511,6 +514,10 @@ class CourseSession(models.Model):
 
 
 class CourseGAScore(models.Model):
+    REPORT_STATUS_CHOICES = [
+        ('PROVISIONAL', 'Provisional'),
+        ('FINAL', 'Final'),
+    ]
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -531,6 +538,7 @@ class CourseGAScore(models.Model):
     calculated_at = models.DateTimeField(auto_now_add=True)
     is_stale = models.BooleanField(default=False)
     locked = models.BooleanField(default=False)
+    report_status = models.CharField(max_length=20, choices=REPORT_STATUS_CHOICES, default='FINAL')
     is_active = models.BooleanField(default=True)
 
     class Meta:

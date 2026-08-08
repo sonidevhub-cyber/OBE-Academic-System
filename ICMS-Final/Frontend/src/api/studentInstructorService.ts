@@ -111,13 +111,13 @@ export const departmentService = {
 // Instructor Service
 export const instructorService = {
   // Using the correct endpoint path that matches the backend URL configuration
-  getAllInstructors: (): Promise<AxiosResponse<any>> => api.get('instructors/instructor/'),
-  getInstructorById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`instructors/instructor/${id}/`),
+  getAllInstructors: (): Promise<AxiosResponse<any>> => api.get('instructors/'),
+  getInstructorById: (id: string | number): Promise<AxiosResponse<any>> => api.get(`instructors/${id}/`),
   getInstructorProfile: (): Promise<AxiosResponse<any>> => api.get('instructors/profile/'),
-  createInstructor: (data: Instructor | FormData): Promise<AxiosResponse<any>> => api.post('instructors/instructor/', data),
-  updateInstructor: (id: string | number, data: Instructor | FormData): Promise<AxiosResponse<any>> => api.put(`instructors/instructor/${id}/`, data),
-  deleteInstructor: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`instructors/instructor/${id}/`),
-  uploadInstructorImage: (id: string | number, imageData: FormData): Promise<AxiosResponse<any>> => api.post(`instructors/instructor/${id}/upload-image/`, imageData),
+  createInstructor: (data: Instructor | FormData): Promise<AxiosResponse<any>> => api.post('instructors/', data),
+  updateInstructor: (id: string | number, data: Instructor | FormData): Promise<AxiosResponse<any>> => api.put(`instructors/${id}/`, data),
+  deleteInstructor: (id: string | number): Promise<AxiosResponse<any>> => api.delete(`instructors/${id}/`),
+  uploadInstructorImage: (id: string | number, imageData: FormData): Promise<AxiosResponse<any>> => api.post(`instructors/${id}/upload-image/`, imageData),
   getAllDepartments: (): Promise<AxiosResponse<any>> => api.get('academics/departments/'),
 };
 

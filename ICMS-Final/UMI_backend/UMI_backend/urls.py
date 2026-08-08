@@ -4,6 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 from core.root_urls import urlpatterns as core_root_urlpatterns
+from core.views.batch import BatchSemesterSelectorView
 
 from academics import views as academics_views
 
@@ -21,6 +22,7 @@ urlpatterns += [
     path('api/register/', include('register.urls')),
     path('api/auth/', include('register.urls')),
     path('api/users/', include('core.urls.user')),
+    path('api/batches/<uuid:batch_id>/semesters/', BatchSemesterSelectorView.as_view(), name='api-batch-semesters'),
     path('api/batches/', include('academic_structure.urls')),
     path('api/programs/', include('core.urls.program')),
     path('api/courses/', include('core.urls.course')),

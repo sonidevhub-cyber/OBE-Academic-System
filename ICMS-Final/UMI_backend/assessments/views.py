@@ -7,7 +7,7 @@ from decimal import Decimal
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from students.models import Student
-from .models import Assessment, StudentAssessment
+from .models import Assessment, StudentAssessment, INTERNAL_ASSESSMENT_TYPES
 
 import uuid
 
@@ -23,6 +23,17 @@ from core.models import Batch, Semester
 from students.models import Student
 from obe.models import CLO, GA
 from .serializer import AssessmentCreateSerializer, AssessmentDetailSerializer
+from clo_master.signals import append_course_to_clo_master
+from .workflows import (
+    derive_batch_semester_status,
+    get_course_session,
+    get_permitted_actions,
+    lock_internal_assessments,
+    mark_final_submitted_from_assessment,
+    sync_course_session_workflow_from_assessments,
+    update_semester_status_from_sessions,
+    validate_semester_write_allowed,
+)
 
 
 QUESTION_BLOOM_LEVEL_MAP = {
@@ -170,14 +181,30 @@ class CreateAssessmentView(APIView):
         except Batch.DoesNotExist:
             return Response({"error": "Invalid batch"}, status=400)
 
-        # ✅ SEMESTER AUTO
+        # ✅ SEMESTER AUTO / EXPLICIT
         try:
-            semester = Semester.objects.get(
-                program=batch.program,
-                number=batch.current_semester
-            )
+            if data.get('semester'):
+                semester = Semester.objects.get(id=data['semester'], program=batch.program)
+            elif data.get('semester_number'):
+                semester = Semester.objects.get(program=batch.program, number=data['semester_number'])
+            else:
+                semester = Semester.objects.get(
+                    program=batch.program,
+                    number=batch.current_semester
+                )
         except Semester.DoesNotExist:
             return Response({"error": "Semester not found"}, status=400)
+
+        course_session = get_course_session(data['course'], batch, semester)
+        try:
+            validate_semester_write_allowed(
+                semester=semester,
+                batch=batch,
+                assessment_type=data['type'],
+                course_session=course_session,
+            )
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=400)
 
         # ✅ CHECK IF FINAL IS ALREADY FINALIZED (for retake and non-retake)
         final_check_query = Assessment.objects.filter(
@@ -340,6 +367,21 @@ class EnterMarksView(APIView):
             batch=assessment.batch,
             semester=assessment.semester
         ).first()
+
+        try:
+            validate_semester_write_allowed(
+                semester=assessment.semester,
+                batch=assessment.batch,
+                assessment_type=assessment.assessment_type,
+                course_session=course_session,
+            )
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=400)
+
+        if assessment.is_locked and assessment.assessment_type != "final":
+            return Response({
+                "error": "Internals are locked for this course. Only the Final assessment can be submitted."
+            }, status=400)
         
 
         # ✅ Step 3: Finalized check
@@ -459,6 +501,8 @@ class EnterMarksView(APIView):
                 course_session.assessment_status = "ASSESSMENT_DONE"
                 course_session.save()
                 
+                append_course_to_clo_master(None, course_session, False)
+
                 print(f"[EnterMarksView] CourseSession {'created' if created else 'updated'}: "
                       f"{course_session.id} - status set to ASSESSMENT_DONE")
 
@@ -474,6 +518,9 @@ class EnterMarksView(APIView):
                     )
                     for ga in gas:
                         check_and_trigger_ga_cqi(assessment.batch, ga)
+
+        if is_normal_final_assessment:
+            mark_final_submitted_from_assessment(assessment)
 
         return Response({
             "message": "Marks saved and finalized",
@@ -1102,10 +1149,93 @@ class AssessmentHistoryView(APIView):
                 "date": ass.assessment_date,
                 "total_marks": ass.total_marks,
                 "is_finalized": ass.is_finalized,
+                "is_locked": ass.is_locked,
             })
         
         logger.info(f"[AssessmentHistoryView] Returning {len(data)} assessments")
         return Response(data)
+
+
+class CourseSessionStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        course_id = request.GET.get("course")
+        batch_id = request.GET.get("batch")
+        semester_number = request.GET.get("semester")
+        semester_id = request.GET.get("semester_id")
+
+        if not course_id or not batch_id:
+            return Response({"error": "course and batch are required"}, status=400)
+
+        try:
+            batch = Batch.objects.get(id=batch_id)
+            if semester_id:
+                semester = Semester.objects.get(id=semester_id, program=batch.program)
+            else:
+                semester = Semester.objects.get(program=batch.program, number=semester_number or batch.current_semester)
+        except (Batch.DoesNotExist, Semester.DoesNotExist):
+            return Response({"error": "Invalid batch or semester"}, status=400)
+
+        session = CourseSession.objects.filter(
+            course_id=course_id,
+            batch=batch,
+            semester=semester,
+            is_active=True,
+        ).first()
+        session = sync_course_session_workflow_from_assessments(session)
+
+        status_value = derive_batch_semester_status(batch, semester)
+        return Response({
+            "course_session_id": str(session.id) if session else None,
+            "internals_locked": bool(session and session.internals_locked),
+            "internal_complete_awaiting_final": bool(session and session.internal_complete_awaiting_final),
+            "final_submitted": bool(session and session.final_submitted),
+            "semester_status": status_value,
+            "permitted_actions": get_permitted_actions(status_value),
+        })
+
+
+class LockInternalAssessmentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, course_session_id=None):
+        try:
+            if course_session_id:
+                course_session = CourseSession.objects.get(
+                    id=course_session_id,
+                    instructor=request.user,
+                    is_active=True,
+                )
+            else:
+                batch = Batch.objects.get(id=request.data.get("batch"))
+                semester = Semester.objects.get(
+                    program=batch.program,
+                    number=request.data.get("semester_number") or batch.current_semester,
+                )
+                course_session = CourseSession.objects.get(
+                    course_id=request.data.get("course"),
+                    batch=batch,
+                    semester=semester,
+                    instructor=request.user,
+                    is_active=True,
+                )
+        except (CourseSession.DoesNotExist, Batch.DoesNotExist, Semester.DoesNotExist):
+            return Response({"error": "Course session not found"}, status=404)
+
+        try:
+            session = lock_internal_assessments(course_session)
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=400)
+
+        return Response({
+            "message": "Internal assessments locked successfully.",
+            "course_session_id": str(session.id),
+            "internals_locked": session.internals_locked,
+            "internal_complete_awaiting_final": session.internal_complete_awaiting_final,
+            "final_submitted": session.final_submitted,
+            "semester_status": derive_batch_semester_status(session.batch, session.semester),
+        })
 from decimal import Decimal
 
 from rest_framework.views import APIView
@@ -1279,6 +1409,22 @@ class UpdateStudentMarksView(APIView):
             return Response(
                 {"error": "Result editing is disabled."},
                 status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            validate_semester_write_allowed(
+                semester=assessment.semester,
+                batch=assessment.batch,
+                assessment_type=assessment.assessment_type,
+                course_session=session,
+            )
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if assessment.is_locked and assessment.assessment_type != "final":
+            return Response(
+                {"error": "Internals are locked for this course. Only the Final assessment can be submitted."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         updated = 0

@@ -4,6 +4,18 @@ from django.conf import settings
 
 
 class Semester(models.Model):
+    STATUS_ONGOING = 'ONGOING'
+    STATUS_AWAITING_EXTERNAL_RESULT = 'AWAITING_EXTERNAL_RESULT'
+    STATUS_RESULT_RECEIVED = 'RESULT_RECEIVED'
+    STATUS_FINALIZED = 'FINALIZED'
+
+    STATUS_CHOICES = [
+        (STATUS_ONGOING, 'Ongoing'),
+        (STATUS_AWAITING_EXTERNAL_RESULT, 'Awaiting External Result'),
+        (STATUS_RESULT_RECEIVED, 'Result Received'),
+        (STATUS_FINALIZED, 'Finalized'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     program = models.ForeignKey(
         'core.Program',
@@ -12,6 +24,11 @@ class Semester(models.Model):
     )
     number = models.IntegerField()
     name = models.CharField(max_length=50)
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_ONGOING,
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

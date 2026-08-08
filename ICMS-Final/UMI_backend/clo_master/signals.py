@@ -1,5 +1,8 @@
 
 
+from decimal import Decimal
+
+from django.db.models import Q
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.db import transaction
@@ -10,14 +13,109 @@ from curriculum.models import CurriculumVersion
 from .models import SemesterCLOMasterCache, CourseCLOMasterEntry
 
 
+def should_append_course_to_clo_master(course_session: CourseSession) -> bool:
+    return (
+        course_session.assessment_status == "ASSESSMENT_DONE"
+        or course_session.internal_complete_awaiting_final
+    )
+
+
+def session_needs_clo_cache_sync(course_session: CourseSession, master_cache: SemesterCLOMasterCache) -> bool:
+    """Return True when live StudentCLOScore rows differ from cached master entries."""
+    if not should_append_course_to_clo_master(course_session):
+        return False
+
+    active_scores = {
+        (score.clo_id, score.student_id): score.attainment
+        for score in StudentCLOScore.objects.filter(
+            course_session=course_session,
+            is_active=True,
+        )
+    }
+    if not active_scores:
+        return False
+
+    cached_scores = {
+        (entry.clo_id, entry.student_id): entry.clo_score
+        for entry in CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            course_session=course_session,
+            is_active=True,
+        )
+    }
+
+    if set(active_scores.keys()) != set(cached_scores.keys()):
+        return True
+
+    for key, attainment in active_scores.items():
+        cached_score = cached_scores.get(key)
+        if cached_score is None:
+            return True
+        if Decimal(str(cached_score)) != Decimal(str(attainment)):
+            return True
+
+    return False
+
+
+def sync_stale_clo_master_cache(
+    *,
+    program,
+    batch,
+    semester,
+    valid_course_ids=None,
+    force=False,
+) -> SemesterCLOMasterCache | None:
+    """
+    Keep the semester CLO master cache aligned with live StudentCLOScore data.
+
+    Called on report load so coordinators see the same freshness as GA reports
+    without pressing Refresh.
+    """
+    if not batch:
+        return None
+
+    master_cache, _ = SemesterCLOMasterCache.objects.get_or_create(
+        program=program,
+        batch=batch,
+        semester=semester,
+        defaults={
+            "total_courses_expected": len(valid_course_ids or []),
+            "total_courses_finalized": 0,
+        },
+    )
+
+    if valid_course_ids is not None and master_cache.total_courses_expected != len(valid_course_ids):
+        master_cache.total_courses_expected = len(valid_course_ids)
+        master_cache.save(update_fields=["total_courses_expected"])
+
+    reportable_sessions = CourseSession.objects.filter(
+        course__program=program,
+        semester=semester,
+        batch=batch,
+        is_active=True,
+    ).filter(
+        Q(assessment_status="ASSESSMENT_DONE")
+        | Q(internal_complete_awaiting_final=True)
+    )
+    if valid_course_ids:
+        reportable_sessions = reportable_sessions.filter(course__id__in=valid_course_ids)
+
+    for session in reportable_sessions:
+        if force or session_needs_clo_cache_sync(session, master_cache):
+            append_course_to_clo_master(sender=CourseSession, instance=session, created=False)
+
+    master_cache.refresh_from_db()
+    return master_cache
+
+
 @receiver(post_save, sender=CourseSession)
 def append_course_to_clo_master(sender, instance, created, **kwargs):
     """
-    Signal that updates clo master cache when a CourseSession's assessment status
-    changes to ASSESSMENT_DONE (locked).
+    Signal that updates CLO master cache when a course session has reportable
+    CLO scores (final complete or provisional internals-only snapshot).
     """
-    if instance.assessment_status != 'ASSESSMENT_DONE':
-        return  # Only proceed if assessment is marked as done
+    if not should_append_course_to_clo_master(instance):
+        return
 
     with transaction.atomic():
         program = instance.course.program

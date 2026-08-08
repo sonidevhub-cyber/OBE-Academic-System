@@ -30,11 +30,17 @@ def cache_previous_course_session_state(sender, instance, **kwargs):
         "allow_result_editing",
         "locked_at",
         "unlocked_by_id",
+        "internals_locked",
+        "internal_complete_awaiting_final",
+        "final_submitted",
     ).first()
     instance._previous_assessment_status = previous["assessment_status"] if previous else None
     instance._previous_allow_result_editing = previous["allow_result_editing"] if previous else None
     instance._previous_locked_at = previous["locked_at"] if previous else None
     instance._previous_unlocked_by_id = previous["unlocked_by_id"] if previous else None
+    instance._previous_internals_locked = previous["internals_locked"] if previous else None
+    instance._previous_internal_complete_awaiting_final = previous["internal_complete_awaiting_final"] if previous else None
+    instance._previous_final_submitted = previous["final_submitted"] if previous else None
 
 
 @receiver(post_save, sender=CourseSession)
@@ -56,6 +62,26 @@ def invalidate_ga_cache_on_course_session_change(sender, instance, created, **kw
 
     if unlocked_or_edited:
         transaction.on_commit(lambda: _invalidate_course_session_ga_cache(instance))
+
+
+@receiver(post_save, sender=CourseSession)
+def update_semester_status_on_course_session_flags(sender, instance, created, **kwargs):
+    if not instance.batch_id or not instance.semester_id:
+        return
+
+    changed = created or any([
+        getattr(instance, "_previous_internals_locked", None) != instance.internals_locked,
+        getattr(instance, "_previous_internal_complete_awaiting_final", None) != instance.internal_complete_awaiting_final,
+        getattr(instance, "_previous_final_submitted", None) != instance.final_submitted,
+    ])
+    if not changed:
+        return
+
+    def _update():
+        from assessments.workflows import update_semester_status_from_sessions
+        update_semester_status_from_sessions(instance.batch, instance.semester)
+
+    transaction.on_commit(_update)
 
 
 @receiver(post_save, sender=CourseSession)

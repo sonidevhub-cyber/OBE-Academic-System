@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
@@ -57,56 +58,43 @@ def get_clo_master_report(request, program_id, semester_id):
             for cvc in curriculum_version_courses
         ]
 
-    # Get or create master cache when batch context is available.
+    # Keep the master cache aligned with live CLO scores on every report load,
+    # similar to how GA reports read fresh CourseGAScore rows.
     master_cache = None
     if batch:
-        master_cache, cache_created = SemesterCLOMasterCache.objects.get_or_create(
-            program=program,
-            batch=batch,
-            semester=semester,
-            defaults={
-                "total_courses_expected": len(valid_course_ids),
-                "total_courses_finalized": 0,
-            },
-        )
+        from .signals import sync_stale_clo_master_cache
 
-        if cache_created or master_cache.total_courses_expected != len(valid_course_ids):
-            master_cache.total_courses_expected = len(valid_course_ids)
-            master_cache.save()
-
-        # Refresh the cache whenever a retake has been updated more recently
-        # than the last cached master row for this batch/semester.
         latest_retake = (
             CourseRetake.objects.filter(current_batch=batch, is_active=True)
             .order_by("-updated_at")
             .first()
         )
-        should_refresh = cache_created or force_refresh
-        if latest_retake and master_cache.last_updated and latest_retake.updated_at > master_cache.last_updated:
-            should_refresh = True
-
-        if should_refresh:
-            # Trigger cache population for all already finalized courses.
-            from obe.models import CourseSession
-            from .signals import append_course_to_clo_master
-
-            finalized_sessions = CourseSession.objects.filter(
-                course__program=program,
+        force_sync = force_refresh
+        if (
+            not force_sync
+            and latest_retake
+        ):
+            existing_cache = SemesterCLOMasterCache.objects.filter(
+                program=program,
+                batch=batch,
                 semester=semester,
-                batch_id=batch_id,
-                assessment_status="ASSESSMENT_DONE",
-                is_active=True,
-            )
-            if valid_course_ids:
-                finalized_sessions = finalized_sessions.filter(course__id__in=valid_course_ids)
-            for session in finalized_sessions:
-                append_course_to_clo_master(
-                    sender=CourseSession,
-                    instance=session,
-                    created=False,
+            ).first()
+            if (
+                existing_cache is None
+                or (
+                    existing_cache.last_updated
+                    and latest_retake.updated_at > existing_cache.last_updated
                 )
+            ):
+                force_sync = True
 
-            master_cache.refresh_from_db()
+        master_cache = sync_stale_clo_master_cache(
+            program=program,
+            batch=batch,
+            semester=semester,
+            valid_course_ids=valid_course_ids,
+            force=force_sync,
+        )
 
     # Get all course sessions for pending list.
     from obe.models import CourseSession
@@ -121,7 +109,8 @@ def get_clo_master_report(request, program_id, semester_id):
     if valid_course_ids:
         all_course_sessions = all_course_sessions.filter(course__id__in=valid_course_ids)
     pending_course_sessions = all_course_sessions.exclude(
-        assessment_status="ASSESSMENT_DONE"
+        Q(assessment_status="ASSESSMENT_DONE")
+        | Q(internal_complete_awaiting_final=True)
     )
 
     sessions_by_course_id = {

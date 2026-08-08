@@ -10,14 +10,37 @@ const CourseAllocationBulkModule: React.FC = () => {
   const [programs, setPrograms] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
+  const [semesters, setSemesters] = useState<any[]>([]);
   const [instructors, setInstructors] = useState<any[]>([]);
 
   const [selectedProgram, setSelectedProgram] = useState<string>('');
   const [selectedBatch, setSelectedBatch] = useState<any>(null);
+  const [selectedSemester, setSelectedSemester] = useState<any>(null);
   const [currentVersion, setCurrentVersion] = useState<any>(null);
   const [allocations, setAllocations] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isSemesterReadOnly = ['RESULT_RECEIVED', 'FINALIZED'].includes(selectedSemester?.status);
+  const canReassignInstructors = Boolean(selectedSemester?.permitted_actions?.can_reassign_instructors ?? true) && !isSemesterReadOnly;
+  const canSaveAllocations = canReassignInstructors && courses.length > 0;
+
+  const statusBadgeClass = (status?: string) => {
+    switch (status) {
+      case 'AWAITING_EXTERNAL_RESULT':
+        return 'bg-amber-100 text-amber-800';
+      case 'RESULT_RECEIVED':
+        return 'bg-blue-100 text-blue-700';
+      case 'FINALIZED':
+        return 'bg-gray-200 text-gray-600';
+      default:
+        return 'bg-green-100 text-green-700';
+    }
+  };
+
+  const formatStatus = (status?: string) => {
+    if (!status) return 'ONGOING';
+    return status.replace(/_/g, ' ');
+  };
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -67,6 +90,8 @@ const CourseAllocationBulkModule: React.FC = () => {
           const batchesData = res.data?.data || res.data || [];
           setBatches(Array.isArray(batchesData) ? batchesData : []);
           setSelectedBatch(null);
+          setSelectedSemester(null);
+          setSemesters([]);
           setCourses([]);
           setAllocations({});
         } catch (err) {
@@ -78,15 +103,42 @@ const CourseAllocationBulkModule: React.FC = () => {
     } else {
       setBatches([]);
       setSelectedBatch(null);
+      setSelectedSemester(null);
+      setSemesters([]);
       setCourses([]);
     }
   }, [selectedProgram]);
 
+  useEffect(() => {
+    if (!selectedBatch?.id) {
+      setSemesters([]);
+      setSelectedSemester(null);
+      return;
+    }
+
+    const loadSemesters = async () => {
+      try {
+        const res = await coordinatorService.getBatchSemesters(selectedBatch.id);
+        const semesterRows = res.data?.semesters || [];
+        setSemesters(semesterRows);
+        const current = semesterRows.find((semester: any) => semester.is_current) || semesterRows[0] || null;
+        setSelectedSemester(current);
+      } catch (err) {
+        console.error('Error loading semester selector:', err);
+        toast.error('Failed to load semesters for this batch');
+        setSemesters([]);
+        setSelectedSemester(null);
+      }
+    };
+
+    loadSemesters();
+  }, [selectedBatch?.id]);
+
   const loadCourses = async () => {
-    if (!selectedBatch) return;
+    if (!selectedBatch || !selectedSemester) return;
     try {
       setLoading(true);
-      console.log('Loading courses for batch:', selectedBatch.name, 'ID:', selectedBatch.id, 'Semester:', selectedBatch.current_semester);
+      console.log('Loading courses for batch:', selectedBatch.name, 'ID:', selectedBatch.id, 'Semester:', selectedSemester.number);
 
       const versionId = selectedBatch.curriculum_version_id;
       let version: any = null;
@@ -117,7 +169,7 @@ const CourseAllocationBulkModule: React.FC = () => {
       setCurrentVersion(detailData);
       console.log('Version details:', detailData);
 
-      const semesterKey = `semester_${selectedBatch.current_semester || 1}`;
+      const semesterKey = `semester_${selectedSemester.number || selectedBatch.current_semester || 1}`;
       const semesterCourses = detailData.courses_by_semester?.[semesterKey] || [];
 
       const transformedCourses = semesterCourses.map((vc: any) => ({
@@ -164,7 +216,7 @@ const CourseAllocationBulkModule: React.FC = () => {
 
   useEffect(() => {
     loadCourses();
-  }, [selectedBatch]);
+  }, [selectedBatch, selectedSemester]);
 
   const handleInstructorChange = (courseId: string, instructorId: string) => {
     setAllocations(prev => ({
@@ -175,6 +227,11 @@ const CourseAllocationBulkModule: React.FC = () => {
   const handleSave = async () => {
     if (!selectedBatch) {
       toast.error('Please select a batch first');
+      return;
+    }
+
+    if (!canSaveAllocations) {
+      toast.error('This semester is read-only.');
       return;
     }
 
@@ -331,10 +388,33 @@ const CourseAllocationBulkModule: React.FC = () => {
             </select>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              <Clock className="h-4 w-4 inline mr-2 text-green-600" />
+              Select Semester
+            </label>
+            <select
+              value={selectedSemester?.id || ''}
+              onChange={(e) => {
+                const semester = semesters.find(s => s.id === e.target.value);
+                setSelectedSemester(semester || null);
+              }}
+              disabled={!selectedBatch}
+              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition-all disabled:bg-gray-50 disabled:cursor-not-allowed"
+            >
+              <option value="">Choose a semester...</option>
+              {semesters.map(semester => (
+                <option key={semester.id} value={semester.id}>
+                  Semester {semester.number} - {formatStatus(semester.status)}
+                </option>
+              ))}
+            </select>
+          </div>
+
         </div>
       </div>
 
-      {selectedBatch && (
+      {selectedBatch && selectedSemester && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -355,12 +435,18 @@ const CourseAllocationBulkModule: React.FC = () => {
               <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Course Allocations</h3>
-                  <p className="text-sm text-gray-500">Assign instructors to courses for {selectedBatch.name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="text-sm text-gray-500">Assign instructors to courses for {selectedBatch.name}</p>
+                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusBadgeClass(selectedSemester.status)}`}>
+                      {selectedSemester.status === 'FINALIZED' ? 'Locked - ' : ''}{formatStatus(selectedSemester.status)}
+                    </span>
+                  </div>
                 </div>
                 <button
                   onClick={handleSave}
-                  disabled={saving || Object.keys(allocations).length === 0}
+                  disabled={saving || Object.keys(allocations).length === 0 || !canSaveAllocations}
                   className="flex items-center px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
+                  title={!canSaveAllocations ? 'This semester is read-only.' : undefined}
                 >
                   {saving ? (
                     <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
@@ -410,7 +496,9 @@ const CourseAllocationBulkModule: React.FC = () => {
                               <select
         value={allocations[course.id] || ''}
                                 onChange={(e) => handleInstructorChange(course.id, e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none appearance-none bg-white"
+                                disabled={!canReassignInstructors}
+                                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none appearance-none bg-white disabled:bg-gray-50 disabled:cursor-not-allowed"
+                                title={!canReassignInstructors ? 'This semester is read-only.' : undefined}
                               >
                                 <option value="">Select Instructor</option>
                             {instructors.map(inst => {
@@ -467,7 +555,7 @@ const CourseAllocationBulkModule: React.FC = () => {
           <ChevronRight className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900">Start Allocation</h3>
           <p className="text-gray-500 max-w-xs mx-auto mt-2">
-            Select a program and batch above to manage course allocations for the current semester.
+            Select a program, batch, and semester above to manage course allocations.
           </p>
         </div>
       )}

@@ -42,6 +42,19 @@ type AssessmentHistoryItem = {
   is_finalized: boolean;
 };
 
+type CourseWorkflowState = {
+  course_session_id?: string | null;
+  internals_locked: boolean;
+  internal_complete_awaiting_final: boolean;
+  final_submitted: boolean;
+  semester_status?: string;
+  permitted_actions?: {
+    can_create_assessments?: boolean;
+    can_create_final_assessment?: boolean;
+    is_read_only?: boolean;
+  };
+};
+
 const BLOOM_DISPLAY_MAP: Record<string, string> = {
   C1: "C1 - Remembering",
   C2: "C2 - Understanding",
@@ -112,11 +125,77 @@ const ManageClass: React.FC<Props> = ({
   const [checkedCQI, setCheckedCQI] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [assessmentHistory, setAssessmentHistory] = useState<AssessmentHistoryItem[]>([]);
+  const [workflow, setWorkflow] = useState<CourseWorkflowState>({
+    internals_locked: Boolean(selectedCourse?.internals_locked),
+    internal_complete_awaiting_final: Boolean(selectedCourse?.internal_complete_awaiting_final),
+    final_submitted: Boolean(selectedCourse?.final_submitted),
+    semester_status: selectedCourse?.semester_status,
+    course_session_id: selectedCourse?.course_session_id,
+    permitted_actions: selectedCourse?.permitted_actions,
+  });
+  const [lockingInternals, setLockingInternals] = useState(false);
+  const isAwaitingFinal = workflow.internals_locked && !workflow.final_submitted;
+  const isReadOnly = Boolean(workflow.final_submitted || workflow.permitted_actions?.is_read_only);
+  const canCreateFinal = !isReadOnly && Boolean(workflow.permitted_actions?.can_create_final_assessment ?? true);
+  const canCreateAssessment = !isReadOnly && (
+    isAwaitingFinal
+      ? canCreateFinal && type === "final"
+      : Boolean(workflow.permitted_actions?.can_create_assessments ?? true)
+  );
   // ================= TYPE RESET =================
   const handleTypeChange = (value: string) => {
     setType(value);
     setQuestions([{ clo: "", description: "", level: "", kpi: 0, marks: 0 }]);
     setMarks({});
+  };
+
+  const loadWorkflow = async () => {
+    if (!courseId || !batchId) return;
+    try {
+      const res = await api.get("/assessments/course-session-status/", {
+        params: {
+          course: courseId,
+          batch: batchId,
+          semester: semesterNumber,
+          semester_id: semesterId,
+        },
+      });
+      setWorkflow(res.data);
+    } catch (error) {
+      console.error("Failed to load course workflow state", error);
+    }
+  };
+
+  useEffect(() => {
+    loadWorkflow();
+  }, [courseId, batchId, semesterNumber, semesterId]);
+
+  useEffect(() => {
+    if (isAwaitingFinal && type && type !== "final") {
+      setType("final");
+    }
+  }, [isAwaitingFinal, type]);
+
+  const handleLockInternals = async () => {
+    if (!workflow.course_session_id) {
+      toast.error("Course session not found for this course.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Lock internal assessments? All submitted Quiz, Assignment, Presentation, Midterm, and Sessional Assessment marks will become read-only. Only Final marks can be entered after this."
+    );
+    if (!confirmed) return;
+
+    try {
+      setLockingInternals(true);
+      await api.post(`/assessments/course-sessions/${workflow.course_session_id}/lock-internals/`);
+      toast.success("Internal assessments locked. Provisional reports refreshed.");
+      await loadWorkflow();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Failed to lock internal assessments.");
+    } finally {
+      setLockingInternals(false);
+    }
   };
 
   // ================= FETCH CLO =================
@@ -389,6 +468,11 @@ useEffect(() => {
         return;
       }
 
+      if (!canCreateAssessment) {
+        toast.error(isAwaitingFinal ? "Only Final assessment can be submitted now." : "This course is read-only.");
+        return;
+      }
+
 
       // ================= NORMAL ASSESSMENT =================
       const totalQ = questions.reduce((sum, q) => sum + q.marks, 0);
@@ -431,6 +515,8 @@ if (type === "final") {
       const res = await api.post("/assessments/create/", {
             course: courseId,
             batch: batchId,
+            semester: semesterId,
+            semester_number: Number(semesterNumber),
             title,
             type,
             total_marks: Number(totalMarks),
@@ -470,6 +556,7 @@ if (type === "final") {
 if (isRetakeMode) {
   await loadAssessmentHistory();
 }
+await loadWorkflow();
 
 // 🔥 CQI trigger
 if (response.data.trigger_cqi) {
@@ -587,7 +674,51 @@ setMarks({});
           </div>
         )}
 
+        {!isRetakeMode && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                workflow.final_submitted
+                  ? "bg-slate-200 text-slate-700"
+                  : isAwaitingFinal
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-emerald-100 text-emerald-700"
+              }`}>
+                {workflow.final_submitted ? "Finalized" : isAwaitingFinal ? "Awaiting Final Result" : "Ongoing"}
+              </span>
+              {isAwaitingFinal && (
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                  Provisional CLO/GA
+                </span>
+              )}
+            </div>
+            {!workflow.internals_locked && !isReadOnly && (
+              <button
+                type="button"
+                onClick={handleLockInternals}
+                disabled={lockingInternals}
+                className="rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-400"
+              >
+                {lockingInternals ? "Locking..." : "Lock Internal Assessments"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {isAwaitingFinal && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+            Internal assessments are locked. Enter Final marks only.
+          </div>
+        )}
+
+        {isReadOnly && (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+            This course assessment screen is read-only.
+          </div>
+        )}
+
         {/* FORM */}
+        {!isReadOnly && (
         <div className="grid grid-cols-4 gap-4 mb-6">
 
           <input
@@ -603,10 +734,11 @@ setMarks({});
             className="border p-2 rounded"
           >
             <option value="">Type</option>
-            <option value="quiz">Quiz</option>
-            <option value="assignment">Assignment</option>
-            <option value="presentation">Presentation</option>
-            <option value="midterm">Mid</option>
+            {!isAwaitingFinal && <option value="quiz">Quiz</option>}
+            {!isAwaitingFinal && <option value="assignment">Assignment</option>}
+            {!isAwaitingFinal && <option value="presentation">Presentation</option>}
+            {!isAwaitingFinal && <option value="midterm">Mid</option>}
+            {!isAwaitingFinal && <option value="sessional">Sessional Assessment</option>}
             <option value="final">Final</option>
           </select>
 
@@ -626,8 +758,11 @@ setMarks({});
           />
 
         </div>
+        )}
 
         {/* CLO SECTION */}
+        {!isReadOnly && (
+        <>
         <div>
         {/* Previous Approved CQI */}
 
@@ -873,10 +1008,10 @@ className="border p-2"
         
 
         <button
-    disabled={saving}
+    disabled={saving || !canCreateAssessment}
     onClick={handleSubmit}
     className={`w-full mt-6 py-2 rounded text-white ${
-        saving
+        saving || !canCreateAssessment
             ? "bg-gray-400 cursor-not-allowed"
             : "bg-blue-600"
     }`}
@@ -885,6 +1020,8 @@ className="border p-2"
 </button>
 
 
+        </>
+        )}
       </div>
       {showCQI && (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">

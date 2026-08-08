@@ -121,7 +121,7 @@ def get_effective_course_sessions(
     return list(effective_sessions.values())
 
 
-def calculate_course_ga_score(course_session: CourseSession, ga: GA):
+def calculate_course_ga_score(course_session: CourseSession, ga: GA, assessment_types=None, report_status="FINAL"):
     """
     Calculate and save CourseGAScore for a specific GA in a course session.
     """
@@ -206,6 +206,8 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
                 assessment__is_finalized=True,
                 assessment__course_retake__isnull=True
             )
+            if assessment_types is not None:
+                oqs = oqs.filter(assessment__assessment_type__in=assessment_types)
             if oqs.exists():
                 original_clo = clo
                 original_questions = oqs
@@ -312,13 +314,15 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
             'enrolled_students': enrolled_students_count,
             'is_stale': False,
             'is_active': True,
+            'report_status': report_status,
+            'locked': report_status == "FINAL",
         }
     )
 
     return course_ga_score
 
 
-def calculate_all_course_ga_scores(course_session: CourseSession):
+def calculate_all_course_ga_scores(course_session: CourseSession, assessment_types=None, report_status="FINAL"):
     """
     Calculate and save all CourseGAScores and StudentCLOScores for a course session.
     """
@@ -372,7 +376,7 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
         scores = []
         for ga in gas.filter(id__in=mapped_ga_ids):
             logger.info(f"[calculate_all_course_ga_scores] Processing ga=GA-{ga.order_number}")
-            score = calculate_course_ga_score(course_session, ga)
+            score = calculate_course_ga_score(course_session, ga, assessment_types=assessment_types, report_status=report_status)
             if score:
                 scores.append(score)
                 logger.info(f"[calculate_all_course_ga_scores] Added ga score={score.score} for ga=GA-{ga.order_number}")
@@ -393,6 +397,8 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
             semester=course_session.semester,
             is_finalized=True
         )
+        if assessment_types is not None:
+            assessments = assessments.filter(assessment_type__in=assessment_types)
         logger.info(f"[calculate_all_course_ga_scores] Found {assessments.count()} finalized assessments")
         
         # Group all CLOs by order number

@@ -108,7 +108,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   const [cloFormData, setCloFormData] = useState({
     title: '',
     description: '',
-    bloom_level: 'K2',
+    bloom_level: 'C2',
     kpi_target: 60,
     order_number: 1
   });
@@ -1094,7 +1094,7 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                       setCloFormData({
                         title: '',
                         description: '',
-                        bloom_level: 'K2',
+                        bloom_level: 'C2',
                         kpi_target: 60,
                         order_number: (mappingMatrix?.clos?.length || 0) + 1
                       });
@@ -1350,12 +1350,12 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                       onChange={(e) => setCloFormData({ ...cloFormData, bloom_level: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                     >
-                      <option value="K1">K1 - Remembering</option>
-                      <option value="K2">K2 - Understanding</option>
-                      <option value="K3">K3 - Applying</option>
-                      <option value="K4">K4 - Analyzing</option>
-                      <option value="K5">K5 - Evaluating</option>
-                      <option value="K6">K6 - Creating</option>
+                      <option value="C1">C1 - Remembering</option>
+                      <option value="C2">C2 - Understanding</option>
+                      <option value="C3">C3 - Applying</option>
+                      <option value="C4">C4 - Analyzing</option>
+                      <option value="C5">C5 - Evaluating</option>
+                      <option value="C6">C6 - Creating</option>
                     </select>
                   </div>
                 </div>

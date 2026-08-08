@@ -32,6 +32,8 @@ class QuestionSerializer(serializers.Serializer):
 class AssessmentCreateSerializer(serializers.Serializer):
     course = serializers.UUIDField()
     batch = serializers.UUIDField()
+    semester = serializers.UUIDField(required=False)
+    semester_number = serializers.IntegerField(required=False)
     title = serializers.CharField()
     type = serializers.CharField()
     total_marks = serializers.FloatField()
