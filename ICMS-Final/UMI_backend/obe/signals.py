@@ -1,13 +1,61 @@
-
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.db import transaction
 from django.db import models
 from django.utils import timezone
 from decimal import Decimal
 
+from assessments.models import Assessment, StudentQuestionMark
 from .models import CourseSession, GAMasterCache, StudentGAEntry, CLOGAMapping, StudentCLOScore, GA
 from students.models import Student
+from .reporting import invalidate_cached_scores_for_course_session, invalidate_ga_reports_for_batch
+
+
+def _invalidate_course_session_ga_cache(course_session: CourseSession):
+    invalidate_cached_scores_for_course_session(course_session)
+    invalidate_ga_reports_for_batch(course_session.batch)
+
+
+@receiver(pre_save, sender=CourseSession)
+def cache_previous_course_session_state(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._previous_assessment_status = None
+        instance._previous_allow_result_editing = None
+        instance._previous_locked_at = None
+        instance._previous_unlocked_by_id = None
+        return
+
+    previous = CourseSession.objects.filter(pk=instance.pk).values(
+        "assessment_status",
+        "allow_result_editing",
+        "locked_at",
+        "unlocked_by_id",
+    ).first()
+    instance._previous_assessment_status = previous["assessment_status"] if previous else None
+    instance._previous_allow_result_editing = previous["allow_result_editing"] if previous else None
+    instance._previous_locked_at = previous["locked_at"] if previous else None
+    instance._previous_unlocked_by_id = previous["unlocked_by_id"] if previous else None
+
+
+@receiver(post_save, sender=CourseSession)
+def invalidate_ga_cache_on_course_session_change(sender, instance, created, **kwargs):
+    previous_status = getattr(instance, "_previous_assessment_status", None)
+    previous_allow_result_editing = getattr(instance, "_previous_allow_result_editing", None)
+    previous_locked_at = getattr(instance, "_previous_locked_at", None)
+    previous_unlocked_by_id = getattr(instance, "_previous_unlocked_by_id", None)
+
+    unlocked_or_edited = (
+        previous_status == "ASSESSMENT_DONE"
+        and (
+            instance.assessment_status != "ASSESSMENT_DONE"
+            or (previous_allow_result_editing is False and instance.allow_result_editing is True)
+            or (previous_locked_at != instance.locked_at and previous_locked_at is not None)
+            or (previous_unlocked_by_id != instance.unlocked_by_id and previous_unlocked_by_id is not None)
+        )
+    )
+
+    if unlocked_or_edited:
+        transaction.on_commit(lambda: _invalidate_course_session_ga_cache(instance))
 
 
 @receiver(post_save, sender=CourseSession)
@@ -95,7 +143,8 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
         student_ids = [s.student_id for s in student_objs]
         student_clo_scores = StudentCLOScore.objects.filter(
             student_id__in=student_ids,
-            course_session_id__in=session_ids
+            course_session_id__in=session_ids,
+            is_active=True,
         ).select_related('student', 'clo', 'course_session')
 
         # Group scores by (student_id, course_session_id, clo_id)
@@ -124,10 +173,10 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
                             total_attainment += contribution
                             total_weight += mapping.weight
 
-                ga_attainment = Decimal('0')
-                if total_weight > 0:
-                    ga_attainment = round(total_attainment / total_weight, 2)
+                if total_weight <= 0:
+                    continue
 
+                ga_attainment = round(total_attainment / total_weight, 2)
                 is_kpi_achieved = float(ga_attainment) >= float(ga.kpi_threshold)
 
                 bulk_entries.append(
@@ -150,3 +199,72 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
         )
         master_cache.needs_recalculation = False
         master_cache.save()
+
+
+@receiver(pre_save, sender=Assessment)
+def cache_previous_assessment_state(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._previous_is_finalized = None
+        return
+
+    instance._previous_is_finalized = (
+        Assessment.objects.filter(pk=instance.pk)
+        .values_list("is_finalized", flat=True)
+        .first()
+    )
+
+
+@receiver(post_save, sender=Assessment)
+def invalidate_ga_cache_on_assessment_change(sender, instance, created, **kwargs):
+    previous_is_finalized = getattr(instance, "_previous_is_finalized", None)
+    if previous_is_finalized is True and not instance.is_finalized:
+        course_session = CourseSession.objects.filter(
+            course=instance.course,
+            batch=instance.batch,
+            semester=instance.semester,
+            is_active=True,
+        ).first()
+        if course_session is not None:
+            transaction.on_commit(lambda: _invalidate_course_session_ga_cache(course_session))
+        else:
+            transaction.on_commit(lambda: invalidate_ga_reports_for_batch(instance.batch))
+
+
+@receiver(post_save, sender=StudentQuestionMark)
+def invalidate_ga_cache_on_mark_edit(sender, instance, **kwargs):
+    assessment = instance.question.assessment
+    if not assessment.is_finalized:
+        return
+
+    batch = assessment.batch
+    if batch is None:
+        return
+
+    course_session = CourseSession.objects.filter(
+        course=assessment.course,
+        batch=assessment.batch,
+        semester=assessment.semester,
+        is_active=True,
+    ).first()
+    if course_session is not None:
+        transaction.on_commit(lambda: _invalidate_course_session_ga_cache(course_session))
+    else:
+        transaction.on_commit(lambda: invalidate_ga_reports_for_batch(batch))
+
+
+@receiver(post_delete, sender=StudentQuestionMark)
+def invalidate_ga_cache_on_mark_delete(sender, instance, **kwargs):
+    assessment = instance.question.assessment
+    if not assessment.is_finalized or assessment.batch is None:
+        return
+
+    course_session = CourseSession.objects.filter(
+        course=assessment.course,
+        batch=assessment.batch,
+        semester=assessment.semester,
+        is_active=True,
+    ).first()
+    if course_session is not None:
+        transaction.on_commit(lambda: _invalidate_course_session_ga_cache(course_session))
+    else:
+        transaction.on_commit(lambda: invalidate_ga_reports_for_batch(assessment.batch))

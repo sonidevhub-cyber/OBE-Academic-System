@@ -61,17 +61,18 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
   if (loading) return <div className="text-center py-8">Loading Report...</div>;
   if (!reportData) return <div className="text-center py-8">No report data available</div>;
 
-  const totalStudents = reportData.students?.length || 0;
+  const allReportStudents = reportData.students || [];
+  const totalStudents = allReportStudents.length;
 
 const passedStudents =
-  reportData.students?.filter((s: any) => s.status === "PASS").length || 0;
+  allReportStudents.filter((s: any) => s.status === "PASS").length || 0;
 
 const failedStudents = totalStudents - passedStudents;
 
 const overallPercentage =
   totalStudents > 0
     ? (
-        reportData.students.reduce(
+        allReportStudents.reduce(
           (sum: number, s: any) => sum + s.percentage,
           0
         ) / totalStudents
@@ -81,7 +82,7 @@ const overallPercentage =
 const overallGPA =
   totalStudents > 0
     ? (
-        reportData.students.reduce(
+        allReportStudents.reduce(
           (sum: number, s: any) => sum + s.gpa,
           0
         ) / totalStudents
@@ -92,12 +93,40 @@ const overallGPA =
   { name: "Failed", value: failedStudents },
 ];
 
-const barData = reportData.students?.map((s: any) => ({
-  name: s.name,
-  GPA: s.gpa,
-})) || [];
+const displayClassCloAttainment = Object.entries(reportData.class_clo_attainment || {}).reduce(
+  (acc: Record<string, any>, [cloCode, value]: any) => {
+    const passedCount = allReportStudents.filter((student: any) => {
+      if (student.is_retake && student.retake_display_cells) {
+        const retakeCloCells = Object.entries(student.retake_display_cells).filter(([key]) =>
+          key.endsWith(`:${cloCode}`)
+        );
+        if (retakeCloCells.length > 0) {
+          const totals = retakeCloCells.reduce(
+            (sum: { obtained: number; total: number }, [, cell]: any) => ({
+              obtained: sum.obtained + Number(cell?.obtained ?? 0),
+              total: sum.total + Number(cell?.total ?? 0),
+            }),
+            { obtained: 0, total: 0 }
+          );
+          return totals.total > 0 && (totals.obtained / totals.total) * 100 >= 50;
+        }
+      }
+      const percentage = Number(student.clo_attainment?.[cloCode]?.percentage ?? 0);
+      return percentage >= 50;
+    }).length;
+    const percentage = totalStudents > 0 ? Number(((passedCount / totalStudents) * 100).toFixed(2)) : 0;
+    const kpi = Number(value?.kpi ?? 60);
+    acc[cloCode] = {
+      ...value,
+      percentage,
+      status: percentage >= kpi ? 'Achieved' : 'Not Achieved',
+    };
+    return acc;
+  },
+  {}
+);
 
-const lineData = Object.entries(reportData.class_clo_attainment || {}).map(
+const lineData = Object.entries(displayClassCloAttainment).map(
   ([clo, value]: any) => ({
     clo,
     percentage: value.percentage,
@@ -121,19 +150,90 @@ const COLORS = ["#22c55e", "#ef4444"];
     return !['midterm', 'final'].includes(type);
   };
 
-  // Calculate total columns for summary rows
-  let totalCols = 2; // count + name
-  reportData.type_groups?.forEach((group: any) => {
-    group.assessments?.forEach((ass: any) => {
-      ass.clos?.forEach(() => {
-        totalCols++;
-      });
-    });
-    if (shouldShowTypeTotal(group.type)) {
-      totalCols++;
-    }
-  });
-  totalCols += 3; // Total %, GPA, Status
+  const formatCellValue = (value: any) => {
+    if (value === null || value === undefined) return 0;
+    return value;
+  };
+
+  const formatMarks = (value: any) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return formatCellValue(value);
+    return Number.isInteger(numericValue) ? numericValue : numericValue.toFixed(2);
+  };
+
+  const formatBloomLevel = (level: any) => {
+    const rawLevel = String(level || '').trim();
+    return rawLevel.replace(/^L(?=C?\d)/i, '');
+  };
+
+  const renderStudentDataRow = (student: any, typeGroups: any[]) => (
+    <tr key={student.retake_id || student.student_id || student.count} className="hover:bg-gray-50">
+      <td className="border p-2 font-semibold text-center">{student.count}</td>
+      <td className="border p-2 font-semibold text-center">
+        <div>{student.name}</div>
+        {student.is_retake && (
+          <div className="mt-1 text-xs font-bold text-amber-700">
+            Retake Attempt {student.attempt_number || 1}
+          </div>
+        )}
+      </td>
+      {typeGroups.map((group: any, groupIdx: number) => (
+        <React.Fragment key={`row-group-${student.count}-${groupIdx}`}>
+          {group.assessments?.map((ass: any, assIdx: number) => {
+            const studentAssData = student.assessments?.[ass.id];
+            return (
+              <React.Fragment key={`row-ass-${ass.id || assIdx}`}>
+                {ass.clos?.map((clo: any, cloIdx: number) => {
+                  const retakeCell = student.retake_display_cells?.[`${group.type}:${clo.clo}`];
+                  const isExempt = studentAssData?.clo_data?.[clo.clo]?.is_exempt;
+                  return (
+                    <td key={`${groupIdx}-${assIdx}-${cloIdx}`} className="border p-2 text-center">
+                      {student.is_retake && retakeCell ? (
+                        <div className="leading-tight">
+                          <div className="text-xs font-semibold text-amber-700">{retakeCell.title || getTypeTitle(group.type)}</div>
+                          <div className="font-bold">
+                            {formatMarks(retakeCell.obtained)}/{formatMarks(retakeCell.total)}
+                          </div>
+                        </div>
+                      ) : isExempt ? (
+                        'NA'
+                      ) : (
+                        formatCellValue(studentAssData?.clo_data?.[clo.clo]?.obtained)
+                      )}
+                    </td>
+                  );
+                })}
+              </React.Fragment>
+            );
+          })}
+          {shouldShowTypeTotal(group.type) && (
+            <td className="border p-2 text-center font-semibold">
+              {student.is_retake && student.retake_type_totals?.[group.type] ? (
+                <div className="leading-tight">
+                  <div className="text-xs font-semibold text-amber-700">{getTypeTitle(group.type)} Total</div>
+                  <div>
+                    {formatMarks(student.retake_type_totals[group.type].obtained)}/
+                    {formatMarks(student.retake_type_totals[group.type].total)}
+                  </div>
+                </div>
+              ) : student.type_totals?.[group.type]?.is_exempt ? (
+                'NA'
+              ) : (
+                formatCellValue(student.type_totals?.[group.type]?.obtained)
+              )}
+            </td>
+          )}
+        </React.Fragment>
+      ))}
+      <td className={`border p-2 text-center font-bold ${student.percentage >= 50 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+        {student.percentage}%
+      </td>
+      <td className="border p-2 text-center">{student.gpa}</td>
+      <td className={`border p-2 text-center font-bold ${student.status === 'PASS' ? 'text-green-700' : 'text-red-700'}`}>
+        {student.status}
+      </td>
+    </tr>
+  );
 
   return (
     <div className="overflow-x-auto">
@@ -226,53 +326,7 @@ const COLORS = ["#22c55e", "#ef4444"];
 
         <tbody>
           {/* Student Rows */}
-          {reportData.students?.map((student: any, idx: number) => (
-            <tr key={idx} className="hover:bg-gray-50">
-              <td className="border p-2 font-semibold text-center">{student.count}</td>
-              <td className="border p-2 font-semibold text-center">{student.name}</td>
-
-              {reportData.type_groups?.map((group: any, groupIdx: number) => (
-                <>
-                  {group.assessments?.map((ass: any, assIdx: number) => {
-                    const studentAssData = student.assessments[ass.id];
-                    return (
-                      <>
-                        {ass.clos?.map((clo: any, cloIdx: number) => (
-                          <td
-  key={`${groupIdx}-${assIdx}-${cloIdx}`}
-  className="border p-2 text-center"
->
-  {studentAssData?.clo_data?.[clo.clo]?.obtained ?? 0}
-</td>
-                        ))}
-                      </>
-                    );
-                  })}
-                  {shouldShowTypeTotal(group.type) && (
-                    <td className="border p-2 text-center font-semibold">
-                      {student.type_totals?.[group.type]?.obtained ?? 0}
-                    </td>
-                  )}
-                </>
-              ))}
-
-              <td
-                className={`border p-2 text-center font-bold ${
-                  student.percentage >= 50 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                }`}
-              >
-                {student.percentage}%
-              </td>
-              <td className="border p-2 text-center">{student.gpa}</td>
-              <td
-                className={`border p-2 text-center font-bold ${
-                  student.status === 'PASS' ? 'text-green-700' : 'text-red-700'
-                }`}
-              >
-                {student.status}
-              </td>
-            </tr>
-          ))}
+          {reportData.students?.map((student: any) => renderStudentDataRow(student, reportData.type_groups || []))}
 
           {/* Class CLO Summary Row */}
           <tr className="bg-gray-200">
@@ -287,7 +341,7 @@ const COLORS = ["#22c55e", "#ef4444"];
                   ass.clos?.forEach((clo: any) => {
                     if (!shownClos.has(clo.clo)) {
                       shownClos.add(clo.clo);
-                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      const cloData = displayClassCloAttainment?.[clo.clo];
                       cells.push(
                         <td
                           key={`class-clo-${clo.clo}`}
@@ -299,7 +353,7 @@ const COLORS = ["#22c55e", "#ef4444"];
                           </div>
                           {cloData?.level && (
                             <div className="text-xs text-gray-600">
-                              L{cloData.level}
+                              {formatBloomLevel(cloData.level)}
                             </div>
                           )}
                         </td>
@@ -334,7 +388,7 @@ const COLORS = ["#22c55e", "#ef4444"];
                   ass.clos?.forEach((clo: any) => {
                     if (!shownClos.has(clo.clo)) {
                       shownClos.add(clo.clo);
-                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      const cloData = displayClassCloAttainment?.[clo.clo];
                       cells.push(
                         <td
                           key={`kpi-${clo.clo}`}
@@ -376,7 +430,7 @@ const COLORS = ["#22c55e", "#ef4444"];
                   ass.clos?.forEach((clo: any) => {
                     if (!shownClos.has(clo.clo)) {
                       shownClos.add(clo.clo);
-                      const cloData = reportData.class_clo_attainment?.[clo.clo];
+                      const cloData = displayClassCloAttainment?.[clo.clo];
                       const isAchieved = cloData?.status === 'Achieved';
                       cells.push(
                         <td
@@ -411,6 +465,7 @@ const COLORS = ["#22c55e", "#ef4444"];
           </tr>
         </tbody>
       </table>
+
       <div className="grid grid-cols-5 gap-4 mt-8">
 
 <div className="bg-blue-100 rounded-lg p-4 text-center shadow">

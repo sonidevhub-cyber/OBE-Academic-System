@@ -180,7 +180,7 @@ def sync_retake_reports_from_assessment(assessment: Assessment, student_id=None)
             update_ga_master_cache(None, course_session, False)
 
             logger.info(f"[Retake Invalidation] Calculating GA report")
-            calculate_ga_report(target_batch)
+            calculate_ga_report(target_batch, force_recalculate=True)
 
             summary_ga_score = (
                 CourseGAScore.objects.filter(course_session=course_session)

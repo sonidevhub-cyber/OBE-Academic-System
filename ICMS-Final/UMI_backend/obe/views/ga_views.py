@@ -1,3 +1,5 @@
+import json
+import urllib.request
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,6 +12,44 @@ from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord
 from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
 from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions
 from retake.report_access_wrapper import get_ga_report_with_invalidation_check
+
+
+# #region debug-point helper:ga-report-view
+def _emit_ga_view_debug_event(hypothesis_id: str, location: str, message: str, data: dict):
+    _path = ".dbg/ga-report-attainment.env"
+    _url = "http://127.0.0.1:7777/event"
+    _session_id = "ga-report-attainment"
+    try:
+        with open(_path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if line.startswith("DEBUG_SERVER_URL="):
+                    _url = line.split("=", 1)[1]
+                elif line.startswith("DEBUG_SESSION_ID="):
+                    _session_id = line.split("=", 1)[1]
+    except OSError:
+        pass
+
+    try:
+        payload = {
+            "sessionId": _session_id,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "msg": f"[DEBUG] {message}",
+            "data": data,
+        }
+        urllib.request.urlopen(
+            urllib.request.Request(
+                _url,
+                data=json.dumps(payload, default=str).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            timeout=1,
+        ).read()
+    except Exception:
+        pass
+# #endregion
 
 
 def ensure_exit_survey_questions_for_program(program, *, lock_questions=False):
@@ -289,26 +329,12 @@ class CourseFinalSubmitView(APIView):
         if session.semester and session.batch:
             mark_existing_sessions_as_done(session.batch, session.semester)
         
-        # Check if all courses in the semester are done → generate semester GA report (calculate semester attainment for all GAs)
-        if session.semester and session.batch:
-            all_sessions_in_semester = CourseSession.objects.filter(
-                batch=session.batch,
-                semester=session.semester,
-                is_active=True
-            )
-            done_sessions_in_semester = all_sessions_in_semester.filter(assessment_status='ASSESSMENT_DONE')
-            if all_sessions_in_semester.count() == done_sessions_in_semester.count() and all_sessions_in_semester.exists():
-                # Calculate semester GA attainment and check for semester-level CQI for all GAs
-                gas = GA.objects.filter(program=session.batch.program, is_active=True)
-                for ga in gas:
-                    # Check if we should trigger semester-level CQI
-                    check_and_trigger_ga_cqi(session.batch, ga, 'SEMESTER', session.semester.number)
-        
-        # Check if program end is ready (all courses in all semesters up to current_semester are done) → trigger cumulative CQI
+        # Check if program end is ready (all courses in all semesters up to current_semester are done)
+        # and trigger cumulative GA-CQI only.
         if session.batch and session.batch.is_program_end_ready:
             gas = GA.objects.filter(program=session.batch.program, is_active=True)
             for ga in gas:
-                check_and_trigger_ga_cqi(session.batch, ga, 'CUMULATIVE')
+                check_and_trigger_ga_cqi(session.batch, ga)
         
         return Response(CourseSessionSerializer(session).data)
 
@@ -323,7 +349,7 @@ class CourseGAScoresView(APIView):
         except CourseSession.DoesNotExist:
             return Response({'error': 'Course session not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        scores = CourseGAScore.objects.filter(course_session=session)
+        scores = CourseGAScore.objects.filter(course_session=session, is_active=True)
         return Response(CourseGAScoreSerializer(scores, many=True).data)
 
 
@@ -437,9 +463,9 @@ class BatchProgramGASummaryView(APIView):
             final_score = calculate_ga_attainment_cumulative_cohort(batch, ga)
             summaries.append({
                 'ga': GASerializer(ga).data,
-                'final_score': float(final_score),
+                'final_score': float(final_score) if final_score is not None else None,
                 'kpi_threshold': float(ga.kpi_threshold),
-                'pass': final_score >= float(ga.kpi_threshold)
+                'pass': final_score is not None and final_score >= float(ga.kpi_threshold)
             })
         
         return Response(summaries)
@@ -663,7 +689,7 @@ class CourseUnlockView(APIView):
             return Response({'error': 'Course session not found'}, status=status.HTTP_404_NOT_FOUND)
         
         # Mark all existing scores as stale
-        CourseGAScore.objects.filter(course_session=session).update(is_stale=True)
+        CourseGAScore.objects.filter(course_session=session).update(is_stale=True, is_active=False)
         
         # Set back to in progress
         session.assessment_status = 'IN_PROGRESS'
@@ -867,7 +893,8 @@ class BatchGAReportView(APIView):
             student_ids = [s.student_id for s in student_objs]
             student_clo_scores = StudentCLOScore.objects.filter(
                 student_id__in=student_ids,
-                course_session_id__in=session_ids
+                course_session_id__in=session_ids,
+                is_active=True,
             ).select_related('student', 'clo', 'course_session')
             
             # Group scores by (student_id, course_session_id, clo_id)
@@ -898,7 +925,7 @@ class BatchGAReportView(APIView):
                                 total_attainment += contribution
                                 total_weight += mapping.weight
                                 
-                    ga_attainment = Decimal('0')
+                    ga_attainment = None
                     if total_weight > 0:
                         ga_attainment = round(total_attainment / total_weight, 2)
                         
@@ -909,7 +936,7 @@ class BatchGAReportView(APIView):
                     student_ga_scores.append({
                         'ga_id': str(ga.id),
                         'ga_code': f'GA-{ga.order_number}',
-                        'direct_score': float(ga_attainment) if ga_attainment is not None else 0.0,
+                        'direct_score': float(ga_attainment) if ga_attainment is not None else None,
                         'is_below_threshold': is_below
                     })
                     
@@ -927,27 +954,54 @@ class BatchGAReportView(APIView):
             from ..services import calculate_weighted_ga_score
             for ga in gas:
                 weighted_result = calculate_weighted_ga_score(ga, batch)
-                final_score = weighted_result['final_score'] if weighted_result['final_score'] is not None else 0.0
-                direct_attainment = weighted_result['direct_score'] if weighted_result['direct_score'] is not None else 0.0
-                indirect_attainment = weighted_result['indirect_score'] if weighted_result['indirect_score'] is not None else 0.0
-                calculated_final = None
+                indirect_attainment = weighted_result['indirect_score']
+                visible_scores = [
+                    score['direct_score']
+                    for report in student_reports
+                    for score in report['ga_scores']
+                    if score['ga_id'] == str(ga.id) and score['direct_score'] is not None
+                ]
+                direct_attainment = None
+                if visible_scores:
+                    direct_attainment = round(
+                        sum(Decimal(str(score)) for score in visible_scores) / Decimal(len(visible_scores)),
+                        2,
+                    )
+
+                final_score = None
                 if direct_attainment is not None and indirect_attainment is not None:
-                    calculated_final = (direct_attainment * 0.8) + (indirect_attainment * 0.2)
+                    final_score = round((direct_attainment * Decimal('0.8')) + (Decimal(str(indirect_attainment)) * Decimal('0.2')), 2)
                 elif direct_attainment is not None:
-                    calculated_final = direct_attainment
+                    final_score = direct_attainment
                 elif indirect_attainment is not None:
-                    calculated_final = indirect_attainment
-                else:
-                    calculated_final = 0.0
+                    final_score = Decimal(str(indirect_attainment))
+                # #region debug-point D:all-students-footer
+                _emit_ga_view_debug_event(
+                    "D",
+                    "obe/views/ga_views.py:BatchGAReportView.all_students",
+                    "Calculated all-students footer direct attainment from visible student rows",
+                    {
+                        "batch_id": str(batch.id),
+                        "ga_id": str(ga.id),
+                        "ga_code": f"GA-{ga.order_number}",
+                        "visible_student_score_count": len(visible_scores),
+                        "visible_student_scores": visible_scores,
+                        "footer_direct_attainment": direct_attainment,
+                        "weighted_course_direct_attainment": weighted_result['direct_score'],
+                    },
+                )
+                # #endregion
                 cohort_summary.append({
                     'ga_id': str(ga.id),
                     'ga_code': f'GA-{ga.order_number}',
                     'ga_title': ga.title,
                     'ga_kpi_threshold': float(ga.kpi_threshold),
-                    'direct_attainment': float(direct_attainment),
-                    'indirect_attainment': float(indirect_attainment),
-                    'final_attainment': float(calculated_final),
-                    'status': 'ACHIEVED' if (final_score is not None and float(final_score) >= float(ga.kpi_threshold)) else 'BELOW_TARGET'
+                    'direct_attainment': float(direct_attainment) if direct_attainment is not None else None,
+                    'indirect_attainment': float(indirect_attainment) if indirect_attainment is not None else None,
+                    'final_attainment': float(final_score) if final_score is not None else None,
+                    'status': 'NOT_ASSESSED' if final_score is None else (
+                        'ACHIEVED' if float(final_score) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
+                    )
                 })
             
             return Response({
@@ -980,7 +1034,8 @@ class BatchGAReportView(APIView):
             course_session_ids = [cs.id for cs in course_sessions]
             course_ga_scores = CourseGAScore.objects.filter(
                 course_session_id__in=course_session_ids,
-                ga__in=gas
+                ga__in=gas,
+                is_active=True,
             ).select_related('course_session', 'ga')
             
             # Group scores by (course_session_id, ga_id) for quick lookup
@@ -1010,6 +1065,20 @@ class BatchGAReportView(APIView):
                             'score': None,
                             'is_below_threshold': False
                         })
+                # #region debug-point A:course-wise-visible-rows
+                _emit_ga_view_debug_event(
+                    "A",
+                    "obe/views/ga_views.py:BatchGAReportView.course_wise",
+                    "Built course-wise visible GA row set for a course session",
+                    {
+                        "batch_id": str(batch.id),
+                        "course_session_id": str(session.id),
+                        "course_code": session.course.code,
+                        "assessment_status": session.assessment_status,
+                        "ga_scores": course_ga_list,
+                    },
+                )
+                # #endregion
                 course_reports.append({
                     'course_id': str(session.course.id),
                     'course_code': session.course.code,
@@ -1023,27 +1092,41 @@ class BatchGAReportView(APIView):
             from ..services import calculate_weighted_ga_score
             for ga in gas:
                 weighted_result = calculate_weighted_ga_score(ga, batch)
-                final_score = weighted_result['final_score'] if weighted_result['final_score'] is not None else 0.0
-                direct_attainment = weighted_result['direct_score'] if weighted_result['direct_score'] is not None else 0.0
-                indirect_attainment = weighted_result['indirect_score'] if weighted_result['indirect_score'] is not None else 0.0
-                calculated_final = None
-                if direct_attainment is not None and indirect_attainment is not None:
-                    calculated_final = (direct_attainment * 0.8) + (indirect_attainment * 0.2)
-                elif direct_attainment is not None:
-                    calculated_final = direct_attainment
-                elif indirect_attainment is not None:
-                    calculated_final = indirect_attainment
-                else:
-                    calculated_final = 0.0
+                final_score = weighted_result['final_score']
+                direct_attainment = weighted_result['direct_score']
+                indirect_attainment = weighted_result['indirect_score']
+                visible_scores = [
+                    item['score']
+                    for report in course_reports
+                    for item in report['ga_scores']
+                    if item['ga_id'] == str(ga.id) and item['score'] is not None
+                ]
+                # #region debug-point D:course-wise-footer
+                _emit_ga_view_debug_event(
+                    "D",
+                    "obe/views/ga_views.py:BatchGAReportView.course_wise_footer",
+                    "Compared course-wise visible GA rows against footer direct attainment",
+                    {
+                        "batch_id": str(batch.id),
+                        "ga_id": str(ga.id),
+                        "ga_code": f"GA-{ga.order_number}",
+                        "visible_course_score_count": len(visible_scores),
+                        "visible_course_scores": visible_scores,
+                        "footer_direct_attainment": direct_attainment,
+                    },
+                )
+                # #endregion
                 cohort_summary.append({
                     'ga_id': str(ga.id),
                     'ga_code': f'GA-{ga.order_number}',
                     'ga_title': ga.title,
                     'ga_kpi_threshold': float(ga.kpi_threshold),
-                    'direct_attainment': float(direct_attainment),
-                    'indirect_attainment': float(indirect_attainment),
-                    'final_attainment': float(calculated_final),
-                    'status': 'ACHIEVED' if (final_score is not None and float(final_score) >= float(ga.kpi_threshold)) else 'BELOW_TARGET'
+                    'direct_attainment': float(direct_attainment) if direct_attainment is not None else None,
+                    'indirect_attainment': float(indirect_attainment) if indirect_attainment is not None else None,
+                    'final_attainment': float(final_score) if final_score is not None else None,
+                    'status': 'NOT_ASSESSED' if final_score is None else (
+                        'ACHIEVED' if float(final_score) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
+                    )
                 })
                 
             return Response({
@@ -1086,15 +1169,14 @@ class BatchGAReportView(APIView):
             enrolled_students_count = get_students_for_batch(batch).count()
             contributing_courses = []
             for session in cs_query:
-                score = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
+                score = CourseGAScore.objects.filter(course_session=session, ga=ga, is_active=True).first()
                 # Keep the course visible even if it has not been finalized yet.
-                course_ga_score = float(score.score) if score else 0.0
+                course_ga_score = float(score.score) if score else None
                 enrolled_students = score.enrolled_students if score else enrolled_students_count
 
                 # Get Course Feedback (Indirect) score for this course & GA & batch.
-                # If the course has not been finalized yet, expose a zero placeholder
-                # so the UI can still render the row.
-                cf_score = 0.0
+                # If the course has not been finalized yet, expose N/A instead of zero.
+                cf_score = None
                 cf_score_obj = CourseFeedbackGAScore.objects.filter(
                     course=session.course,
                     ga=ga,

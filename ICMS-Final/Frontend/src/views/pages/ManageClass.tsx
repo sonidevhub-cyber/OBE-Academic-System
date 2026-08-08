@@ -42,6 +42,26 @@ type AssessmentHistoryItem = {
   is_finalized: boolean;
 };
 
+const BLOOM_DISPLAY_MAP: Record<string, string> = {
+  C1: "C1 - Remembering",
+  C2: "C2 - Understanding",
+  C3: "C3 - Applying",
+  C4: "C4 - Analyzing",
+  C5: "C5 - Evaluating",
+  C6: "C6 - Creating",
+  K1: "C1 - Remembering",
+  K2: "C2 - Understanding",
+  K3: "C3 - Applying",
+  K4: "C4 - Analyzing",
+  K5: "C5 - Evaluating",
+  K6: "C6 - Creating",
+};
+
+const formatBloomLevel = (level: string) => {
+  const code = level?.trim().split(" ")[0];
+  return BLOOM_DISPLAY_MAP[code] || level;
+};
+
 interface Props {
   courseId: string;
   batchId: string;
@@ -77,6 +97,7 @@ const ManageClass: React.FC<Props> = ({
   const [type, setType] = useState("");
   const [title, setTitle] = useState("");
   const [totalMarks, setTotalMarks] = useState("");
+  const [saving, setSaving] = useState(false);
   const [date, setDate] = useState("");
   const [weakClos, setWeakClos] = useState<any[]>([]);
   const [showCQI, setShowCQI] = useState(false);
@@ -308,7 +329,6 @@ useEffect(() => {
   // ================= CLO SELECT =================
   const handleCLOChange = (value: string, index: number) => {
 
-
   const selected = clos.find(c => c.id === value);
   if (!selected) return;
 
@@ -360,6 +380,9 @@ useEffect(() => {
   // ================= SUBMIT =================
   const handleSubmit = async () => {
     try {
+      if (saving) return;
+
+      setSaving(true);
 
       if (!title || !type || !totalMarks || !date) {
         toast.error("Fill all fields");
@@ -374,6 +397,29 @@ useEffect(() => {
         toast.error("Question marks must equal total marks");
         return;
       }
+      // ================= FINAL CLO VALIDATION =================
+if (type === "final") {
+
+    const res = await api.post("/assessments/clo-coverage/", {
+        course: courseId,
+        batch: batchId,
+        semester: semesterId,
+        curriculum_version: effectiveCurriculumVersionId,
+        current_clos: questions.map(q => q.clo),
+    });
+
+    if (!res.data.all_clos_covered) {
+
+        toast.error(
+            "Please assess these CLOs before Final: " +
+            res.data.missing_clos
+                .map((c: any) => `CLO ${c.order}`)
+                .join(", ")
+        );
+
+        return;
+    }
+}
 
       const cleanQuestions = questions.map(q => ({
         clo: q.clo,
@@ -438,16 +484,34 @@ if (response.data.trigger_cqi) {
 }
 else {
 
-    toast.success("Report sent to Coordinator.");
+    toast.success("Assessment saved successfully.");
 
 }
 
 toast.success("Assessment completed ✅");
+setTitle("");
+setType("");
+setTotalMarks("");
+setDate("");
+
+setQuestions([
+  {
+    clo: "",
+    description: "",
+    level: "",
+    kpi: 0,
+    marks: 0,
+  },
+]);
+
+setMarks({});
                         
     } catch (err: any) {
       console.error(err?.response?.data);
       toast.error(JSON.stringify(err?.response?.data));
-    }
+    }finally {
+    setSaving(false);
+}
   };
 
   return (
@@ -659,7 +723,7 @@ CLO {c.order_number}
 
 <td className="border p-2">
 
-{q.level}
+{formatBloomLevel(q.level)}
 
 </td>
 
@@ -809,11 +873,17 @@ className="border p-2"
         
 
         <button
-          onClick={handleSubmit}
-          className="bg-blue-600 text-white w-full mt-6 py-2 rounded"
-        >
-          Save Assessment
-        </button>
+    disabled={saving}
+    onClick={handleSubmit}
+    className={`w-full mt-6 py-2 rounded text-white ${
+        saving
+            ? "bg-gray-400 cursor-not-allowed"
+            : "bg-blue-600"
+    }`}
+>
+    {saving ? "Saving..." : "Save Assessment"}
+</button>
+
 
       </div>
       {showCQI && (

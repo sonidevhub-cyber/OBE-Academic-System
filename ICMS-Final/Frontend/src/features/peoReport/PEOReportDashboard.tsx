@@ -19,6 +19,7 @@ import type { PEOReportData, PEOReportMatrixItem, PEOCQIRecord } from './types';
 import PEOEmploymentAnalytics from './PEOEmploymentAnalytics';
 import PEOAttainmentChart from './PEOAttainmentChart';
 import PEOMatrixTable from './PEOMatrixTable';
+import PEOQuestionBreakdown from './PEOQuestionBreakdown';
 
 interface PEOReportDashboardProps {
   programId?: string;
@@ -86,9 +87,12 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
     pdf.setFont('helvetica', 'bold');
     pdf.text(`Target Threshold: ${targetThreshold}%`, pageWidth - marginX, 22, { align: 'right' });
     pdf.text(`Status: ${overallStatus}`, pageWidth - marginX, 28, { align: 'right' });
-    pdf.text(`Survey Responses: ${reportData?.header.totalSurveyResponses || 0}`, pageWidth - marginX, 34, {
-      align: 'right',
-    });
+    const alumniN = reportData?.header.totalAlumniSurveyResponses ?? 0;
+    const employerN = reportData?.header.totalEmployerSurveyResponses ?? 0;
+    pdf.text(
+      `Responses: Alumni ${alumniN} / Employer ${employerN} = ${reportData?.header.totalSurveyResponses || 0}`,
+      pageWidth - marginX, 34, { align: 'right' }
+    );
 
     const chartY = 40;
     pdf.setDrawColor(229, 231, 235);
@@ -383,11 +387,60 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
         )}
       </div>
 
+      {/* Indirect weights banner */}
+      {(() => {
+        const alumniWeight = reportData.indirectWeightConfig?.alumniWeight ?? 50;
+        const employerWeight = reportData.indirectWeightConfig?.employerWeight ?? 50;
+        const isFixed = !reportData.indirectWeightConfig || (alumniWeight === 50 && employerWeight === 50);
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 px-5 py-4">
+              <div className="text-[10px] uppercase font-black tracking-widest text-indigo-500 mb-1">
+                Alumni Survey
+              </div>
+              <div className="text-2xl font-black text-indigo-800">
+                {reportData.header.totalAlumniSurveyResponses ?? 0}
+                <span className="ml-2 text-sm font-bold text-indigo-500">
+                  {alumniWeight.toFixed(0)}% weight
+                </span>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 px-5 py-4">
+              <div className="text-[10px] uppercase font-black tracking-widest text-emerald-600 mb-1">
+                Employer Survey
+              </div>
+              <div className="text-2xl font-black text-emerald-800">
+                {reportData.header.totalEmployerSurveyResponses ?? 0}
+                <span className="ml-2 text-sm font-bold text-emerald-600">
+                  {employerWeight.toFixed(0)}% weight
+                </span>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-5 py-4">
+              <div className="text-[10px] uppercase font-black tracking-widest text-gray-500 mb-1">
+                Indirect (20%) Combined
+                {isFixed && <span className="ml-2 rounded-full bg-slate-900 text-slate-50 px-2 py-0.5 text-[9px]">FIXED 50:50</span>}
+              </div>
+              <div className="text-2xl font-black text-gray-800">
+                {reportData.header.totalSurveyResponses ?? 0}
+                <span className="ml-2 text-sm font-bold text-gray-500">total respondents</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Matrix first */}
       <PEOMatrixTable
         matrix={reportData.matrix}
+        indirectWeightConfig={reportData.indirectWeightConfig}
         onTriggerCQI={handleTriggerCQI}
         canManageCQI={canDownloadPdf}
+      />
+
+      <PEOQuestionBreakdown
+        breakdowns={reportData.questionBreakdown || []}
+        matrix={reportData.matrix}
       />
 
       {/* Then chart */}

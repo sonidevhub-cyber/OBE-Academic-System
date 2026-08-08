@@ -2,14 +2,20 @@ from django.utils import timezone
 from django.utils.html import escape
 from django.http import HttpResponse
 from django.db import models
+from rest_framework import generics
+from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from obe.models import GACQIRecord, GA
 from core.models import Program, Batch
+from core.permissions import IsHOD
 from obe.services import calculate_weighted_ga_score
-from ga_cqi_cohort.serializers import GACQICohortSerializer
+from ga_cqi_cohort.serializers import (
+    GACQICohortSerializer,
+    GACQICumulativeCloseSerializer,
+)
 
 
 def evaluate_ga_status_row(program, batch):
@@ -30,7 +36,7 @@ def evaluate_ga_status_row(program, batch):
                 batch=batch, 
                 cqi_level='CUMULATIVE',
                 defaults={
-                    'status': 'PENDING_HOD_INPUT',
+                    'status': 'OPEN',
                     'issue_statement': f"Batch {batch.name} has failed to achieve "
                                       f"the target for GA-{ga.order_number} ({ga.title}) "
                                       f"at the cohort level.",
@@ -39,10 +45,11 @@ def evaluate_ga_status_row(program, batch):
                     'kpi_threshold_at_trigger': ga.kpi_threshold
                 }
             )
-            if not created and record.status == 'NOT_TRIGGERED':
-                record.status = 'PENDING_HOD_INPUT'
-                record.triggered_at = timezone.now()
-                record.save()
+            if not created and record.status in {'NOT_TRIGGERED', 'PENDING_HOD_INPUT', 'PENDING'}:
+                record.status = 'OPEN'
+                if record.triggered_at is None:
+                    record.triggered_at = timezone.now()
+                record.save(update_fields=['status', 'triggered_at', 'updated_at'])
 
 
 class GAStatusRowView(APIView):
@@ -98,7 +105,7 @@ class GACQISaveView(APIView):
     """
     PATCH endpoint for HOD to save CQI with action plan
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsHOD]
     
     def patch(self, request, record_id):
         try:
@@ -109,7 +116,13 @@ class GACQISaveView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        if record.status == 'SAVED':
+        if record.cqi_level != 'CUMULATIVE' or not record.is_active:
+            return Response(
+                {'error': 'Only active cumulative GA-CQI records can be saved here'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if record.status in {'SAVED', 'CLOSED_IMPLEMENTED'}:
             return Response(
                 {'error': 'Record already saved and locked'}, 
                 status=status.HTTP_400_BAD_REQUEST
@@ -136,6 +149,37 @@ class GACQISaveView(APIView):
         return Response(GACQICohortSerializer(record).data)
 
 
+class GACQICumulativeCloseView(generics.UpdateAPIView):
+    """
+    HOD-only single-step cumulative GA-CQI close action.
+    """
+    permission_classes = [IsAuthenticated, IsHOD]
+    serializer_class = GACQICumulativeCloseSerializer
+    lookup_field = 'id'
+    lookup_url_kwarg = 'id'
+
+    def get_queryset(self):
+        return GACQIRecord.objects.filter(
+            cqi_level='CUMULATIVE',
+            is_active=True,
+        ).select_related('ga', 'batch', 'closed_by')
+
+    def perform_update(self, serializer):
+        record = self.get_object()
+
+        if record.status == 'CLOSED_IMPLEMENTED':
+            raise ValidationError({'detail': 'This cumulative GA-CQI record is already closed.'})
+
+        if record.status != 'SAVED':
+            raise ValidationError({'detail': 'Only saved cumulative GA-CQI records can be closed.'})
+
+        serializer.save(
+            status='CLOSED_IMPLEMENTED',
+            closed_by=self.request.user,
+            closed_at=timezone.now(),
+        )
+
+
 class GACQIAdvisoryExportView(APIView):
     """
     Get all saved GACQIRecords for advisory export
@@ -153,7 +197,10 @@ class GACQIAdvisoryExportView(APIView):
             )
             
         cqi_records = GACQIRecord.objects.filter(
-            batch=batch, cqi_level='CUMULATIVE', is_active=True, status='SAVED'
+            batch=batch,
+            cqi_level='CUMULATIVE',
+            is_active=True,
+            status__in=['SAVED', 'CLOSED_IMPLEMENTED'],
         ).select_related('ga', 'saved_by_hod')
         
         serializer = GACQICohortSerializer(cqi_records, many=True)
@@ -178,7 +225,10 @@ class GACQIAdvisoryExportPDFView(APIView):
             )
             
         cqi_records = GACQIRecord.objects.filter(
-            batch=batch, cqi_level='CUMULATIVE', is_active=True, status='SAVED'
+            batch=batch,
+            cqi_level='CUMULATIVE',
+            is_active=True,
+            status__in=['SAVED', 'CLOSED_IMPLEMENTED'],
         ).select_related('ga', 'saved_by_hod')
         
         html_content = f"""
@@ -201,12 +251,16 @@ class GACQIAdvisoryExportPDFView(APIView):
                     <tr>
                         <th>GA Code</th>
                         <th>GA Title</th>
+                        <th>Status</th>
                         <th>Attainment Score</th>
                         <th>KPI Threshold</th>
                         <th>Issue</th>
                         <th>HOD Action Plan</th>
+                        <th>Departmental Improvement Framework</th>
                         <th>Saved By</th>
                         <th>Saved At</th>
+                        <th>Closed By</th>
+                        <th>Closed At</th>
                     </tr>
         """
         
@@ -215,12 +269,16 @@ class GACQIAdvisoryExportPDFView(APIView):
                     <tr>
                         <td>GA-{record.ga.order_number}</td>
                         <td>{escape(record.ga.title)}</td>
+                        <td>{escape(record.get_status_display())}</td>
                         <td>{record.attainment_value}%</td>
                         <td>{record.kpi_threshold_at_trigger}%</td>
                         <td>{escape(record.issue_statement)}</td>
-                        <td>{escape(record.hod_action_plan)}</td>
+                        <td>{escape(record.hod_action_plan or '-')}</td>
+                        <td>{escape(record.remedy_text or '-')}</td>
                         <td>{escape(record.saved_by_hod.full_name if record.saved_by_hod else 'N/A')}</td>
                         <td>{record.saved_at.strftime('%Y-%m-%d %H:%M:%S') if record.saved_at else 'N/A'}</td>
+                        <td>{escape(record.closed_by.full_name if record.closed_by else 'N/A')}</td>
+                        <td>{record.closed_at.strftime('%Y-%m-%d %H:%M:%S') if record.closed_at else 'N/A'}</td>
                     </tr>
             """
             

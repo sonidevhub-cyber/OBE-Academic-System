@@ -304,3 +304,14 @@ export const buildProfileField = (label: string, value: any, formatter = formatP
     value: formatted,
   };
 };
+// 🔥 Bloom's Taxonomy level code -> display text mapping
+// Backend sends raw bloom_level (e.g. "L1"); adjust keys/values below
+// to exactly match what your CLO model's bloom_level choices actually are.
+export const BLOOM_LEVEL_MAP: { [key: string]: string; } = {
+  C1: "C1 - Remember",
+  C2: "C2 - Understand",
+  C3: "C3 - Apply",
+  C4: "C4 - Analyze",
+  C5: "C5 - Evaluate",
+  C6: "C6 - Create",
+};

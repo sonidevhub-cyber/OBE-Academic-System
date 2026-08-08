@@ -13,7 +13,18 @@ from .peo_views import (
     BatchToggleAlumniFeedbackView,
     PEOIndirectScoreView,
     AlumniSurveyStatusView,
-    AlumniEmploymentStatsView
+    AlumniEmploymentStatsView,
+    EmployerSurveyCycleListView,
+    EmployerSurveyCycleCreateView,
+    EmployerSurveyCycleGenerateTokensView,
+    EmployerSurveyCycleDispatchEmailsView,
+    EmployerSurveyCycleResponsesView,
+    EmployerSurveyPublicView,
+    # Flexible SurveyQuestion views
+    ProgramSurveyQuestionListView,
+    SurveyQuestionListCreateView,
+    SurveyQuestionDetailView,
+    SurveyQuestionLockView,
 )
 from .ga_views import (
     GAListCreateView,
@@ -136,7 +147,18 @@ __all__ = [
     'AlumniSurveyResponseView',
     'AlumniSurveyStatusView',
     'AlumniEmploymentStatsView',
+    'EmployerSurveyCycleListView',
+    'EmployerSurveyCycleCreateView',
+    'EmployerSurveyCycleGenerateTokensView',
+    'EmployerSurveyCycleDispatchEmailsView',
+    'EmployerSurveyCycleResponsesView',
+    'EmployerSurveyPublicView',
     'PEOIndirectScoreView',
-    'EnableResultEditingView'
+    'EnableResultEditingView',
+    # Flexible SurveyQuestion views
+    'ProgramSurveyQuestionListView',
+    'SurveyQuestionListCreateView',
+    'SurveyQuestionDetailView',
+    'SurveyQuestionLockView',
 ]
 

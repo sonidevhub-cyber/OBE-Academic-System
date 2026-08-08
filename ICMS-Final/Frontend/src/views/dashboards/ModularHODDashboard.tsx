@@ -18,7 +18,7 @@ import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMa
 import PEOReport from '../../pages/PEOReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
-import OBEReportDashboard from '../modules/coordinator/OBEReportDashboard';
+import OBEReportDashboard from '../modules/coordinator/OBEReportDashboardView';
 import HODCQI from '../pages/HODCQI';
 import HODNotice from '../pages/HODNotice';
 import UniversalRoleSwitcher from '../../components/UniversalRoleSwitcher';
@@ -133,7 +133,7 @@ const ModularHODDashboard: React.FC = () => {
 
   const mainItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "obe-management", label: "PEO/GA Management", icon: Settings },
+    { id: "obe-management", label: "PEO/GA Setup", icon: Settings },
     { id: "notice", label: "Notice Board", icon: Bell },
     { id: "result-editing", label: "Result lock", icon: Settings },
   ];

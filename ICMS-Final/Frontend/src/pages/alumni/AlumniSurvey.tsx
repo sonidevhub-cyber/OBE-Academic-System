@@ -25,6 +25,12 @@ type SurveyCycle = {
   batch_name?: string;
 };
 
+type AlumniAnswerValue = {
+  score?: number;
+  selected_option_label?: string;
+  text_answer?: string;
+};
+
 const storageKey = (cycleId: string, studentId: string) =>
   `alumni_survey_submitted:${cycleId}:${studentId}`;
 
@@ -41,11 +47,22 @@ const resolveAlumniStudentIdentifier = (user: any, alumni: AlumniDashboardRespon
 
 const ratingLabels = [
   { value: 1, label: 'Poor' },
-  { value: 2, label: 'Fair' },
+  { value: 2, label: 'Below Average' },
   { value: 3, label: 'Average' },
   { value: 4, label: 'Good' },
   { value: 5, label: 'Excellent' },
 ];
+
+const getQuestionType = (question: AlumniSurveyQuestion) => question.question_type || 'RATING_SCALE';
+const getQuestionOptions = (question: AlumniSurveyQuestion) => {
+  if (getQuestionType(question) === 'TEXT') return [];
+  const options = question.effective_options?.length
+    ? question.effective_options
+    : question.custom_options?.length
+      ? question.custom_options
+      : ratingLabels.map(item => item.label);
+  return options.map(option => String(option));
+};
 
 const AlumniSurvey: React.FC = () => {
   const navigate = useNavigate();
@@ -55,10 +72,15 @@ const AlumniSurvey: React.FC = () => {
   const [activeCycle, setActiveCycle] = useState<SurveyCycle | null>(null);
   const [questions, setQuestions] = useState<AlumniSurveyQuestion[]>([]);
   const [questionsSource, setQuestionsSource] = useState<'cycle' | 'peo' | null>(null);
-  const [responses, setResponses] = useState<Record<string, number>>({});
+  const [responses, setResponses] = useState<Record<string, AlumniAnswerValue>>({});
   const [employmentStatus, setEmploymentStatus] = useState<string | null>(null);
   const [organizationName, setOrganizationName] = useState('');
   const [currentDesignation, setCurrentDesignation] = useState('');
+  const [employerContactName, setEmployerContactName] = useState('');
+  const [employerContactEmail, setEmployerContactEmail] = useState('');
+  const [higherStudiesUniversity, setHigherStudiesUniversity] = useState('');
+  const [higherStudiesDegree, setHigherStudiesDegree] = useState('');
+  const [higherStudiesCountry, setHigherStudiesCountry] = useState('');
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -115,9 +137,23 @@ const AlumniSurvey: React.FC = () => {
 
         const studentId = resolveAlumniStudentIdentifier(currentUser, dashboard);
         console.log("[AlumniSurvey] studentId:", studentId);
-        setHasSubmitted(
-          cycle ? localStorage.getItem(storageKey(cycle.id, String(studentId || 'guest'))) === 'true' : false
-        );
+        let submitted = false;
+        if (cycle && effectiveBatchId) {
+          const statusPayload = await obeService
+            .getAlumniSurveyStatus(String(effectiveBatchId), studentId ? String(studentId) : undefined)
+            .catch((err) => {
+              console.error("[AlumniSurvey] Error loading survey status:", err);
+              return null;
+            });
+          submitted = Boolean(statusPayload?.submitted);
+          const key = storageKey(cycle.id, String(studentId || 'guest'));
+          if (submitted) {
+            localStorage.setItem(key, 'true');
+          } else {
+            localStorage.removeItem(key);
+          }
+        }
+        setHasSubmitted(submitted);
 
         const loadCycleQuestions = async () => {
           if (!cycle) return [];
@@ -135,7 +171,17 @@ const AlumniSurvey: React.FC = () => {
         const loadPeoQuestions = async () => {
           if (!effectiveProgramId) return [];
           try {
-            console.log("[AlumniSurvey] Loading PEOs for effectiveProgramId: ", effectiveProgramId);
+            console.log("[AlumniSurvey] Loading unified ALUMNI SurveyQuestions for program:", effectiveProgramId);
+            const unified = await obeService.getSurveyQuestions(String(effectiveProgramId), 'ALUMNI').catch((err) => {
+              console.error("[AlumniSurvey] Error loading unified alumni survey questions:", err);
+              return [];
+            });
+            console.log("[AlumniSurvey] Unified ALUMNI questions:", unified);
+            if (Array.isArray(unified) && unified.length > 0) {
+              return unified as any;
+            }
+
+            console.log("[AlumniSurvey] Falling back to per-PEO alumni survey questions.");
             const peos: PEO[] = await obeService.getProgramPEOs(String(effectiveProgramId)).catch((err) => {
               console.error("[AlumniSurvey] Error loading PEOs:", err);
               return [];
@@ -163,9 +209,9 @@ const AlumniSurvey: React.FC = () => {
         if (cycleQuestions.length > 0) {
           setQuestionsSource('cycle');
           setQuestions(cycleQuestions);
-          const initialResponses: Record<string, number> = {};
+          const initialResponses: Record<string, AlumniAnswerValue> = {};
           cycleQuestions.forEach((question) => {
-            initialResponses[question.id] = 0;
+            initialResponses[question.id] = {};
           });
           setResponses(initialResponses);
           return;
@@ -179,9 +225,9 @@ const AlumniSurvey: React.FC = () => {
 
         setQuestionsSource(peoQuestions.length > 0 ? 'peo' : null);
         setQuestions(peoQuestions);
-        const initialResponses: Record<string, number> = {};
-        peoQuestions.forEach((question) => {
-          initialResponses[question.id] = 0;
+        const initialResponses: Record<string, AlumniAnswerValue> = {};
+        peoQuestions.forEach((question: AlumniSurveyQuestion) => {
+          initialResponses[question.id] = {};
         });
         setResponses(initialResponses);
       } catch (error) {
@@ -201,17 +247,42 @@ const AlumniSurvey: React.FC = () => {
     };
   }, [batchId, currentUser?.program_id]);
 
+  const needsEmployerContact = employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED';
+  const needsHigherStudiesDetails = employmentStatus === 'HIGHER_STUDIES';
+  const shouldShowSurveyQuestions = employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED' || employmentStatus === 'HIGHER_STUDIES';
+  const visibleQuestions = shouldShowSurveyQuestions ? questions : [];
+  const isQuestionAnswered = (question: AlumniSurveyQuestion) => {
+    const answer = responses[question.id] || {};
+    if (getQuestionType(question) === 'TEXT') {
+      return Boolean(answer.text_answer?.trim());
+    }
+    return Boolean(answer.selected_option_label?.trim()) || Boolean(answer.score && answer.score > 0);
+  };
   const answeredCount = useMemo(
-    () => questions.filter((question) => (responses[question.id] || 0) > 0).length,
-    [questions, responses]
+    () => visibleQuestions.filter(isQuestionAnswered).length,
+    [visibleQuestions, responses]
   );
-  const progressPercent = questions.length ? Math.round((answeredCount / questions.length) * 100) : 0;
-  const isComplete = questions.length > 0 && questions.every((question) => (responses[question.id] || 0) > 0);
+  const isComplete = shouldShowSurveyQuestions
+    ? visibleQuestions.length > 0 && visibleQuestions.every(isQuestionAnswered)
+    : employmentStatus === 'UNEMPLOYED' || employmentStatus === 'HOUSEWIFE';
+  const progressPercent = shouldShowSurveyQuestions
+    ? visibleQuestions.length ? Math.round((answeredCount / visibleQuestions.length) * 100) : 0
+    : isComplete ? 100 : 0;
 
-  const handleRating = (questionId: string, rating: number) => {
+  const handleOptionSelect = (question: AlumniSurveyQuestion, option: string, optionIndex: number) => {
     setResponses((prev) => ({
       ...prev,
-      [questionId]: rating,
+      [question.id]: {
+        score: optionIndex + 1,
+        selected_option_label: option,
+      },
+    }));
+  };
+
+  const handleTextAnswer = (questionId: string, text: string) => {
+    setResponses((prev) => ({
+      ...prev,
+      [questionId]: { text_answer: text },
     }));
   };
 
@@ -232,8 +303,33 @@ const AlumniSurvey: React.FC = () => {
       return;
     }
 
+    if (needsEmployerContact && !organizationName.trim()) {
+      toast.error('Please enter your organization or company name.');
+      return;
+    }
+
+    if (needsEmployerContact && !employerContactName.trim()) {
+      toast.error('Please enter employer contact person name.');
+      return;
+    }
+
+    if (needsEmployerContact && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(employerContactEmail.trim())) {
+      toast.error('Please enter a valid employer contact email.');
+      return;
+    }
+
+    if (needsHigherStudiesDetails && !higherStudiesUniversity.trim()) {
+      toast.error('Please enter your university or institution name.');
+      return;
+    }
+
+    if (needsHigherStudiesDetails && !higherStudiesDegree.trim()) {
+      toast.error('Please enter your degree or program name.');
+      return;
+    }
+
     if (!isComplete) {
-      toast.error('Please answer all survey questions.');
+      toast.error(shouldShowSurveyQuestions ? 'Please answer all survey questions.' : 'Please select a valid status.');
       return;
     }
 
@@ -241,12 +337,22 @@ const AlumniSurvey: React.FC = () => {
     try {
       await obeService.submitAlumniSurvey(String(activeCycle.id), String(studentId), {
         employment_status: employmentStatus ?? undefined,
-        organization_name: organizationName || undefined,
-        current_designation: currentDesignation || undefined,
-        responses: questions.map((question) => ({
-          question: question.id,
-          score: responses[question.id],
-        })),
+        organization_name: organizationName.trim() || undefined,
+        current_designation: currentDesignation.trim() || undefined,
+        employer_contact_name: employerContactName.trim() || undefined,
+        employer_contact_email: employerContactEmail.trim() || undefined,
+        higher_studies_university: higherStudiesUniversity.trim() || undefined,
+        higher_studies_degree: higherStudiesDegree.trim() || undefined,
+        higher_studies_country: higherStudiesCountry.trim() || undefined,
+        responses: visibleQuestions.map((question) => {
+          const answer = responses[question.id] || {};
+          return {
+            question: question.id,
+            score: answer.score,
+            selected_option_label: answer.selected_option_label,
+            text_answer: answer.text_answer,
+          };
+        }),
       });
 
       localStorage.setItem(storageKey(activeCycle.id, String(studentId)), 'true');
@@ -307,7 +413,7 @@ const AlumniSurvey: React.FC = () => {
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 text-slate-500 text-xs font-black uppercase tracking-widest mb-4">
                   Alumni PEO Survey
                 </div>
-                <h1 className="text-3xl md:text-5xl font-black text-gray-900">100% Complete</h1>
+                <h1 className="text-3xl md:text-5xl font-black text-gray-900">Survey Not Ready</h1>
                 <p className="text-gray-500 font-medium mt-3 max-w-3xl">
                   {questionsSource === 'peo'
                     ? 'The locked PEO questions are loaded from the program definition. A live cycle is still required to submit responses.'
@@ -410,7 +516,7 @@ const AlumniSurvey: React.FC = () => {
             </div>
           </div>
 
-          {(employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED') && (
+          {needsEmployerContact && (
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
@@ -436,12 +542,93 @@ const AlumniSurvey: React.FC = () => {
                   placeholder="e.g., Software Engineer, SQA, Team Lead"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Employer Contact Person
+                </label>
+                <input
+                  type="text"
+                  value={employerContactName}
+                  onChange={(e) => setEmployerContactName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                  placeholder="e.g., HR manager or direct supervisor"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Employer Contact Email
+                </label>
+                <input
+                  type="email"
+                  value={employerContactEmail}
+                  onChange={(e) => setEmployerContactEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                  placeholder="e.g., hr@company.com"
+                />
+              </div>
+            </div>
+          )}
+
+          {needsHigherStudiesDetails && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  University / Institution Name
+                </label>
+                <input
+                  type="text"
+                  value={higherStudiesUniversity}
+                  onChange={(e) => setHigherStudiesUniversity(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none text-gray-900"
+                  placeholder="e.g., NUST, FAST, University of Lahore"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Degree / Program
+                </label>
+                <input
+                  type="text"
+                  value={higherStudiesDegree}
+                  onChange={(e) => setHigherStudiesDegree(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none text-gray-900"
+                  placeholder="e.g., MS Computer Science, MBA, PhD"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-[#8892B0] mb-2 uppercase tracking-wider">
+                  Country
+                </label>
+                <input
+                  type="text"
+                  value={higherStudiesCountry}
+                  onChange={(e) => setHigherStudiesCountry(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none text-gray-900"
+                  placeholder="Optional"
+                />
+              </div>
             </div>
           )}
         </motion.section>
 
-        <div className="space-y-6">
-          {questions.map((question, index) => (
+        {!employmentStatus && (
+          <section className="bg-[#112240] rounded-[32px] p-8 border border-[#233554] text-center">
+            <p className="text-[#8892B0] font-bold">Select employment status to continue.</p>
+          </section>
+        )}
+
+        {employmentStatus && !shouldShowSurveyQuestions && (
+          <section className="bg-[#112240] rounded-[32px] p-8 border border-[#233554] text-center">
+            <p className="text-white font-black text-xl mb-2">Survey questions are not required for this status.</p>
+            <p className="text-[#8892B0] font-medium">
+              Submit your status so the department can keep alumni records accurate.
+            </p>
+          </section>
+        )}
+
+        {shouldShowSurveyQuestions && (
+          <div className="space-y-6">
+          {visibleQuestions.map((question, index) => (
             <motion.section
               key={question.id}
               initial={{ opacity: 0, y: 20 }}
@@ -455,14 +642,36 @@ const AlumniSurvey: React.FC = () => {
                     {index + 1}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="bg-[#F7C948]/10 text-[#F7C948] px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-[#F7C948]/20 flex items-center gap-2">
-                        <Award className="w-3 h-3" />
-                        {question.peo_title || 'PEO'}
-                      </span>
-                      <span className="bg-emerald-500/10 text-emerald-300 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-emerald-500/20 flex items-center gap-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {(() => {
+                        const isGeneral: boolean =
+                          (question as any).is_general === true ||
+                          ((question as any).peo_id == null && !question.peo_title);
+                        if (isGeneral) {
+                          return (
+                            <span className="bg-indigo-500/15 text-indigo-300 px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-indigo-500/30 flex items-center gap-2">
+                              <Award className="w-3 h-3" />
+                              GENERAL
+                            </span>
+                          );
+                        }
+                        const peoLabel = question.peo_title
+                          ? `PEO ${(question as any).peo_order_number ? `${(question as any).peo_order_number} · ` : ''}${question.peo_title}`
+                          : 'PEO';
+                        return (
+                          <span className="bg-[#F7C948]/10 text-[#F7C948] px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-[#F7C948]/20 flex items-center gap-2">
+                            <Award className="w-3 h-3" />
+                            {peoLabel}
+                          </span>
+                        );
+                      })()}
+                      <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border flex items-center gap-2 ${
+                        (question as any).is_locked === false
+                          ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                          : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                      }`}>
                         <Lock className="w-3 h-3" />
-                        Locked
+                        {(question as any).is_locked === false ? 'Editable' : 'Locked'}
                       </span>
                     </div>
                     <h3 className="text-xl font-bold text-white leading-tight">
@@ -472,24 +681,39 @@ const AlumniSurvey: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-center flex-wrap">
-                {ratingLabels.map((rating) => (
-                  <button
-                    key={rating.value}
-                    onClick={() => handleRating(question.id, rating.value)}
-                    className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
-                      responses[question.id] === rating.value
-                        ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-indigo-600 shadow-lg'
-                        : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
-                    }`}
-                  >
-                    {rating.label}
-                  </button>
-                ))}
-              </div>
+              {getQuestionType(question) === 'TEXT' ? (
+                <textarea
+                  value={responses[question.id]?.text_answer || ''}
+                  onChange={(e) => handleTextAnswer(question.id, e.target.value)}
+                  rows={5}
+                  className="w-full bg-white text-gray-900 border border-gray-300 rounded-2xl px-5 py-4 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  placeholder="Write your answer..."
+                />
+              ) : (
+                <div className="flex gap-2 justify-center flex-wrap">
+                  {getQuestionOptions(question).map((option, optionIndex) => {
+                    const isSelected = responses[question.id]?.selected_option_label === option
+                      || responses[question.id]?.score === optionIndex + 1;
+                    return (
+                      <button
+                        key={`${question.id}-${optionIndex}`}
+                        onClick={() => handleOptionSelect(question, option, optionIndex)}
+                        className={`px-4 py-3 rounded-xl border-2 flex items-center justify-center font-semibold transition-all ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-indigo-600 shadow-lg'
+                            : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </motion.section>
           ))}
-        </div>
+          </div>
+        )}
 
         <div className="pt-8 flex flex-col items-center gap-6">
           <button

@@ -83,7 +83,7 @@ def recalculate_reports_for_retake_queryset(retake_queryset, semester_id=None):
                 batch=retake.current_batch,
                 ga__program=retake.current_batch.program,
             ).update(needs_recalculation=True, is_locked=False)
-            calculate_ga_report(retake.current_batch)
+            calculate_ga_report(retake.current_batch, force_recalculate=True)
 
         processed.append(retake)
 

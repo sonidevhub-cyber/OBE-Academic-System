@@ -16,6 +16,40 @@ interface CurriculumVersionDetailPageProps {
 
 type ActiveTab = 'courses' | 'obe' | 'history';
 
+const coerceWeight = (weight: number | string | null | undefined): number => {
+  const num = Number(weight);
+  return Number.isFinite(num) ? num : 0;
+};
+
+  const formatDecimalWeight = (weight: number | string | null | undefined): string => {
+    return coerceWeight(weight).toFixed(2);
+  };
+
+  const getCloSelectedGaIds = (matrix: any, cloId: string, temp: Record<string, number>) => {
+    return (matrix?.gas || [])
+      .map((ga: any) => ga.id)
+      .filter((gaId: string) => coerceWeight(temp[`${cloId}_${gaId}`]) > 0);
+  };
+
+  const normalizeCloRowWeights = (matrix: any, cloId: string, temp: Record<string, number>) => {
+    const selectedGaIds = getCloSelectedGaIds(matrix, cloId, temp);
+    if (selectedGaIds.length === 0) return temp;
+
+    const equalWeight = 1 / selectedGaIds.length;
+    const next = { ...temp };
+
+    matrix?.gas?.forEach((ga: any) => {
+      const key = `${cloId}_${ga.id}`;
+      if (selectedGaIds.includes(ga.id)) {
+        next[key] = equalWeight;
+      } else {
+        delete next[key];
+      }
+    });
+
+    return next;
+  };
+
 const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = ({ id: propId, onClose, onVersionCreated }) => {
   const { isSAC, currentUser } = useAuth();
   const { id: paramId } = useParams<{ id: string }>();
@@ -78,6 +112,22 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
     kpi_target: 60,
     order_number: 1
   });
+
+  const cloTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    mappingMatrix?.clos?.forEach((clo: any) => {
+      totals[clo.id] = mappingMatrix.gas?.reduce((sum: number, ga: any) => {
+        const key = `${clo.id}_${ga.id}`;
+        return sum + coerceWeight(tempMappings[key]);
+      }, 0) || 0;
+    });
+    return totals;
+  }, [mappingMatrix, tempMappings]);
+
+  const isObeMatrixValid = useMemo(() => {
+    if (!mappingMatrix?.clos?.length) return false;
+    return mappingMatrix.clos.every((clo: any) => Math.abs((cloTotals[clo.id] || 0) - 1) < 0.0001);
+  }, [mappingMatrix, cloTotals]);
 
   const { idForRequests, isNew, isInvalidId } = useMemo(() => {
     if (!id) return { idForRequests: NaN, isNew: false, isInvalidId: true };
@@ -263,11 +313,17 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
       const data = await obeService.getMappingMatrix(courseId, version.id);
       setMappingMatrix(data);
       
-      // Initialize temp mappings for GAs
+      // Initialize temp mappings with equal distribution per CLO row
       const initial: Record<string, number> = {};
-      data.mappings?.forEach((m: any) => {
-        // GA mapping key: cloId_gaId
-        initial[`${m.clo_id || m.clo}_${m.ga_id || m.ga}`] = m.weight || 3;
+      data.clos?.forEach((clo: any) => {
+        const rowMappings = (data.mappings || []).filter((m: any) => (m.clo_id || m.clo) === clo.id);
+        const rowCount = rowMappings.length;
+        if (rowCount > 0) {
+          const equalWeight = 1 / rowCount;
+          rowMappings.forEach((m: any) => {
+            initial[`${m.clo_id || m.clo}_${m.ga_id || m.ga}`] = equalWeight;
+          });
+        }
       });
       setTempMappings(initial);
     } catch (error) {
@@ -281,12 +337,18 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
   const handleSaveObeMappings = async () => {
     if (!selectedCourseForObe || !version) return;
 
+    if (!isObeMatrixValid) {
+      const invalidClo = mappingMatrix?.clos?.find((clo: any) => Math.abs((cloTotals[clo.id] || 0) - 1) > 0.0001);
+      toast.error(`Total weight for CLO ${invalidClo?.order_number || ''} must be exactly 1.00`);
+      return;
+    }
+
     const action = async () => {
       try {
         setSubmitting(true);
         const mappingsList = Object.entries(tempMappings).map(([key, weight]) => {
           const [cloId, gaId] = key.split('_');
-          return { clo_id: cloId, ga_id: gaId, weight };
+          return { clo_id: cloId, ga_id: gaId, weight: coerceWeight(weight) };
         });
         
         await obeService.saveCLOGAMappings(selectedCourseForObe.course, version.id, mappingsList);
@@ -1053,8 +1115,8 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                       </button>
                       <button
                         onClick={handleSaveObeMappings}
-                        disabled={submitting}
-                        className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-semibold shadow-md"
+                        disabled={submitting || !isObeMatrixValid}
+                        className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-semibold shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Save className="w-4 h-4 mr-2" />
                         Save Mappings
@@ -1127,6 +1189,9 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                   </div>
                                 </th>
                               ))}
+                              <th className="px-4 py-3 text-center text-xs font-black text-indigo-700 uppercase border-b w-24 bg-indigo-50/50">
+                                Total
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1140,18 +1205,37 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                   return (
                                     <td key={`${clo.id}-${ga.id}`} className="px-2 py-3 text-center border-b border-r">
                                       {isEditingObe ? (
-                                        <input
-                                          type="checkbox"
-                                          checked={!!weight}
-                                          onChange={(e) => {
-                                            const checked = e.target.checked;
-                                            const newTemp = { ...tempMappings };
-                                            if (!checked) delete newTemp[`${clo.id}_${ga.id}`];
-                                            else newTemp[`${clo.id}_${ga.id}`] = 3; // Default weight 3
-                                            setTempMappings(newTemp);
-                                          }}
-                                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                                        />
+                                        <div className="flex flex-col items-center gap-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={!!weight}
+                                            onChange={(e) => {
+                                              const checked = e.target.checked;
+                                              const newTemp = { ...tempMappings };
+                                              if (!checked) delete newTemp[`${clo.id}_${ga.id}`];
+                                              else newTemp[`${clo.id}_${ga.id}`] = 1;
+                                              setTempMappings(normalizeCloRowWeights(mappingMatrix, clo.id, newTemp));
+                                            }}
+                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                          />
+                                          {weight ? (
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="1"
+                                              step="0.01"
+                                              value={formatDecimalWeight(weight)}
+                                              onChange={(e) => {
+                                                const nextValue = e.target.value === '' ? 0 : Number(e.target.value);
+                                                setTempMappings(prev => ({
+                                                  ...prev,
+                                                  [`${clo.id}_${ga.id}`]: nextValue
+                                                }));
+                                              }}
+                                              className="w-16 px-2 py-1 text-center text-xs font-bold border border-gray-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            />
+                                          ) : null}
+                                        </div>
                                       ) : (
                                         weight ? (
                                           <div className="flex justify-center">
@@ -1164,6 +1248,11 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                     </td>
                                   );
                                 })}
+                                <td className="px-3 py-3 text-center border-b bg-indigo-50/30">
+                                  <span className={`text-xs font-black ${Math.abs((cloTotals[clo.id] || 0) - 1) < 0.0001 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {formatDecimalWeight(cloTotals[clo.id] || 0)}
+                                  </span>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

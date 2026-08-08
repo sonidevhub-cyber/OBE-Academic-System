@@ -3,6 +3,25 @@ export interface PEOReportHeader {
   program: string;
   evaluationCycleYear: string;
   totalSurveyResponses: number;
+  totalAlumniSurveyResponses?: number;
+  totalEmployerSurveyResponses?: number;
+}
+
+export interface PEOIndirectSourceBreakdown {
+  percentage: number | null;
+  responseCount: number;
+  weight: number;
+}
+
+export interface PEOIndirectMeta {
+  alumni: PEOIndirectSourceBreakdown;
+  employer: PEOIndirectSourceBreakdown;
+  totalResponses: number;
+}
+
+export interface PEOIndirectWeightConfig {
+  alumniWeight: number;
+  employerWeight: number;
 }
 
 export interface PEOEmploymentStatusItem {
@@ -48,6 +67,8 @@ export interface PEOReportMatrixItem {
   mappedQuestions: string[];
   directPercentage: number | null;
   indirectPercentage: number | null;
+  indirectBreakdown?: PEOIndirectMeta;
+  indirectQuestionRows?: Array<PEOQuestionBreakdownItem & { source?: string; legacy?: boolean }>;
   combinedAttainmentPercentage: number | null;
   targetPercentage: number;
   status: 'Achieved' | 'CQI Triggered';
@@ -61,6 +82,8 @@ export interface PEOQuestionBreakdownItem {
   avgScore: number | null;
   percentage: number | null;
   label: string;
+  source?: 'Alumni Survey' | 'Employer Survey' | string;
+  legacy?: boolean;
 }
 
 export interface PEOReportQuestionBreakdown {
@@ -87,6 +110,7 @@ export interface PEOReportSignatures {
 export interface PEOReportData {
   header: PEOReportHeader;
   employmentStats: PEOEmploymentStats;
+  indirectWeightConfig?: PEOIndirectWeightConfig;
   summary: PEOReportSummary;
   matrix: PEOReportMatrixItem[];
   questionBreakdown?: PEOReportQuestionBreakdown[];

@@ -6,6 +6,12 @@ class InstructorSerializer(serializers.ModelSerializer):
     user_email = serializers.ReadOnlyField(source='user.email')
     role = serializers.ReadOnlyField(source='user.role')
     active_role = serializers.ReadOnlyField(source='user.active_role')
+    department_name = serializers.SerializerMethodField()
+
+    def get_department_name(self, obj):
+        if obj.department:
+            return getattr(obj.department, 'name', None)
+        return None
     
     class Meta:
         model = Instructor

@@ -546,13 +546,41 @@ const CoordinatorCLOReportModule: React.FC = () => {
                             </div>
                             {/* CQI Info Button */}
                             {clo.cqi && (
-                              <button
-                                onClick={() => toggleCqi(`${course.course_id}-${clo.clo_id}`)}
-                                className="p-1 rounded-full hover:bg-indigo-100 text-indigo-600 flex items-center gap-1"
-                              >
-                                <Info size={14} />
-                                {expandedCqi.has(`${course.course_id}-${clo.clo_id}`) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                              </button>
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCqi(`${course.course_id}-${clo.clo_id}`)}
+                                  className="p-1 rounded-full hover:bg-indigo-100 text-indigo-600 flex items-center gap-1"
+                                  title="View CQI details"
+                                >
+                                  <Info size={14} />
+                                  {expandedCqi.has(`${course.course_id}-${clo.clo_id}`) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                </button>
+
+                                {expandedCqi.has(`${course.course_id}-${clo.clo_id}`) && (
+                                  <div className="absolute top-8 right-0 z-50 w-72 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left shadow-xl">
+                                    <div className="mb-3 border-b border-amber-200 pb-2 text-xs font-black uppercase tracking-wider text-amber-800">
+                                      CQI Details
+                                    </div>
+                                    <div className="space-y-3 text-xs normal-case tracking-normal">
+                                      <div>
+                                        <span className="font-bold text-gray-900">Reason:</span>
+                                        <p className="mt-1 font-medium text-gray-700">{clo.cqi.reason}</p>
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-gray-900">Action Plan:</span>
+                                        <p className="mt-1 font-medium text-gray-700">{clo.cqi.action_plan}</p>
+                                      </div>
+                                      {clo.cqi.coordinator_comment && (
+                                        <div>
+                                          <span className="font-bold text-gray-900">Coordinator Comment:</span>
+                                          <p className="mt-1 font-medium text-gray-700">{clo.cqi.coordinator_comment}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                         </th>
@@ -586,40 +614,6 @@ const CoordinatorCLOReportModule: React.FC = () => {
                         })
                       ))}
                     </tr>
-                    {/* Expanded CQI Row */}
-                    {report.finalized_courses.some((c) => c.clos.some((clo) => clo.cqi && expandedCqi.has(`${c.course_id}-${clo.clo_id}`))) && (
-                      <tr className="bg-yellow-50">
-                        <td colSpan={3} className="px-4 py-2 sticky left-0 bg-yellow-50 z-10"></td>
-                        {report.finalized_courses.map((course: CLOMasterCompilationCourse) => (
-                          course.clos.map((clo) => {
-                            const key = `${course.course_id}-${clo.clo_id}`;
-                            if (clo.cqi && expandedCqi.has(key)) {
-                              return (
-                                <td key={key} colSpan={1} className="px-3 py-3 text-xs border border-gray-200 align-top">
-                                  <div className="space-y-2">
-                                    <div>
-                                      <span className="font-bold text-gray-800">Reason:</span>
-                                      <p className="mt-1 text-gray-700">{clo.cqi.reason}</p>
-                                    </div>
-                                    <div>
-                                      <span className="font-bold text-gray-800">Action Plan:</span>
-                                      <p className="mt-1 text-gray-700">{clo.cqi.action_plan}</p>
-                                    </div>
-                                    {clo.cqi.coordinator_comment && (
-                                      <div>
-                                        <span className="font-bold text-gray-800">Coordinator Comment:</span>
-                                        <p className="mt-1 text-gray-700">{clo.cqi.coordinator_comment}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                              );
-                            }
-                            return <td key={key} colSpan={1} className="border border-gray-200"></td>;
-                          })
-                        ))}
-                      </tr>
-                    )}
                   </React.Fragment>
                 ))}
                 {/* Summary Row 1: No. of Students Achieving CLOs KPI */}

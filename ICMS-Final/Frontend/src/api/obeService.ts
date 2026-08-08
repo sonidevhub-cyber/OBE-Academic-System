@@ -36,11 +36,100 @@ export interface AlumniSurveyQuestion {
   peo_id?: string;
   peo_title?: string;
   peo_description?: string;
+  peo_order_number?: number | null;
+  is_general?: boolean;
   question_text: string;
+  question_type?: SurveyQuestionType;
+  custom_options?: string[] | null;
+  effective_options?: string[];
   is_locked: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type SurveyType = 'ALUMNI' | 'EMPLOYER';
+export type SurveyQuestionType = 'RATING_SCALE' | 'SINGLE_SELECT' | 'TEXT';
+
+export interface SurveyQuestion {
+  id: string;
+  survey_type: SurveyType;
+  program?: string | null;
+  peo?: string | PEO | null;
+  peo_id?: string | null;
+  peo_title?: string | null;
+  peo_order_number?: number | null;
+  is_general?: boolean;
+  question_text: string;
+  question_type?: SurveyQuestionType;
+  custom_options?: string[] | null;
+  effective_options?: string[];
+  is_locked: boolean;
+  is_active: boolean;
+  version_snapshot_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PEOSurveyWeightConfig {
+  id?: string;
+  program: string;
+  alumni_weight: number;
+  employer_weight: number;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployerSurveyCycle {
+  id: string;
+  batch: string;
+  linked_alumni_cycle?: string | null;
+  survey_window: '6_MONTHS' | '1.5_YEARS' | '2_YEARS' | '3_YEARS';
+  status: 'DRAFT' | 'ACTIVE' | 'CLOSED';
+  due_at?: string | null;
+  response_threshold?: number;
+  auto_extension_days?: number;
+  auto_extension_count?: number;
+  activated_by?: string | null;
+  activated_at?: string | null;
+  closed_at?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface EmployerSurveyResponseSummary {
+  id: string;
+  cycle: string;
+  alumni_student?: string | null;
+  employer_email: string;
+  employer_contact_name?: string | null;
+  employer_organization?: string | null;
+  employee_name_at_org?: string | null;
+  response_token: string;
+  token_sent_at?: string | null;
+  token_used_at?: string | null;
+  submitted_at?: string | null;
+  is_active: boolean;
+}
+
+export interface EmployerSurveyPublicQuestion {
+  id: string;
+  survey_type: SurveyType;
+  peo_title?: string | null;
+  peo_order_number?: number | null;
+  is_general: boolean;
+  question_text: string;
+  question_type?: SurveyQuestionType;
+  custom_options?: string[] | null;
+  effective_options?: string[];
+}
+
+export interface EmployerSurveySubmissionAnswer {
+  question_id: string;
+  score?: number;
+  selected_option_label?: string;
+  text_answer?: string;
 }
 
 export interface GA {
@@ -163,6 +252,11 @@ export interface InterimAlert {
   issue_statement?: string | null;
   attainment_value?: number | null;
   saved_at?: string | null;
+  cqi_level?: 'SEMESTER' | 'CUMULATIVE' | null;
+  cqi_status?: string | null;
+  hod_action_plan?: string | null;
+  remedial_plan?: string | null;
+  recommended_remedy?: string | null;
 }
 
 export interface CourseInfo {
@@ -615,6 +709,20 @@ class OBEService {
     return response.data;
   }
 
+  async getAlumniSurveyStatus(batchId: string, studentId?: string): Promise<{
+    enabled: boolean;
+    submitted: boolean;
+    cycle_id?: string | null;
+    response_count?: number;
+    eligible_alumni_count?: number;
+    response_rate?: number;
+  }> {
+    const response = await api.get(`/obe/batches/${batchId}/alumni-survey-status/`, {
+      params: studentId ? { student_id: studentId } : undefined,
+    });
+    return response.data;
+  }
+
   async getAlumniSurveyQuestions(cycleId: string): Promise<AlumniSurveyQuestion[]> {
     const response = await api.get(`/obe/alumni-survey/${cycleId}/`);
     return response.data;
@@ -632,7 +740,17 @@ class OBEService {
       employment_status?: string;
       organization_name?: string;
       current_designation?: string;
-      responses: Array<{ question: string; score: number }>;
+      employer_contact_name?: string;
+      employer_contact_email?: string;
+      higher_studies_university?: string;
+      higher_studies_degree?: string;
+      higher_studies_country?: string;
+      responses: Array<{
+        question: string;
+        score?: number;
+        selected_option_label?: string;
+        text_answer?: string;
+      }>;
     }
   ): Promise<{ success: boolean }> {
     const response = await api.post(`/obe/alumni-survey/${cycleId}/student/${studentId}/`, data);
@@ -880,6 +998,108 @@ class OBEService {
 
   async deletePEO(id: string): Promise<any> {
     const response = await api.delete(`/obe/peos/${id}/`);
+    return response.data;
+  }
+
+  // --- Flexible SurveyQuestion (Alumni + Employer shared) ---
+  async getSurveyQuestions(programId: string, survey_type?: SurveyType, peo_id?: string): Promise<SurveyQuestion[]> {
+    const params: any = {};
+    if (survey_type) params.survey_type = survey_type;
+    if (peo_id) params.peo_id = peo_id;
+    const response = await api.get(`/obe/programs/${programId}/survey-questions/`, { params });
+    return response.data;
+  }
+
+  async createSurveyQuestion(data: Partial<SurveyQuestion>): Promise<SurveyQuestion> {
+    const response = await api.post('/obe/survey-questions/', data);
+    return response.data;
+  }
+
+  async updateSurveyQuestion(id: string, data: Partial<SurveyQuestion>): Promise<SurveyQuestion> {
+    const response = await api.patch(`/obe/survey-questions/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteSurveyQuestion(id: string): Promise<any> {
+    const response = await api.delete(`/obe/survey-questions/${id}/`);
+    return response.data;
+  }
+
+  async lockSurveyQuestion(id: string): Promise<SurveyQuestion> {
+    const response = await api.post(`/obe/survey-questions/${id}/lock/`);
+    return response.data;
+  }
+
+  // --- PEO Survey Weight Config (Alumni vs Employer sub-weights) ---
+  async getPEOSurveyWeightConfig(programId: string): Promise<PEOSurveyWeightConfig> {
+    const response = await api.get(`/obe/programs/${programId}/peo-survey-weight-config/`);
+    return response.data;
+  }
+
+  async savePEOSurveyWeightConfig(programId: string, data: Partial<PEOSurveyWeightConfig>): Promise<PEOSurveyWeightConfig> {
+    const response = await api.put(`/obe/programs/${programId}/peo-survey-weight-config/`, data);
+    return response.data;
+  }
+
+  // --- Employer Survey ---
+  async getEmployerSurveyCycles(batchId: string): Promise<EmployerSurveyCycle[]> {
+    const response = await api.get(`/obe/batches/${batchId}/employer-survey-cycles/`);
+    return response.data;
+  }
+
+  async createEmployerSurveyCycle(data: Partial<EmployerSurveyCycle>): Promise<EmployerSurveyCycle> {
+    const response = await api.post('/obe/employer-survey-cycles/', data);
+    return response.data;
+  }
+
+  async generateEmployerSurveyTokens(cycleId: string): Promise<{
+    cycle_id: string;
+    created: number;
+    skipped_duplicate: number;
+    missing_email: number;
+    total_seeds: number;
+  }> {
+    const response = await api.post(`/obe/employer-survey-cycles/${cycleId}/generate-tokens/`);
+    return response.data;
+  }
+
+  async dispatchEmployerSurveyEmails(cycleId: string): Promise<{
+    cycle_id: string;
+    sent: number;
+    failed: number;
+    total_pending: number;
+  }> {
+    const response = await api.post(`/obe/employer-survey-cycles/${cycleId}/dispatch-emails/`);
+    return response.data;
+  }
+
+  async getEmployerSurveyResponses(cycleId: string): Promise<EmployerSurveyResponseSummary[]> {
+    const response = await api.get(`/obe/employer-survey-cycles/${cycleId}/responses/`);
+    return response.data;
+  }
+
+  // --- Public Employer Survey (no-auth, token-based) ---
+  async getEmployerSurveyPublicQuestions(token: string): Promise<{
+    valid: boolean;
+    employer_email?: string;
+    employee_name_at_org?: string | null;
+    employer_organization?: string | null;
+    questions: EmployerSurveyPublicQuestion[];
+    message?: string;
+  }> {
+    const response = await api.get(`/obe/public/employer-survey/${token}/`);
+    return response.data;
+  }
+
+  async submitEmployerSurveyByToken(
+    token: string,
+    answers: EmployerSurveySubmissionAnswer[]
+  ): Promise<{
+    response_id: string;
+    answers_recorded: number;
+    submitted_at: string;
+  }> {
+    const response = await api.post(`/obe/public/employer-survey/${token}/submit/`, { answers });
     return response.data;
   }
 

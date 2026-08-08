@@ -1,4 +1,6 @@
+import uuid
 from decimal import Decimal
+from django.utils import timezone
 from .models import (
     CLOGAMapping,
     CourseSession,
@@ -16,14 +18,37 @@ from .models import (
     PEO,
     GAPEOMapping,
     get_peo_indirect_score,
+    get_flexible_peo_indirect_score,
     GAReport
 )
-from django.db import transaction
+from .reporting import (
+    ga_report_has_stale_contributors,
+    get_valid_course_ga_scores,
+    invalidate_ga_reports_for_batch,
+)
+from django.db import transaction, models
 from django.db.models import Avg, Count, Sum, Max, Q
 from assessments.models import Assessment, Question, StudentQuestionMark
 from students.models import Student
 from core.models import Batch, Semester
-from django.utils import timezone
+
+
+def _get_effective_course_sessions_for_batch(batch: Batch, *, require_assessment_done: bool = False):
+    """
+    Return the latest effective session per course code for a batch.
+    """
+    return get_effective_course_sessions(
+        batch,
+        require_assessment_done=require_assessment_done,
+    )
+
+
+def _get_course_ga_score_queryset(batch: Batch, ga: GA):
+    return get_valid_course_ga_scores(
+        batch,
+        ga,
+        require_assessment_done=True,
+    )
 
 
 def get_students_for_batch(batch: Batch):
@@ -38,7 +63,8 @@ def get_students_for_batch(batch: Batch):
         Student.objects.filter(
             Q(user__batch=batch)
             | Q(batch=batch)
-            | Q(retakes__current_batch=batch, retakes__is_active=True)
+            | Q(retakes__current_batch=batch, retakes__is_active=True),
+            user__is_active=True,
         )
         .select_related('user')
         .distinct()
@@ -203,6 +229,7 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
                 continue
             
         total_obtained = Decimal('0')
+        contributor_count = 0
         
         # For each student, use retake marks if available
         for student in students:
@@ -218,6 +245,8 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
                         question__in=retake_questions
                     )
                     logger.debug(f"[calculate_course_ga_score] student_marks count={student_marks.count()}")
+                    if student_marks.exists():
+                        contributor_count += 1
                     student_total = sum(sm.marks_obtained for sm in student_marks)
                     
                     # Scale to original total
@@ -233,6 +262,8 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
                         question__in=original_questions,
                         course_retake__isnull=True
                     )
+                    if student_marks.exists():
+                        contributor_count += 1
                     student_total_scaled = sum(sm.marks_obtained for sm in student_marks)
                     logger.debug(f"[calculate_course_ga_score] Using original marks (no retake questions): total={student_total_scaled}")
             else:
@@ -242,34 +273,45 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA):
                     question__in=original_questions,
                     course_retake__isnull=True
                 )
+                if student_marks.exists():
+                    contributor_count += 1
                 student_total_scaled = sum(sm.marks_obtained for sm in student_marks)
                 logger.debug(f"[calculate_course_ga_score] No retake, using original marks: total={student_total_scaled}")
                 
             total_obtained += student_total_scaled
         
-        total_possible = total_marks * enrolled_students_count
+        total_possible = total_marks * contributor_count if contributor_count > 0 else Decimal('0')
         
         if total_possible > 0:
             clo_attainment = (total_obtained / total_possible) * 100
         else:
-            clo_attainment = Decimal('0')
+            clo_attainment = None
             
-        total_score += Decimal(clo_attainment) * mapping.weight
-        total_weight += mapping.weight
+        if clo_attainment is not None:
+            total_score += Decimal(clo_attainment) * mapping.weight
+            total_weight += mapping.weight
 
     if total_weight > 0:
         final_score = round(total_score / total_weight, 2)
     else:
-        final_score = Decimal('0')
+        final_score = None
 
-    # Create or update CourseGAScore
+    # Create or update CourseGAScore only when there is real assessment data.
+    if final_score is None:
+        CourseGAScore.objects.filter(course_session=course_session, ga=ga).update(
+            is_active=False,
+            is_stale=True,
+        )
+        return None
+
     course_ga_score, created = CourseGAScore.objects.update_or_create(
         course_session=course_session,
         ga=ga,
         defaults={
             'score': final_score,
             'enrolled_students': enrolled_students_count,
-            'is_stale': False
+            'is_stale': False,
+            'is_active': True,
         }
     )
 
@@ -441,6 +483,7 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
                             question__in=retake_questions
                         )
                         logger.debug(f"[calculate_all_course_ga_scores] student_marks count={student_marks.count()}")
+                        has_student_data = student_marks.exists()
                         student_total = sum(sm.marks_obtained for sm in student_marks)
                         retake_total = sum(q.marks for q in retake_questions)
                         
@@ -462,6 +505,7 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
                             question__in=original_questions,
                             course_retake__isnull=True
                         )
+                        has_student_data = student_marks.exists()
                         total_obtained = sum(sm.marks_obtained for sm in student_marks)
                         attainment = (total_obtained / total_marks) * 100
                         logger.debug(f"[calculate_all_course_ga_scores] Using original marks: total_obtained={total_obtained}, attainment={attainment}")
@@ -478,17 +522,27 @@ def calculate_all_course_ga_scores(course_session: CourseSession):
                         question__in=original_questions,
                         course_retake__isnull=True
                     )
+                    has_student_data = student_marks.exists()
                     total_obtained = sum(sm.marks_obtained for sm in student_marks)
                     attainment = (total_obtained / total_marks) * 100
                     logger.debug(f"[calculate_all_course_ga_scores] Using original marks: total_obtained={total_obtained}, attainment={attainment}")
-                
+
+                if not has_student_data:
+                    StudentCLOScore.objects.filter(
+                        student=student,
+                        clo=original_clo,
+                        course_session=course_session,
+                    ).update(is_active=False)
+                    continue
+
                 logger.info(f"[calculate_all_course_ga_scores] Creating StudentCLOScore for student={student.student_id}, clo={original_clo.id}, attainment={round(attainment, 2)}")
                 StudentCLOScore.objects.update_or_create(
                     student=student,
                     clo=original_clo,
                     course_session=course_session,
                     defaults={
-                        'attainment': round(attainment, 2)
+                        'attainment': round(attainment, 2),
+                        'is_active': True,
                     }
                 )
 
@@ -509,28 +563,25 @@ def calculate_ga_attainment_semester_cohort(batch: Batch, semester: Semester, ga
     Calculate semester-wise cohort GA attainment: weighted average of course scores 
     using both credit hours and enrolled students (double weighted average)
     """
-    allowed_course_ids = []
-    if batch.curriculum_version:
-        allowed_course_ids = batch.curriculum_version.version_courses.filter(
-            is_active=True
-        ).values_list('course_id', flat=True)
-        
-    course_sessions = get_effective_course_sessions(
+    course_sessions = _get_effective_course_sessions_for_batch(
         batch,
-        semester=semester,
         require_assessment_done=True,
     )
-    if allowed_course_ids:
-        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(course_id)
+            for course_id in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
         course_sessions = [
             session for session in course_sessions
             if str(session.course_id) in allowed_course_ids
         ]
 
-    course_scores = CourseGAScore.objects.filter(
-        course_session__in=course_sessions,
-        ga=ga,
-    ).select_related('course_session', 'course_session__course')
+    course_scores = _get_course_ga_score_queryset(batch, ga).filter(
+        course_session__semester=semester,
+    )
 
     if not course_scores.exists():
         return None
@@ -546,7 +597,7 @@ def calculate_ga_attainment_semester_cohort(batch: Batch, semester: Semester, ga
         total_student_credits += credits * enrolled
 
     if total_student_credits == 0:
-        return Decimal('0')
+        return None
 
     return round(total_weighted_score / total_student_credits, 2)
 
@@ -556,28 +607,7 @@ def calculate_ga_attainment_cumulative_cohort(batch: Batch, ga: GA):
     Calculate cumulative cohort GA attainment: all semesters using both 
     credit hours and enrolled students (double weighted average)
     """
-    allowed_course_ids = []
-    if batch.curriculum_version:
-        allowed_course_ids = batch.curriculum_version.version_courses.filter(
-            is_active=True
-        ).values_list('course_id', flat=True)
-        
-    course_sessions = get_effective_course_sessions(
-        batch,
-        upto_semester=batch.current_semester,
-        require_assessment_done=True,
-    )
-    if allowed_course_ids:
-        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
-        course_sessions = [
-            session for session in course_sessions
-            if str(session.course_id) in allowed_course_ids
-        ]
-
-    course_scores = CourseGAScore.objects.filter(
-        course_session__in=course_sessions,
-        ga=ga,
-    ).select_related('course_session', 'course_session__course')
+    course_scores = _get_course_ga_score_queryset(batch, ga)
 
     if not course_scores.exists():
         return None
@@ -593,7 +623,7 @@ def calculate_ga_attainment_cumulative_cohort(batch: Batch, ga: GA):
         total_student_credits += credits * enrolled
 
     if total_student_credits == 0:
-        return Decimal('0')
+        return None
 
     return round(total_weighted_score / total_student_credits, 2)
 
@@ -606,25 +636,24 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
     # This matters for retake students who may still belong to their original batch.
     batch = batch or getattr(student.user, 'batch', None) or getattr(student, 'batch', None)
     if batch is None:
-        return Decimal('0')
+        return None
 
-    allowed_course_ids = []
-    if batch.curriculum_version:
-        allowed_course_ids = batch.curriculum_version.version_courses.filter(
-            is_active=True
-        ).values_list('course_id', flat=True)
-        
-    course_sessions = get_effective_course_sessions(
+    course_sessions = _get_effective_course_sessions_for_batch(
         batch,
-        semester=semester,
         require_assessment_done=True,
     )
-    if allowed_course_ids:
-        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(course_id)
+            for course_id in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
         course_sessions = [
             session for session in course_sessions
             if str(session.course_id) in allowed_course_ids
         ]
+    course_sessions = [session for session in course_sessions if session.semester_id == semester.id]
 
     total_attainment = Decimal('0')
     total_weight = Decimal('0')
@@ -643,7 +672,8 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
             student_clo_score = StudentCLOScore.objects.filter(
                 student=student,
                 clo=mapping.clo,
-                course_session=session
+                course_session=session,
+                is_active=True,
             ).first()
 
             if student_clo_score:
@@ -651,7 +681,7 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
                 total_weight += mapping.weight
 
     if total_weight == 0:
-        return Decimal('0')
+        return None
 
     return round(total_attainment / total_weight, 2)
 
@@ -662,25 +692,24 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
     """
     batch = batch or getattr(student.user, 'batch', None) or getattr(student, 'batch', None)
     if batch is None:
-        return Decimal('0')
+        return None
 
-    allowed_course_ids = []
-    if batch.curriculum_version:
-        allowed_course_ids = batch.curriculum_version.version_courses.filter(
-            is_active=True
-        ).values_list('course_id', flat=True)
-        
-    course_sessions = get_effective_course_sessions(
+    course_sessions = _get_effective_course_sessions_for_batch(
         batch,
-        upto_semester=batch.current_semester,
         require_assessment_done=True,
     )
-    if allowed_course_ids:
-        allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(course_id)
+            for course_id in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
         course_sessions = [
             session for session in course_sessions
             if str(session.course_id) in allowed_course_ids
         ]
+    course_sessions = [session for session in course_sessions if session.semester_id and session.semester.number <= batch.current_semester]
 
     # Fetch all relevant mappings in one query and group by course session
     session_ids = [cs.id for cs in course_sessions]
@@ -702,7 +731,8 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
     # Fetch all student CLO scores in one query for these sessions and student
     student_clo_scores = StudentCLOScore.objects.filter(
         student=student,
-        course_session_id__in=session_ids
+        course_session_id__in=session_ids,
+        is_active=True,
     ).select_related('clo', 'course_session')  # Pre-fetch related objects
     
     # Create a dictionary to look up scores quickly
@@ -727,70 +757,54 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
                 total_weight += mapping.weight
 
     if total_weight == 0:
-        return Decimal('0')
+        return None
 
     return round(total_attainment / total_weight, 2)
 
 
-def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str, semester: int = None):
+def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str = 'CUMULATIVE', semester: int = None):
     """
-    Check if GA attainment is below threshold and create GACQIRecord if needed
+    Check cumulative GA attainment and create or refresh a GA-CQI record if needed.
     """
-    if cqi_level == 'SEMESTER' and semester is None:
+    if cqi_level != 'CUMULATIVE':
         return None
 
-    if cqi_level == 'CUMULATIVE':
-        attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
-    else:
-        # SEMESTER level
-        from core.models import Semester
-        sem_obj = Semester.objects.filter(program=batch.program, number=semester).first()
-        if not sem_obj:
-            return None
-        attainment = calculate_ga_attainment_semester_cohort(batch, sem_obj, ga)
+    attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
 
     if attainment is None:
         return None
 
-    # Reuse any existing CQI row for this GA/batch scope to respect DB uniqueness.
     cqi_filter = {
         'ga': ga,
         'batch': batch,
-        'cqi_level': cqi_level,
+        'cqi_level': 'CUMULATIVE',
+        'semester__isnull': True,
     }
-    if cqi_level == 'SEMESTER':
-        cqi_filter['semester'] = semester
-    else:
-        cqi_filter['semester__isnull'] = True
-
     existing_cqi = GACQIRecord.objects.filter(**cqi_filter).order_by('-updated_at').first()
     if existing_cqi:
-        # Keep the existing record and refresh the trigger values if needed.
         updated = False
-        new_attainment = attainment
-        if new_attainment is not None and existing_cqi.attainment_value != new_attainment:
-            existing_cqi.attainment_value = new_attainment
+        if existing_cqi.attainment_value != attainment:
+            existing_cqi.attainment_value = attainment
             updated = True
         if existing_cqi.kpi_threshold_at_trigger != ga.kpi_threshold:
             existing_cqi.kpi_threshold_at_trigger = ga.kpi_threshold
             updated = True
-        if existing_cqi.status == 'NOT_TRIGGERED':
-            existing_cqi.status = 'PENDING'
+        if existing_cqi.status in {'NOT_TRIGGERED', 'PENDING_HOD_INPUT', 'PENDING'}:
+            existing_cqi.status = 'OPEN'
             updated = True
         if updated:
             existing_cqi.save()
         return existing_cqi
 
-    # Check if below threshold
     if attainment < ga.kpi_threshold:
         cqi = GACQIRecord.objects.create(
             ga=ga,
             batch=batch,
-            cqi_level=cqi_level,
-            semester=semester if cqi_level == 'SEMESTER' else None,
+            cqi_level='CUMULATIVE',
+            semester=None,
             attainment_value=attainment,
             kpi_threshold_at_trigger=ga.kpi_threshold,
-            status='PENDING'
+            status='OPEN'
         )
         return cqi
     return None
@@ -938,6 +952,15 @@ def get_teacher_ga_context(course_id: str, batch_id: str = None):
                 f"({ga.title}), below the {float(ga.kpi_threshold):.2f}% target."
             )
 
+        remedy_text = None
+        if warning_record:
+            remedy_text = (
+                warning_record.remedy_text
+                or warning_record.hod_action_plan
+                or warning_record.remedial_plan
+                or None
+            )
+
         ga_data = {
             'ga_code': ga_code,
             'ga_title': ga.title,
@@ -962,7 +985,14 @@ def get_teacher_ga_context(course_id: str, batch_id: str = None):
             } if source_semester_no else None,
             'issue_statement': issue_statement,
             'attainment_value': previous_score,
-            'saved_at': warning_record.saved_at.isoformat() if warning_record and warning_record.saved_at else None
+            'saved_at': warning_record.saved_at.isoformat() if warning_record and warning_record.saved_at else None,
+            'cqi_level': warning_record.cqi_level if warning_record else (
+                'CUMULATIVE' if is_cumulative else 'SEMESTER'
+            ),
+            'cqi_status': warning_record.status if warning_record else None,
+            'hod_action_plan': warning_record.hod_action_plan if warning_record else None,
+            'remedial_plan': warning_record.remedial_plan if warning_record else None,
+            'recommended_remedy': remedy_text
         }
 
         if mapped_clos:
@@ -989,7 +1019,12 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
     """
     # Check for existing locked report first
     existing_report = GAReport.objects.filter(ga=ga, batch=batch, is_locked=True).first()
-    if existing_report and not force_recalculate and not existing_report.needs_recalculation:
+    if (
+        existing_report
+        and not force_recalculate
+        and not existing_report.needs_recalculation
+        and not ga_report_has_stale_contributors(batch, ga, require_assessment_done=True)
+    ):
         return {
             'final_score': float(existing_report.final_score) if existing_report.final_score is not None else None,
             'direct_score': float(existing_report.direct_score) if existing_report.direct_score is not None else None,
@@ -1005,24 +1040,26 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
     
     # Get Direct score
     direct_score = None
-    allowed_course_ids = []
-    if batch.curriculum_version:
-        allowed_course_ids = batch.curriculum_version.version_courses.filter(
-            is_active=True
-        ).values_list('course_id', flat=True)
-        
-    cs_query = CourseSession.objects.filter(
-        batch=batch,
-        is_active=True,
-        assessment_status='ASSESSMENT_DONE'
+    course_sessions = _get_effective_course_sessions_for_batch(
+        batch,
+        require_assessment_done=True,
     )
-    if allowed_course_ids:
-        cs_query = cs_query.filter(course_id__in=allowed_course_ids)
-    course_sessions = cs_query
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(course_id)
+            for course_id in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
 
-    course_scores = CourseGAScore.objects.filter(
-        course_session__in=course_sessions,
-        ga=ga
+    course_scores = get_valid_course_ga_scores(
+        batch,
+        ga,
+        require_assessment_done=True,
     )
     if course_scores.exists():
         total_weighted_score = Decimal('0')
@@ -1171,7 +1208,7 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
     return result
 
 
-def calculate_ga_report(batch):
+def calculate_ga_report(batch, force_recalculate=False):
     """
     Calculate GA report for all active GAs in the batch's program.
     Locks reports if the batch is program end ready.
@@ -1190,7 +1227,13 @@ def calculate_ga_report(batch):
         ga_id_str = str(ga.id)
         existing_report = report_map.get(ga_id_str)
         
-        if existing_report and existing_report.is_locked and not existing_report.needs_recalculation:
+        if (
+            existing_report
+            and not force_recalculate
+            and existing_report.is_locked
+            and not existing_report.needs_recalculation
+            and not ga_report_has_stale_contributors(batch, ga, require_assessment_done=True)
+        ):
             # Use locked existing report
             weighted_result = {
                 'final_score': float(existing_report.final_score) if existing_report.final_score is not None else None,
@@ -1206,7 +1249,7 @@ def calculate_ga_report(batch):
             }
         else:
             # Calculate and save the result
-            weighted_result = calculate_weighted_ga_score(ga, batch)
+            weighted_result = calculate_weighted_ga_score(ga, batch, force_recalculate=force_recalculate)
             
         report_rows.append({
             'ga_id': ga_id_str,
@@ -1294,7 +1337,12 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
         assessed_course_count = 0
 
         for session in course_sessions:
-            score_obj = CourseGAScore.objects.filter(course_session=session, ga=ga).first()
+            score_obj = CourseGAScore.objects.filter(
+                course_session=session,
+                ga=ga,
+                is_active=True,
+                is_stale=False,
+            ).first()
             if score_obj:
                 assessed_course_count += 1
 
@@ -1315,8 +1363,8 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
                     total_weighted_score += Decimal(str(attainment)) * mapping.weight
                     total_weight += mapping.weight
 
-            course_feedback_score = Decimal('0')
-            course_feedback_coverage = Decimal('0')
+            course_feedback_score = None
+            course_feedback_coverage = None
             if total_weight > 0:
                 course_feedback_score = round(total_weighted_score / total_weight, 2)
                 respondent_count = responses.filter(course_id=session.course_id).values('student').distinct().count()
@@ -1330,8 +1378,8 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
             contributing_courses.append({
                 'course_code': session.course.code,
                 'course_name': session.course.name,
-                'course_ga_score': float(score_obj.score) if score_obj else 0.0,
-                'course_feedback_score': float(course_feedback_score) if course_feedback_score is not None else 0.0,
+                'course_ga_score': float(score_obj.score) if score_obj else None,
+                'course_feedback_score': float(course_feedback_score) if course_feedback_score is not None else None,
                 'enrolled_students': score_obj.enrolled_students if score_obj else enrolled_students_count,
                 'semester': session.semester.number if session.semester else None,
                 'credits': session.course.credit_hours,
@@ -1519,11 +1567,11 @@ def calculate_peo_report(peo, batch=None):
     if total_weight > 0:
         direct_score = round(total_weighted_direct / total_weight, 2)
     
-    # Calculate Indirect score: get_peo_indirect_score
+    # Calculate Indirect score: get_flexible_peo_indirect_score (handles Alumni + Employer)
     indirect_score = None
     indirect_sources = []
     if batch:
-        indirect_data = get_peo_indirect_score(peo.id, batch.id)
+        indirect_data = get_flexible_peo_indirect_score(peo.id, batch.id)
         if indirect_data['overall'] is not None:
             indirect_score = Decimal(str(indirect_data['overall']))
             indirect_sources = indirect_data['sources']
@@ -1589,3 +1637,354 @@ def calculate_all_peo_reports(batch):
         if peo_result:
             report_rows.append(peo_result)
     return report_rows
+
+
+# ---------------------------------------------------------------------------
+# Employer Survey: Tokenized one-time-link distribution & submission
+# ---------------------------------------------------------------------------
+
+def generate_employer_survey_tokens_for_cycle(employer_cycle_id: str):
+    """
+    For a given EmployerSurveyCycle, seed EmployerSurveyResponse rows
+    (each with a unique one-time-use UUID response_token) for every
+    alumni employment record captured in the linked AlumniSurveyCycle
+    (or the sibling active alumni cycle of the same survey_window)
+    that has a non-empty employer contact.
+
+    Returns summary counts: { created, skipped_duplicate, missing_email }
+    """
+    from .models import (
+        EmployerSurveyCycle,
+        EmployerSurveyResponse,
+        AlumniSurveyCycle,
+        AlumniSurveyResponse,
+        AlumniSurveySubmission,
+    )
+    from django.db import transaction
+
+    cycle = EmployerSurveyCycle.objects.select_related("batch", "linked_alumni_cycle").get(
+        id=employer_cycle_id, is_active=True
+    )
+    batch = cycle.batch
+    survey_window = cycle.survey_window
+
+    alumni_cycle = cycle.linked_alumni_cycle
+    if alumni_cycle is None:
+        alumni_cycle = AlumniSurveyCycle.objects.filter(
+            batch=batch, survey_window=survey_window, is_active=True
+        ).order_by("-created_at").first()
+
+    employer_seeds: list[dict] = []
+
+    if alumni_cycle is not None:
+        sub_rows = AlumniSurveySubmission.objects.filter(
+            cycle=alumni_cycle, is_active=True
+        ).exclude(
+            models.Q(employer_contact_email__isnull=True) | models.Q(employer_contact_email="")
+        ).select_related("student", "student__user").values(
+            "id", "student_id", "organization_name", "current_designation",
+            "employer_contact_name", "employer_contact_email", "student__user__full_name",
+        )
+        for r in sub_rows:
+            employer_seeds.append({
+                "alumni_submission_id": r["id"],
+                "student_id": r["student_id"],
+                "employer_email": (r["employer_contact_email"] or "").strip().lower(),
+                "employer_contact_name": r.get("employer_contact_name"),
+                "employer_organization": r.get("organization_name"),
+                "employee_designation": r.get("current_designation"),
+                "employee_name": r.get("student__user__full_name"),
+            })
+
+        if not employer_seeds:
+            resp_rows = AlumniSurveyResponse.objects.filter(
+                cycle=alumni_cycle, is_active=True,
+                employment_status__in=["EMPLOYED", "SELF_EMPLOYED"],
+            ).exclude(
+                organization_name__isnull=True
+            ).exclude(
+                organization_name=""
+            ).select_related("student", "student__user").values(
+                "student_id", "employment_status", "organization_name",
+                "current_designation", "student__user__full_name",
+            ).distinct()
+            for r in resp_rows:
+                employer_seeds.append({
+                    "alumni_submission_id": None,
+                    "student_id": r["student_id"],
+                    "employer_email": "",
+                    "employer_organization": r.get("organization_name"),
+                    "employee_designation": r.get("current_designation"),
+                    "employee_name": r.get("student__user__full_name"),
+                })
+
+    created = 0
+    skipped_duplicate = 0
+    missing_email = 0
+
+    with transaction.atomic():
+        for seed in employer_seeds:
+            if not seed["employer_email"]:
+                missing_email += 1
+                continue
+            defaults = {
+                "alumni_survey_submission_id": seed["alumni_submission_id"],
+                "employer_contact_name": seed.get("employer_contact_name"),
+                "employer_organization": seed.get("employer_organization"),
+                "employer_designation": seed.get("employee_designation"),
+                "employee_name_at_org": seed.get("employee_name"),
+            }
+            obj, was_created = EmployerSurveyResponse.objects.get_or_create(
+                cycle=cycle,
+                employer_email=seed["employer_email"],
+                alumni_student_id=seed["student_id"],
+                defaults=defaults,
+            )
+            if was_created:
+                created += 1
+            else:
+                skipped_duplicate += 1
+
+    return {
+        "cycle_id": str(cycle.id),
+        "created": created,
+        "skipped_duplicate": skipped_duplicate,
+        "missing_email": missing_email,
+        "total_seeds": len(employer_seeds),
+    }
+
+
+def build_employer_survey_public_link(response_token, request=None, frontend_base_url=None):
+    """
+    Build the public (non-authenticated) URL that an employer opens to
+    submit feedback. The link is one-time-use because the token is
+    invalidated on successful submit.
+
+    Accepts either a Django HttpRequest (to derive scheme/host) or an
+    explicit frontend_base_url string like "https://eduobe.example.com".
+    """
+    token_str = str(response_token)
+    if not frontend_base_url:
+        try:
+            from django.conf import settings
+            frontend_base_url = getattr(settings, "FRONTEND_BASE_URL", None)
+        except Exception:
+            frontend_base_url = None
+    if frontend_base_url:
+        base = frontend_base_url.rstrip("/")
+        return f"{base}/employer/survey/{token_str}"
+    if request is not None:
+        scheme = request.scheme
+        host = request.get_host()
+        return f"{scheme}://{host}/employer/survey/{token_str}"
+    return f"/employer/survey/{token_str}"
+
+
+def _send_employer_survey_email(employer_response, public_link, program_name=None):
+    """
+    Thin email wrapper. Uses Django's send_mail when available; otherwise
+    logs the intent to stdout so the operator can plug in a real backend.
+    Does NOT throw — failures are captured so the batch keeps running.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    subject = f"EduOBE Employer Feedback Request — {program_name or 'Program'}"
+    body = (
+        "Dear Employer,\n\n"
+        f"Your feedback about the graduate '{employer_response.employee_name_at_org or 'this graduate'}' "
+        f"at '{employer_response.employer_organization or 'your organization'}' helps our program improve.\n\n"
+        f"Please complete this short anonymous survey (5-min):\n  {public_link}\n\n"
+        "This link is valid for one submission only.\n\n"
+        "Thank you,\nEduOBE Office"
+    )
+    try:
+        from django.core.mail import send_mail
+        from django.conf import settings
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@eduobe.local")
+        recipient = employer_response.employer_email
+        send_mail(subject, body, from_email, [recipient], fail_silently=False)
+        return True
+    except Exception as exc:  # noqa: BLE001 — email backend may be missing in dev
+        logger.warning("Employer survey email skipped for %s: %s", employer_response.employer_email, exc)
+        logger.info("EMAIL INTENT: to=%s | link=%s", employer_response.employer_email, public_link)
+        return False
+
+
+def dispatch_employer_survey_emails(employer_cycle_id: str, request=None, frontend_base_url=None):
+    """
+    For every pending EmployerSurveyResponse in the cycle whose token has
+    not been sent yet, mark token_sent_at and deliver the one-time link
+    via email. Returns summary counts.
+    """
+    from .models import EmployerSurveyResponse
+
+    pending = list(EmployerSurveyResponse.objects.filter(
+        cycle_id=employer_cycle_id,
+        token_sent_at__isnull=True,
+        submitted_at__isnull=True,
+        is_active=True,
+    ).select_related("cycle", "cycle__batch", "cycle__batch__program"))
+
+    sent = 0
+    failed = 0
+    program_name = None
+    for resp in pending:
+        if program_name is None and resp.cycle.batch.program:
+            program_name = resp.cycle.batch.program.name
+        link = build_employer_survey_public_link(
+            resp.response_token, request=request, frontend_base_url=frontend_base_url
+        )
+        ok = _send_employer_survey_email(resp, link, program_name=program_name)
+        if ok:
+            resp.token_sent_at = timezone.now()
+            resp.save(update_fields=["token_sent_at"])
+            sent += 1
+        else:
+            failed += 1
+    return {
+        "cycle_id": str(employer_cycle_id),
+        "sent": sent,
+        "failed": failed,
+        "total_pending": len(pending),
+    }
+
+
+def submit_employer_survey_by_token(response_token: str, answers_payload: list[dict]):
+    """
+    Public (non-auth) submission path for Employer Survey.
+
+    answers_payload = [
+        {"question_id": "<uuid>", "score": 1..5},
+        ...
+    ]
+
+    Validates token single-use, then creates one EmployerSurveyAnswer per
+    scored question, records submitted_at, and invalidates the token.
+    General questions (peo=null) are accepted but excluded from scoring.
+    """
+    from .models import EmployerSurveyResponse, EmployerSurveyAnswer, SurveyQuestion
+    from django.db import transaction
+
+    resp = EmployerSurveyResponse.objects.filter(
+        response_token=response_token
+    ).select_related("cycle").first()
+    if resp is None:
+        raise LookupError("Survey link is not recognized.")
+
+    has_recorded_answers = resp.answers.filter(is_active=True).exists()
+    if has_recorded_answers and resp.token_used_at is not None:
+        raise PermissionError("This survey link has already been used.")
+    if has_recorded_answers and resp.submitted_at is not None:
+        raise PermissionError("This survey has already been submitted.")
+    if has_recorded_answers and not resp.is_active:
+        raise PermissionError("This survey link is no longer active.")
+
+    cycle_qs = SurveyQuestion.objects.filter(
+        survey_type="EMPLOYER",
+        is_active=True,
+    )
+    if resp.cycle and resp.cycle.batch and resp.cycle.batch.program:
+        cycle_qs = cycle_qs.filter(
+            models.Q(program=resp.cycle.batch.program) | models.Q(program__isnull=True)
+        )
+    valid_questions = {str(q.id): q for q in cycle_qs}
+
+    with transaction.atomic():
+        bulk_answers = []
+        for entry in answers_payload:
+            qid = entry.get("question_id")
+            score = entry.get("score")
+            selected_option_label = entry.get("selected_option_label")
+            text_answer = entry.get("text_answer")
+            if qid is None:
+                continue
+            try:
+                qid_uuid = str(uuid.UUID(str(qid)))
+            except (ValueError, AttributeError):
+                continue
+            question = valid_questions.get(qid_uuid)
+            if question is None:
+                continue
+
+            answer_kwargs = {
+                "response": resp,
+                "question_id": qid_uuid,
+                "score": None,
+                "selected_option_label": None,
+                "text_answer": None,
+            }
+            if question.question_type == "TEXT":
+                cleaned_text = str(text_answer or "").strip()
+                if not cleaned_text:
+                    continue
+                answer_kwargs["text_answer"] = cleaned_text
+            else:
+                try:
+                    score_int = int(score)
+                except (TypeError, ValueError):
+                    score_int = None
+                cleaned_label = str(selected_option_label or "").strip()
+                if score_int is None and not cleaned_label:
+                    continue
+                answer_kwargs["score"] = score_int if score_int and score_int > 0 else None
+                answer_kwargs["selected_option_label"] = cleaned_label or None
+
+            if (
+                answer_kwargs["score"] is None
+                and answer_kwargs["selected_option_label"] is None
+                and answer_kwargs["text_answer"] is None
+            ):
+                continue
+            bulk_answers.append(EmployerSurveyAnswer(**answer_kwargs))
+
+        if bulk_answers:
+            EmployerSurveyAnswer.objects.bulk_create(bulk_answers, ignore_conflicts=True)
+
+        resp.submitted_at = timezone.now()
+        resp.token_used_at = timezone.now()
+        resp.is_active = False
+        resp.save(update_fields=["submitted_at", "token_used_at", "is_active", "updated_at"])
+
+    return {
+        "response_id": str(resp.id),
+        "answers_recorded": len(bulk_answers),
+        "submitted_at": resp.submitted_at.isoformat(),
+    }
+
+
+def mark_alumni_survey_submission_from_legacy(alumni_cycle_id: str):
+    """
+    One-shot migration helper: for every student that already has legacy
+    AlumniSurveyResponse rows in a given cycle, create a corresponding
+    AlumniSurveySubmission header row (without flexible answers) so that
+    the new flexible scoring pipeline can recognize the student count
+    when the Coordinator later migrates questions to SurveyQuestion.
+    """
+    from .models import AlumniSurveyCycle, AlumniSurveyResponse, AlumniSurveySubmission
+    from django.db import transaction
+
+    cycle = AlumniSurveyCycle.objects.get(id=alumni_cycle_id)
+    per_student = AlumniSurveyResponse.objects.filter(
+        cycle=cycle, is_active=True
+    ).values(
+        "student_id", "employment_status", "organization_name", "current_designation"
+    ).distinct()
+
+    created = 0
+    existing = 0
+    with transaction.atomic():
+        for row in per_student:
+            _, was_created = AlumniSurveySubmission.objects.get_or_create(
+                cycle=cycle,
+                student_id=row["student_id"],
+                defaults={
+                    "employment_status": row.get("employment_status"),
+                    "organization_name": row.get("organization_name"),
+                    "current_designation": row.get("current_designation"),
+                },
+            )
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+    return {"cycle_id": str(cycle.id), "created": created, "existing": existing}

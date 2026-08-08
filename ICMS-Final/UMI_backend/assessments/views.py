@@ -25,6 +25,52 @@ from obe.models import CLO, GA
 from .serializer import AssessmentCreateSerializer, AssessmentDetailSerializer
 
 
+QUESTION_BLOOM_LEVEL_MAP = {
+    "K1": "K1",
+    "K2": "K2",
+    "K3": "K3",
+    "K4": "K4",
+    "K5": "K5",
+    "K6": "K6",
+    "C1": "K1",
+    "C2": "K2",
+    "C3": "K3",
+    "C4": "K4",
+    "C5": "K5",
+    "C6": "K6",
+    "REMEMBER": "K1",
+    "REMEMBERING": "K1",
+    "UNDERSTAND": "K2",
+    "UNDERSTANDING": "K2",
+    "APPLY": "K3",
+    "APPLYING": "K3",
+    "ANALYZE": "K4",
+    "ANALYZING": "K4",
+    "EVALUATE": "K5",
+    "EVALUATING": "K5",
+    "CREATE": "K6",
+    "CREATING": "K6",
+}
+
+
+def normalize_question_bloom_level(level):
+    if level is None:
+        return None
+    normalized = str(level).strip().upper()
+    if normalized in QUESTION_BLOOM_LEVEL_MAP:
+        return QUESTION_BLOOM_LEVEL_MAP[normalized]
+
+    first_token = normalized.split()[0] if normalized else ""
+    if first_token in QUESTION_BLOOM_LEVEL_MAP:
+        return QUESTION_BLOOM_LEVEL_MAP[first_token]
+
+    if "-" in normalized:
+        label = normalized.split("-", 1)[1].strip()
+        return QUESTION_BLOOM_LEVEL_MAP.get(label)
+
+    return None
+
+
 class AssessmentListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -44,6 +90,47 @@ class AssessmentListView(APIView):
 
         serializer = AssessmentDetailSerializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class CLOCoverageView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        course_id = request.data.get("course")
+        curriculum_version_id = request.data.get("curriculum_version")
+        current_clos = set(str(clo) for clo in request.data.get("current_clos", []) if clo)
+
+        if not course_id:
+            return Response({"error": "course is required"}, status=400)
+
+        from django.db.models import Q
+
+        clos_query = Q(course_id=course_id, is_active=True)
+        if curriculum_version_id:
+            clos_query &= Q(curriculum_version_id=curriculum_version_id)
+
+        required_clos = list(
+            CLO.objects.filter(clos_query)
+            .order_by("order_number")
+            .values("id", "order_number", "description")
+        )
+
+        missing_clos = [
+            {
+                "id": str(clo["id"]),
+                "order": clo["order_number"],
+                "description": clo["description"],
+            }
+            for clo in required_clos
+            if str(clo["id"]) not in current_clos
+        ]
+
+        return Response({
+            "all_clos_covered": len(missing_clos) == 0,
+            "missing_clos": missing_clos,
+        })
+
+
 class CreateAssessmentView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -143,6 +230,12 @@ class CreateAssessmentView(APIView):
                 return Response({
                     "error": f"CLO {q['clo']} invalid"
                 }, status=400)
+            normalized_level = normalize_question_bloom_level(q.get("level"))
+            if not normalized_level:
+                return Response({
+                    "error": f"Invalid Bloom level {q.get('level')}"
+                }, status=400)
+            q["level"] = normalized_level
 
         # ✅ CREATE ASSESSMENT
         assessment = Assessment.objects.create(
@@ -163,7 +256,7 @@ class CreateAssessmentView(APIView):
                 assessment=assessment,
                 clo_id=q['clo'],
                 description=q['description'],
-                bloom_level=q['level'],
+                bloom_level=q["level"],
                 marks=q['marks']
             )
             for q in questions
@@ -373,28 +466,6 @@ class EnterMarksView(APIView):
                 mark_existing_sessions_as_done(assessment.batch, assessment.semester)
 
                 # ✅ Step 14: Semester-level CQI check
-                all_sessions_in_semester = CourseSession.objects.filter(
-                    batch=assessment.batch,
-                    semester=assessment.semester,
-                    is_active=True
-                )
-                done_sessions_in_semester = all_sessions_in_semester.filter(
-                    assessment_status='ASSESSMENT_DONE'
-                )
-
-                if (
-                    all_sessions_in_semester.exists() and
-                    all_sessions_in_semester.count() == done_sessions_in_semester.count()
-                ):
-                    gas = GA.objects.filter(
-                        program=assessment.batch.program,
-                        is_active=True
-                    )
-                    for ga in gas:
-                        check_and_trigger_ga_cqi(
-                            assessment.batch, ga, 'SEMESTER', assessment.semester.number
-                        )
-
                 # ✅ Step 15: Cumulative-level CQI check
                 if assessment.batch.is_program_end_ready:
                     gas = GA.objects.filter(
@@ -402,7 +473,7 @@ class EnterMarksView(APIView):
                         is_active=True
                     )
                     for ga in gas:
-                        check_and_trigger_ga_cqi(assessment.batch, ga, 'CUMULATIVE')
+                        check_and_trigger_ga_cqi(assessment.batch, ga)
 
         return Response({
             "message": "Marks saved and finalized",
@@ -1267,18 +1338,17 @@ class UpdateStudentMarksView(APIView):
         # Recalculate OBE once
         calculate_all_course_ga_scores(session)
 
-        gas = GA.objects.filter(
-            program=session.course.program,
-            is_active=True
-        )
-
-        for ga in gas:
-            check_and_trigger_ga_cqi(
-                batch=session.batch,
-                ga=ga,
-                cqi_level="SEMESTER",
-                semester=session.semester.number
+        if session.batch and session.batch.is_program_end_ready:
+            gas = GA.objects.filter(
+                program=session.course.program,
+                is_active=True
             )
+
+            for ga in gas:
+                check_and_trigger_ga_cqi(
+                    batch=session.batch,
+                    ga=ga,
+                )
 
         return Response(
             {

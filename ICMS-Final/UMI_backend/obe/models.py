@@ -1,7 +1,7 @@
 import uuid 
 from django.db import models 
 from django.core.exceptions import ValidationError
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from django.utils import timezone
 from decimal import Decimal
 
@@ -55,11 +55,45 @@ class PEO(models.Model):
                 is_active=True
             ).update(is_active=False)
             
-            question_text = f"To what extent are you achieving this objective in your current professional role: {self.description}"
+            legacy_text = f"To what extent are you achieving this objective in your current professional role: {self.description}"
             AlumniSurveyQuestion.objects.create(
                 peo=self,
-                question_text=question_text,
+                question_text=legacy_text,
                 is_locked=True,
+                is_active=True
+            )
+
+            SurveyQuestion.objects.filter(
+                peo=self,
+                survey_type=SURVEY_TYPE_ALUMNI,
+                is_active=True,
+                is_locked=False
+            ).update(is_active=False)
+
+            SurveyQuestion.objects.filter(
+                peo=self,
+                survey_type=SURVEY_TYPE_EMPLOYER,
+                is_active=True,
+                is_locked=False
+            ).update(is_active=False)
+
+            alumni_q = f"{ALUMNI_SURVEY_TEMPLATE_PREFIX} {self.description}"
+            employer_q = f"{EMPLOYER_SURVEY_TEMPLATE_PREFIX} {self.description}"
+
+            SurveyQuestion.objects.create(
+                survey_type=SURVEY_TYPE_ALUMNI,
+                program=self.program,
+                peo=self,
+                question_text=alumni_q,
+                is_locked=False,
+                is_active=True
+            )
+            SurveyQuestion.objects.create(
+                survey_type=SURVEY_TYPE_EMPLOYER,
+                program=self.program,
+                peo=self,
+                question_text=employer_q,
+                is_locked=False,
                 is_active=True
             )
 
@@ -337,12 +371,12 @@ class GAPEOMapping(models.Model):
 
 class CLO(models.Model): 
     BLOOM_LEVELS = [
-        ('K1', 'K1 - Remembering'),
-        ('K2', 'K2 - Understanding'),
-        ('K3', 'K3 - Applying'),
-        ('K4', 'K4 - Analyzing'),
-        ('K5', 'K5 - Evaluating'),
-        ('K6', 'K6 - Creating'),
+        ('C1', 'Remembering'),
+        ('C2', 'Understanding'),
+        ('C3', 'Applying'),
+        ('C4', 'Analyzing'),
+        ('C5', 'Evaluating'),
+        ('C6', 'Creating'),
     ]
     id = models.UUIDField( 
         primary_key=True, 
@@ -367,9 +401,9 @@ class CLO(models.Model):
     ) 
     order_number = models.IntegerField() 
     bloom_level = models.CharField(
-        max_length=10, 
+        max_length=2, 
         choices=BLOOM_LEVELS,
-        default='K2'
+        default='C2'
     )
     kpi_target = models.FloatField(default=60.0) 
     is_active = models.BooleanField(default=True) 
@@ -497,6 +531,7 @@ class CourseGAScore(models.Model):
     calculated_at = models.DateTimeField(auto_now_add=True)
     is_stale = models.BooleanField(default=False)
     locked = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         unique_together = ('course_session', 'ga')
@@ -507,6 +542,8 @@ class CourseGAScore(models.Model):
 
 class GACQIRecord(models.Model):
     STATUS_CHOICES = [
+        ('OPEN', 'Open'),
+        ('CLOSED_IMPLEMENTED', 'Closed / Implemented'),
         ('NOT_TRIGGERED', 'Not Triggered'),
         ('PENDING_HOD_INPUT', 'Pending HOD Input'),
         ('SAVED', 'Saved'),
@@ -516,7 +553,6 @@ class GACQIRecord(models.Model):
         ('FULLY_APPROVED', 'Fully Approved'),
     ]
     CQI_LEVEL_CHOICES = [
-        ('SEMESTER', 'Semester End CQI'),
         ('CUMULATIVE', 'Program End CQI'),
     ]
     id = models.UUIDField(
@@ -535,7 +571,7 @@ class GACQIRecord(models.Model):
         related_name='ga_cqi_records',
         null=True, blank=True
     )
-    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES,default='SEMESTER')
+    cqi_level = models.CharField(max_length=30, choices=CQI_LEVEL_CHOICES, default='CUMULATIVE')
     semester = models.IntegerField(null=True, blank=True)
     attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
@@ -572,14 +608,22 @@ class GACQIRecord(models.Model):
         blank=True
     )
     saved_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
+    remedy_text = models.TextField(blank=True, null=True)
+    closed_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='closed_ga_cqis',
+        null=True,
+        blank=True
+    )
+    closed_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
     is_active = models.BooleanField(default=True)  # Soft delete
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # Ensure only one CQI record per (ga, batch, cqi_level, semester) for SEMESTER
-        # And one per (ga, batch, cqi_level) for CUMULATIVE
-        # Unique constraints are handled via raw SQL in migration 0012
+        # Historical uniqueness is handled via raw SQL in migration 0012.
+        # Older semester-level rows may still exist for audit/look-back purposes.
         pass
 
     def __str__(self):
@@ -672,6 +716,7 @@ class StudentCLOScore(models.Model):
     )
     attainment = models.DecimalField(max_digits=5, decimal_places=2)
     calculated_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         unique_together = ('student', 'clo', 'course_session')
@@ -1044,6 +1089,544 @@ def get_ga_indirect_score(ga_id, batch_id):
     if sources:
         overall = sum(s['score'] for s in sources) / len(sources)
     
+    return {
+        'sources': sources,
+        'overall': overall
+    }
+
+
+SURVEY_TYPE_ALUMNI = 'ALUMNI'
+SURVEY_TYPE_EMPLOYER = 'EMPLOYER'
+SURVEY_TYPE_CHOICES = [
+    (SURVEY_TYPE_ALUMNI, 'Alumni Survey'),
+    (SURVEY_TYPE_EMPLOYER, 'Employer Survey'),
+]
+
+QUESTION_TYPE_RATING_SCALE = 'RATING_SCALE'
+QUESTION_TYPE_SINGLE_SELECT = 'SINGLE_SELECT'
+QUESTION_TYPE_TEXT = 'TEXT'
+QUESTION_TYPE_CHOICES = [
+    (QUESTION_TYPE_RATING_SCALE, 'Rating Scale (1-5)'),
+    (QUESTION_TYPE_SINGLE_SELECT, 'Custom Single Select'),
+    (QUESTION_TYPE_TEXT, 'Open Text Box'),
+]
+
+DEFAULT_RATING_OPTIONS = ['Poor', 'Below Average', 'Average', 'Good', 'Excellent']
+
+ALUMNI_SURVEY_TEMPLATE_PREFIX = "To what extent are you achieving this objective in your current professional role:"
+EMPLOYER_SURVEY_TEMPLATE_PREFIX = "To what extent does the graduate demonstrate this objective in their professional role:"
+
+
+class SurveyQuestion(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    survey_type = models.CharField(
+        max_length=20,
+        choices=SURVEY_TYPE_CHOICES,
+        db_index=True
+    )
+    program = models.ForeignKey(
+        'core.Program',
+        on_delete=models.CASCADE,
+        related_name='survey_questions',
+        null=True,
+        blank=True
+    )
+    peo = models.ForeignKey(
+        PEO,
+        on_delete=models.SET_NULL,
+        related_name='survey_questions',
+        null=True,
+        blank=True
+    )
+    question_text = models.TextField()
+    question_type = models.CharField(
+        max_length=20,
+        choices=QUESTION_TYPE_CHOICES,
+        default=QUESTION_TYPE_RATING_SCALE,
+        help_text='Rating Scale (1-5), Custom Single Select, or Open Text Box'
+    )
+    custom_options = models.JSONField(
+        null=True,
+        blank=True,
+        default=list,
+        help_text='List of option labels for SINGLE_SELECT questions (ordered). Optional overrides default rating options)'
+    )
+    is_locked = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    version_snapshot_id = models.UUIDField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text='Preserves original question IDs for historical response integrity'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['survey_type', 'created_at']
+
+    def effective_options(self):
+        """Return the labels list used for single-select rating-style questions.
+        For RATING_SCALE -> DEFAULT_RATING_OPTIONS (or custom_options if defined.
+        For SINGLE_SELECT -> custom_options."""
+        if self.question_type == QUESTION_TYPE_TEXT:
+            return []
+        custom = self.custom_options or []
+        if isinstance(custom, list) and custom:
+            return [str(x) for x in custom]
+        if self.question_type == QUESTION_TYPE_RATING_SCALE:
+            return list(DEFAULT_RATING_OPTIONS)
+        return []
+
+    def __str__(self):
+        peo_label = f"PEO-{self.peo.order_number}" if self.peo else "General"
+        return f"{self.get_survey_type_display()} - {peo_label}: {self.question_text[:50]}..."
+
+
+class PEOSurveyWeightConfig(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    program = models.OneToOneField(
+        'core.Program',
+        on_delete=models.CASCADE,
+        related_name='peo_survey_weight_config'
+    )
+    alumni_weight = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('50.00'),
+        help_text='Percentage of the 20% indirect component from Alumni Survey (0-100)'
+    )
+    employer_weight = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('50.00'),
+        help_text='Percentage of the 20% indirect component from Employer Survey (0-100)'
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        pass
+
+    def clean(self):
+        total = self.alumni_weight + self.employer_weight
+        if total != Decimal('100.00'):
+            from django.core.exceptions import ValidationError
+            raise ValidationError(f"Alumni weight + Employer weight must equal 100% (got {total}%)")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"PEO Survey Weights for {self.program}: "
+            f"Alumni={self.alumni_weight}%, Employer={self.employer_weight}%"
+        )
+
+
+class AlumniSurveySubmission(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    cycle = models.ForeignKey(
+        AlumniSurveyCycle,
+        on_delete=models.CASCADE,
+        related_name='submissions'
+    )
+    student = models.ForeignKey(
+        'students.Student',
+        on_delete=models.CASCADE,
+        related_name='alumni_survey_submissions'
+    )
+    employment_status = models.CharField(
+        max_length=20,
+        choices=AlumniSurveyResponse.EMPLOYMENT_STATUS_CHOICES,
+        null=True,
+        blank=True
+    )
+    organization_name = models.CharField(max_length=255, null=True, blank=True)
+    current_designation = models.CharField(max_length=255, null=True, blank=True)
+    employer_contact_name = models.CharField(max_length=255, null=True, blank=True)
+    employer_contact_email = models.EmailField(max_length=255, null=True, blank=True)
+    # --- Higher Studies details ---
+    higher_studies_university = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text='University / Institution name where pursuing Higher Studies'
+    )
+    higher_studies_degree = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text='e.g. MS Computer Science, MBA, PhD etc.'
+    )
+    higher_studies_country = models.CharField(
+        max_length=120,
+        null=True,
+        blank=True,
+        help_text='Country of Higher Studies Institution (optional)'
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('cycle', 'student')
+        ordering = ['-submitted_at']
+
+    def __str__(self):
+        return f"Alumni Submission {self.student} - {self.cycle}"
+
+
+class AlumniSurveyAnswer(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    submission = models.ForeignKey(
+        AlumniSurveySubmission,
+        on_delete=models.CASCADE,
+        related_name='answers'
+    )
+    question = models.ForeignKey(
+        SurveyQuestion,
+        on_delete=models.PROTECT,
+        related_name='alumni_answers'
+    )
+    score = models.IntegerField(
+        choices=[(1, '1'), (2, '2'), (3, '3'), (4, '4'), (5, '5')],
+        null=True,
+        blank=True,
+        help_text='1-based option index / numeric score (null for TEXT answers or custom option index beyond 5)'
+    )
+    selected_option_label = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text='The option text as it appeared in the survey at submission time (for custom single select)'
+    )
+    text_answer = models.TextField(
+        null=True,
+        blank=True,
+        help_text='User entered text when question_type=TEXT'
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('submission', 'question')
+        ordering = ['submitted_at']
+
+    def __str__(self):
+        if self.text_answer:
+            return f"Alumni Answer: Q={str(self.question_id)[:8]} Text"
+        return f"Alumni Answer: Q={str(self.question_id)[:8]} Score={self.score}"
+
+
+class EmployerSurveyCycle(models.Model):
+    SURVEY_WINDOW_CHOICES = [
+        ('6_MONTHS', '6 Months Post Graduation'),
+        ('1.5_YEARS', '1.5 Years Post Graduation'),
+        ('2_YEARS', '2 Years Post Graduation'),
+        ('3_YEARS', '3 Years Post Graduation'),
+    ]
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('ACTIVE', 'Active'),
+        ('CLOSED', 'Closed'),
+    ]
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='employer_survey_cycles'
+    )
+    linked_alumni_cycle = models.ForeignKey(
+        AlumniSurveyCycle,
+        on_delete=models.SET_NULL,
+        related_name='employer_survey_cycles',
+        null=True,
+        blank=True
+    )
+    survey_window = models.CharField(max_length=20, choices=SURVEY_WINDOW_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+    due_at = models.DateTimeField(null=True, blank=True)
+    response_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('30.00'))
+    auto_extension_days = models.PositiveIntegerField(default=2)
+    auto_extension_count = models.PositiveIntegerField(default=0)
+    activated_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='activated_employer_surveys',
+        null=True,
+        blank=True
+    )
+    activated_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Employer Survey {self.batch} - {self.survey_window} ({self.status})"
+
+
+class EmployerSurveyResponse(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    cycle = models.ForeignKey(
+        EmployerSurveyCycle,
+        on_delete=models.CASCADE,
+        related_name='responses'
+    )
+    alumni_survey_submission = models.ForeignKey(
+        AlumniSurveySubmission,
+        on_delete=models.SET_NULL,
+        related_name='employer_responses',
+        null=True,
+        blank=True,
+        help_text='Links back to the alumni employment record that generated this survey'
+    )
+    alumni_student = models.ForeignKey(
+        'students.Student',
+        on_delete=models.SET_NULL,
+        related_name='employer_survey_about',
+        null=True,
+        blank=True,
+        help_text='The graduate this employer feedback is about'
+    )
+    employer_email = models.EmailField(max_length=255, db_index=True)
+    employer_contact_name = models.CharField(max_length=255, null=True, blank=True)
+    employer_organization = models.CharField(max_length=255, null=True, blank=True)
+    employer_designation = models.CharField(max_length=255, null=True, blank=True)
+    employee_name_at_org = models.CharField(max_length=255, null=True, blank=True)
+    response_token = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True
+    )
+    token_sent_at = models.DateTimeField(null=True, blank=True)
+    token_used_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('cycle', 'employer_email', 'alumni_student')
+        ordering = ['-created_at']
+
+    @property
+    def is_token_valid(self):
+        return self.is_active and self.token_used_at is None and self.submitted_at is None
+
+    def invalidate_token(self):
+        self.token_used_at = timezone.now()
+        self.is_active = False
+
+    def __str__(self):
+        status = "Submitted" if self.submitted_at else "Pending"
+        return f"Employer Response ({status}) for {self.alumni_student} from {self.employer_email[:30]}"
+
+
+class EmployerSurveyAnswer(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+    response = models.ForeignKey(
+        EmployerSurveyResponse,
+        on_delete=models.CASCADE,
+        related_name='answers'
+    )
+    question = models.ForeignKey(
+        SurveyQuestion,
+        on_delete=models.PROTECT,
+        related_name='employer_answers'
+    )
+    score = models.IntegerField(
+        choices=[(1, '1'), (2, '2'), (3, '3'), (4, '4'), (5, '5')],
+        null=True,
+        blank=True,
+        help_text='1-based option index / numeric score (null for TEXT answers or custom option index beyond 5)'
+    )
+    selected_option_label = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text='The option text as it appeared in the survey at submission time (for custom single select)'
+    )
+    text_answer = models.TextField(
+        null=True,
+        blank=True,
+        help_text='User entered text when question_type=TEXT'
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('response', 'question')
+        ordering = ['submitted_at']
+
+    def __str__(self):
+        if self.text_answer:
+            return f"Employer Answer: Q={str(self.question_id)[:8]} Text"
+        return f"Employer Answer: Q={str(self.question_id)[:8]} Score={self.score}"
+
+
+def get_flexible_peo_indirect_score(peo_id, batch_id, survey_window=None):
+    """
+    NEW flexible-version indirect score for a PEO.
+    Aggregates from:
+      - Legacy AlumniSurveyResponse (fixed 1:1 AlumniSurveyQuestion rows, for historical data)
+      - New AlumniSurveyAnswer (SurveyQuestion survey_type=ALUMNI, multi-question per PEO)
+      - New EmployerSurveyAnswer (SurveyQuestion survey_type=EMPLOYER, multi-question per PEO)
+    General questions (peo=null) are excluded from scoring.
+    """
+    sources = []
+
+    peo_filter = Q(question__peo__id=peo_id) | Q(question__peo__id=peo_id)
+
+    alumni_new_qs = AlumniSurveyAnswer.objects.filter(
+        question__survey_type=SURVEY_TYPE_ALUMNI,
+        question__peo__id=peo_id,
+        question__is_active=True,
+        submission__cycle__batch_id=batch_id,
+        submission__is_active=True,
+        is_active=True
+    )
+    if survey_window:
+        alumni_new_qs = alumni_new_qs.filter(submission__cycle__survey_window=survey_window)
+
+    alumni_per_q_avg = alumni_new_qs.values('question_id').annotate(
+        qavg=models.Avg('score')
+    ).values_list('qavg', flat=True)
+    alumni_new_count = alumni_new_qs.values('submission_id').distinct().count()
+
+    if alumni_per_q_avg:
+        avg_of_q_avgs = sum(alumni_per_q_avg) / len(alumni_per_q_avg)
+        normalized = ((Decimal(str(avg_of_q_avgs)) - Decimal('1')) / Decimal('4')) * Decimal('100')
+        sources.append({
+            'source': 'Alumni Survey',
+            'survey_window': survey_window,
+            'score': normalized,
+            'response_count': alumni_new_count,
+            'question_count': len(alumni_per_q_avg),
+        })
+
+    if not sources:
+        legacy_qs = AlumniSurveyResponse.objects.filter(
+            question__peo__id=peo_id,
+            cycle__batch_id=batch_id,
+            is_active=True,
+            question__is_active=True
+        )
+        if survey_window:
+            legacy_qs = legacy_qs.filter(cycle__survey_window=survey_window)
+        if legacy_qs.exists():
+            avg_score = legacy_qs.aggregate(avg=models.Avg('score'))['avg']
+            if avg_score:
+                normalized = ((Decimal(str(avg_score)) - Decimal('1')) / Decimal('4')) * Decimal('100')
+                sources.append({
+                    'source': 'Alumni Survey',
+                    'survey_window': survey_window,
+                    'score': normalized,
+                    'response_count': legacy_qs.values('student_id').distinct().count(),
+                    'question_count': 1,
+                    'legacy': True,
+                })
+
+    employer_qs = EmployerSurveyAnswer.objects.filter(
+        question__survey_type=SURVEY_TYPE_EMPLOYER,
+        question__peo__id=peo_id,
+        question__is_active=True,
+        response__cycle__batch_id=batch_id,
+        response__submitted_at__isnull=False,
+        is_active=True
+    )
+    if survey_window:
+        employer_qs = employer_qs.filter(response__cycle__survey_window=survey_window)
+
+    employer_per_question = list(employer_qs.values(
+        'question_id',
+        'question__question_text',
+    ).annotate(qavg=models.Avg('score')).order_by('question__created_at'))
+    employer_per_q_avg = [row['qavg'] for row in employer_per_question]
+    employer_resp_count = employer_qs.values('response_id').distinct().count()
+
+    if employer_per_q_avg:
+        avg_of_q_avgs = sum(employer_per_q_avg) / len(employer_per_q_avg)
+        normalized = ((Decimal(str(avg_of_q_avgs)) - Decimal('1')) / Decimal('4')) * Decimal('100')
+        sources.append({
+            'source': 'Employer Survey',
+            'survey_window': survey_window,
+            'score': normalized,
+            'response_count': employer_resp_count,
+            'question_count': len(employer_per_q_avg),
+            'question_rows': [
+                {
+                    'question_id': str(row['question_id']),
+                    'question_text': row['question__question_text'],
+                    'avg_score': round(float(row['qavg']), 2) if row['qavg'] is not None else None,
+                    'percentage': round(float(((Decimal(str(row['qavg'])) - Decimal('1')) / Decimal('4')) * Decimal('100')), 2) if row['qavg'] is not None else None,
+                }
+                for row in employer_per_question
+            ],
+        })
+
+    overall = None
+    if sources:
+        program_id = None
+        peo_obj = PEO.objects.filter(id=peo_id).select_related('program').first()
+        if peo_obj:
+            program_id = peo_obj.program_id
+
+        alumni_src = next((s for s in sources if s['source'] == 'Alumni Survey'), None)
+        employer_src = next((s for s in sources if s['source'] == 'Employer Survey'), None)
+
+        if alumni_src and employer_src and program_id:
+            cfg = PEOSurveyWeightConfig.objects.filter(
+                program_id=program_id, is_active=True
+            ).first()
+            if cfg is None:
+                cfg = PEOSurveyWeightConfig(
+                    alumni_weight=Decimal('50.00'),
+                    employer_weight=Decimal('50.00')
+                )
+            w_a = cfg.alumni_weight / Decimal('100')
+            w_e = cfg.employer_weight / Decimal('100')
+            overall = (alumni_src['score'] * w_a) + (employer_src['score'] * w_e)
+        elif alumni_src and not employer_src:
+            overall = alumni_src['score']
+        elif employer_src and not alumni_src:
+            overall = employer_src['score']
+        else:
+            overall = sum(s['score'] for s in sources) / len(sources)
+
     return {
         'sources': sources,
         'overall': overall

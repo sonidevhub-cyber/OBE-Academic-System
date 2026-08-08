@@ -14,8 +14,12 @@ from .models import (
     AlumniSurveyQuestion,
     AlumniSurveyCycle,
     AlumniSurveyResponse,
+    AlumniSurveySubmission,
+    EmployerSurveyCycle,
+    EmployerSurveyResponse,
     PEOCQIRecord,
-    PEOCQISubmissionHistory
+    PEOCQISubmissionHistory,
+    SurveyQuestion,
 )
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
@@ -28,6 +32,14 @@ class PEOSerializer(serializers.ModelSerializer):
     def get_alumni_survey_question_text(self, obj):
         question = obj.alumni_survey_questions.filter(is_active=True).order_by('-created_at').first()
         return question.question_text if question else None
+
+    def create(self, validated_data):
+        validated_data.pop('skip_alumni_survey', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('skip_alumni_survey', None)
+        return super().update(instance, validated_data)
 
     class Meta: 
         model = PEO 
@@ -148,6 +160,9 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
     saved_by_hod_name = serializers.CharField(
         source='saved_by_hod.full_name', read_only=True, allow_null=True
     )
+    closed_by_name = serializers.CharField(
+        source='closed_by.full_name', read_only=True, allow_null=True
+    )
 
     def get_ga_code(self, obj):
         return f'GA-{obj.ga.order_number}'
@@ -189,9 +204,15 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
             'submitted_by', 'approved_by', 'is_audit_visible', 'is_locked',
             'created_at', 'updated_at', 'history', 'contributing_courses',
             'issue_statement', 'hod_action_plan', 'triggered_at', 
-            'saved_by_hod', 'saved_by_hod_name', 'saved_at', 'is_active'
+            'saved_by_hod', 'saved_by_hod_name', 'saved_at',
+            'remedy_text', 'closed_by', 'closed_by_name', 'closed_at',
+            'is_active'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'history', 'contributing_courses', 'is_locked', 'triggered_at', 'saved_at', 'saved_by_hod']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'history', 'contributing_courses',
+            'is_locked', 'triggered_at', 'saved_at', 'saved_by_hod',
+            'closed_by', 'closed_at'
+        ]
 
 
 class PEOCQISubmissionHistorySerializer(serializers.ModelSerializer):
@@ -365,6 +386,9 @@ class AlumniSurveyCycleSerializer(serializers.ModelSerializer):
     response_rate = serializers.SerializerMethodField()
     
     def get_response_count(self, obj):
+        submission_count = obj.submissions.filter(is_active=True).values('student').distinct().count()
+        if submission_count:
+            return submission_count
         return obj.responses.values('student').distinct().count()
 
     def get_eligible_alumni_count(self, obj):
@@ -396,3 +420,76 @@ class AlumniSurveyResponseSerializer(serializers.ModelSerializer):
         model = AlumniSurveyResponse
         fields = ['id', 'cycle', 'student', 'question', 'question_text', 'peo_title', 'score', 'submitted_at', 'employment_status', 'organization_name', 'current_designation']
         read_only_fields = ['id', 'submitted_at']
+
+
+class SurveyQuestionSerializer(serializers.ModelSerializer):
+    peo_title = serializers.CharField(source='peo.title', read_only=True, allow_null=True)
+    peo_order_number = serializers.IntegerField(source='peo.order_number', read_only=True, allow_null=True)
+    peo_id = serializers.PrimaryKeyRelatedField(source='peo', read_only=True, allow_null=True)
+    program_id = serializers.PrimaryKeyRelatedField(source='program', read_only=True, allow_null=True)
+    is_general = serializers.SerializerMethodField()
+    effective_options = serializers.SerializerMethodField()
+
+    def get_is_general(self, obj):
+        return not bool(obj.peo_id)
+
+    def get_effective_options(self, obj):
+        return list(obj.effective_options())
+
+    class Meta:
+        model = SurveyQuestion
+        fields = [
+            'id', 'survey_type', 'program', 'program_id', 'peo', 'peo_id',
+            'peo_title', 'peo_order_number', 'question_text',
+            'question_type', 'custom_options', 'effective_options',
+            'is_locked',
+            'is_active', 'is_general', 'version_snapshot_id', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'program_id', 'peo_id', 'peo_title', 'peo_order_number', 'is_general', 'effective_options', 'version_snapshot_id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'program': {'required': False, 'allow_null': True},
+            'peo': {'required': False, 'allow_null': True},
+            'is_active': {'required': False},
+            'is_locked': {'required': False},
+            'question_type': {'required': False},
+            'custom_options': {'required': False, 'allow_null': True},
+        }
+
+
+class EmployerSurveyCycleSerializer(serializers.ModelSerializer):
+    batch_name = serializers.CharField(source='batch.name', read_only=True)
+    linked_alumni_cycle_id = serializers.PrimaryKeyRelatedField(source='linked_alumni_cycle', read_only=True, allow_null=True)
+    response_count = serializers.SerializerMethodField()
+    pending_count = serializers.SerializerMethodField()
+
+    def get_response_count(self, obj):
+        return obj.responses.filter(submitted_at__isnull=False).count()
+
+    def get_pending_count(self, obj):
+        return obj.responses.filter(submitted_at__isnull=True, token_used_at__isnull=True, is_active=True).count()
+
+    class Meta:
+        model = EmployerSurveyCycle
+        fields = [
+            'id', 'batch', 'batch_name', 'linked_alumni_cycle', 'linked_alumni_cycle_id',
+            'survey_window', 'status', 'due_at', 'response_threshold',
+            'auto_extension_days', 'auto_extension_count', 'activated_by',
+            'activated_at', 'closed_at', 'is_active', 'created_at',
+            'response_count', 'pending_count',
+        ]
+        read_only_fields = [
+            'id', 'batch_name', 'linked_alumni_cycle_id', 'activated_by',
+            'activated_at', 'closed_at', 'created_at', 'response_count', 'pending_count',
+        ]
+
+
+class EmployerSurveyResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployerSurveyResponse
+        fields = [
+            'id', 'cycle', 'alumni_survey_submission', 'alumni_student',
+            'employer_email', 'employer_contact_name', 'employer_organization',
+            'employer_designation', 'employee_name_at_org', 'response_token', 'token_sent_at',
+            'token_used_at', 'submitted_at', 'is_active', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'response_token', 'token_sent_at', 'token_used_at', 'submitted_at', 'created_at', 'updated_at']

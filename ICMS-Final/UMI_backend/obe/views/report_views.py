@@ -7,7 +7,7 @@ from django.db.models import Q
 from core.models import Batch
 from curriculum.models import CurriculumVersion
 from students.models import Student
-from assessments.models import Assessment, Question, StudentQuestionMark
+from assessments.models import Assessment, Question, StudentQuestionMark, CQI
 from ..models import CourseSession, CLO
 from ..services import get_teacher_ga_context
 
@@ -347,6 +347,44 @@ class CourseCLOReportView(APIView):
             }
             assessment_effectiveness.append(effectiveness)
         
+        cqi_list = []
+        approved_cqis = (
+            CQI.objects.filter(
+                course=course,
+                batch=session.batch,
+                semester=session.semester,
+                status='approved',
+            )
+            .select_related('clo', 'instructor', 'reviewed_by')
+            .order_by('clo__order_number', '-updated_at')
+        )
+
+        for cqi in approved_cqis:
+            clo_code = cqi.clo.code if hasattr(cqi.clo, 'code') and cqi.clo.code else f'CLO-{cqi.clo.order_number}'
+            instructor_name = (
+                getattr(cqi.instructor, 'full_name', None)
+                or getattr(cqi.instructor, 'username', None)
+                or ''
+            )
+            approved_by = ''
+            if cqi.reviewed_by:
+                approved_by = (
+                    getattr(cqi.reviewed_by, 'full_name', None)
+                    or getattr(cqi.reviewed_by, 'username', None)
+                    or ''
+                )
+
+            cqi_list.append({
+                'clo_code': clo_code,
+                'clo_description': cqi.clo.description,
+                'course_code': course.code,
+                'reason': cqi.reason,
+                'action_plan': cqi.action_plan,
+                'instructor': instructor_name,
+                'approved_by': approved_by,
+                'status': cqi.status,
+            })
+
         print(f"DEBUG: clo_summary: {clo_summary}")
         print(f"DEBUG: assessment_effectiveness: {assessment_effectiveness}")
         
@@ -360,6 +398,6 @@ class CourseCLOReportView(APIView):
             },
             'clo_summary': clo_summary,
             'assessment_effectiveness': assessment_effectiveness,
-            'cqi_list': []
+            'cqi_list': cqi_list
         })
 

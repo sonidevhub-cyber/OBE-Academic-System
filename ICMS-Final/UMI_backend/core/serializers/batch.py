@@ -169,6 +169,9 @@ class BatchListSerializer(serializers.ModelSerializer):
         cycle = self._get_alumni_cycle(obj)
         if not cycle:
             return 0
+        submission_count = cycle.submissions.filter(is_active=True).values('student').distinct().count()
+        if submission_count:
+            return submission_count
         return cycle.responses.filter(is_active=True).values('student').distinct().count()
 
     def get_alumni_feedback_total_alumni(self, obj):

@@ -16,6 +16,15 @@ from obe.models import (
     GAPEOMapping,
     PEOCQIRecord,
     PEO,
+    SurveyQuestion,
+    AlumniSurveyAnswer,
+    AlumniSurveySubmission,
+    EmployerSurveyAnswer,
+    EmployerSurveyCycle,
+    EmployerSurveyResponse,
+    PEOSurveyWeightConfig,
+    SURVEY_TYPE_ALUMNI,
+    SURVEY_TYPE_EMPLOYER,
 )
 from obe.services import calculate_weighted_ga_score
 
@@ -86,6 +95,22 @@ def _resolve_alumni_cycle(batch: Batch, year: int) -> AlumniSurveyCycle | None:
     ).first()
 
 
+def _resolve_employer_cycle(batch: Batch, year: int) -> EmployerSurveyCycle | None:
+    matching = batch.employer_survey_cycles.filter(is_active=True).filter(
+        Q(created_at__year=year)
+        | Q(activated_at__year=year)
+        | Q(closed_at__year=year)
+    )
+    cycle = matching.order_by("-closed_at", "-activated_at", "-created_at").first()
+    if cycle:
+        return cycle
+    return batch.employer_survey_cycles.filter(is_active=True).order_by(
+        "-closed_at",
+        "-activated_at",
+        "-created_at",
+    ).first()
+
+
 def _question_label(percentage: float | None) -> str:
     if percentage is None:
         return "Not Assessed"
@@ -125,11 +150,18 @@ def _build_alumni_employment_stats(batch: Batch, cycle: AlumniSurveyCycle | None
         }
 
     responses = list(
-        AlumniSurveyResponse.objects.filter(
+        AlumniSurveySubmission.objects.filter(
             cycle=cycle,
             is_active=True,
         ).values("student_id", "employment_status", "organization_name").distinct()
     )
+    if not responses:
+        responses = list(
+            AlumniSurveyResponse.objects.filter(
+                cycle=cycle,
+                is_active=True,
+            ).values("student_id", "employment_status", "organization_name").distinct()
+        )
 
     employment_order = [
         "employed",
@@ -196,6 +228,13 @@ def resolve_peo_report_context(program_id: str, year: int, batch_id: str | None 
 
     peos = list(PEO.objects.filter(program=program, is_active=True).order_by("order_number"))
     cycle = _resolve_alumni_cycle(batch, year)
+    employer_cycle = _resolve_employer_cycle(batch, year)
+    weight_cfg = PEOSurveyWeightConfig.objects.filter(program=program, is_active=True).first()
+    if weight_cfg is None:
+        weight_cfg = PEOSurveyWeightConfig(
+            alumni_weight=Decimal("50.00"),
+            employer_weight=Decimal("50.00"),
+        )
     cqi_records = list(
         PEOCQIRecord.objects.filter(batch=batch, peo__in=peos).select_related("peo", "submitted_by")
     )
@@ -204,53 +243,104 @@ def resolve_peo_report_context(program_id: str, year: int, batch_id: str | None 
         "program": program,
         "batch": batch,
         "cycle": cycle,
+        "employer_cycle": employer_cycle,
+        "weight_cfg": weight_cfg,
         "peos": peos,
         "cqi_records": cqi_records,
     }
 
 
-def _build_indirect_breakdown(
+def _build_alumni_indirect(
     peo: PEO,
     cycle: AlumniSurveyCycle | None,
 ) -> tuple[float | None, list[dict[str, Any]], int]:
-    questions = list(
+    peo_id = peo.id
+    flexible_questions = list(
+        SurveyQuestion.objects.filter(
+            survey_type=SURVEY_TYPE_ALUMNI,
+            peo_id=peo_id,
+            is_active=True,
+        ).order_by("created_at")
+    )
+
+    if cycle is not None and flexible_questions:
+        answers = AlumniSurveyAnswer.objects.filter(
+            question__in=flexible_questions,
+            question__is_active=True,
+            submission__cycle=cycle,
+            submission__is_active=True,
+            is_active=True,
+        ).select_related("question", "submission")
+        total_respondents = answers.values("submission_id").distinct().count()
+
+        question_rows: list[dict[str, Any]] = []
+        per_q_pcts: list[Decimal] = []
+        for q in flexible_questions:
+            q_answers = answers.filter(question_id=q.id)
+            avg = q_answers.aggregate(a=Avg("score"))["a"]
+            if avg is None:
+                question_rows.append({
+                    "questionText": q.question_text,
+                    "avgScore": None,
+                    "percentage": None,
+                    "label": "Not Assessed",
+                    "source": "Alumni Survey",
+                })
+                continue
+            pct = round((float(avg) / 5.0) * 100.0, 2)
+            per_q_pcts.append(Decimal(str(pct)))
+            question_rows.append({
+                "questionText": q.question_text,
+                "avgScore": round(float(avg), 2),
+                "percentage": pct,
+                "label": _question_label(pct),
+                "source": "Alumni Survey",
+            })
+
+        if per_q_pcts:
+            avg_pct = float(sum(per_q_pcts) / len(per_q_pcts))
+            return round(avg_pct, 2), question_rows, total_respondents
+        if question_rows:
+            return None, question_rows, total_respondents
+
+    legacy_questions = list(
         AlumniSurveyQuestion.objects.filter(peo=peo, is_active=True).order_by("created_at")
     )
-    if cycle is None or not questions:
+    if cycle is None or not legacy_questions:
         return None, [], 0
 
     responses = AlumniSurveyResponse.objects.filter(
         cycle=cycle,
-        question__in=questions,
+        question__in=legacy_questions,
         is_active=True,
         question__is_active=True,
     )
     total_responses = responses.values("student_id").distinct().count()
 
-    question_rows: list[dict[str, Any]] = []
-    for question in questions:
+    question_rows = []
+    for question in legacy_questions:
         question_responses = responses.filter(question=question)
         avg_score = question_responses.aggregate(avg=Avg("score"))["avg"]
         if avg_score is None:
-            question_rows.append(
-                {
-                    "questionText": question.question_text,
-                    "avgScore": None,
-                    "percentage": None,
-                    "label": "Not Assessed",
-                }
-            )
+            question_rows.append({
+                "questionText": question.question_text,
+                "avgScore": None,
+                "percentage": None,
+                "label": "Not Assessed",
+                "source": "Alumni Survey",
+                "legacy": True,
+            })
             continue
 
         percentage = round((float(avg_score) / 5.0) * 100.0, 2)
-        question_rows.append(
-            {
-                "questionText": question.question_text,
-                "avgScore": round(float(avg_score), 2),
-                "percentage": percentage,
-                "label": _question_label(percentage),
-            }
-        )
+        question_rows.append({
+            "questionText": question.question_text,
+            "avgScore": round(float(avg_score), 2),
+            "percentage": percentage,
+            "label": _question_label(percentage),
+            "source": "Alumni Survey",
+            "legacy": True,
+        })
 
     overall_avg = responses.aggregate(avg=Avg("score"))["avg"]
     if overall_avg is None:
@@ -258,6 +348,110 @@ def _build_indirect_breakdown(
 
     indirect_percentage = round((float(overall_avg) / 5.0) * 100.0, 2)
     return indirect_percentage, question_rows, total_responses
+
+
+def _build_employer_indirect(
+    peo: PEO,
+    cycle: EmployerSurveyCycle | None,
+) -> tuple[float | None, list[dict[str, Any]], int]:
+    if cycle is None:
+        return None, [], 0
+
+    questions = list(
+        SurveyQuestion.objects.filter(
+            survey_type=SURVEY_TYPE_EMPLOYER,
+            peo_id=peo.id,
+            is_active=True,
+        ).order_by("created_at")
+    )
+    if not questions:
+        return None, [], 0
+
+    answers = EmployerSurveyAnswer.objects.filter(
+        question__in=questions,
+        question__is_active=True,
+        response__cycle=cycle,
+        response__submitted_at__isnull=False,
+        is_active=True,
+    ).select_related("question", "response")
+    total_respondents = answers.values("response_id").distinct().count()
+
+    question_rows: list[dict[str, Any]] = []
+    per_q_pcts: list[Decimal] = []
+    for q in questions:
+        q_answers = answers.filter(question_id=q.id)
+        avg = q_answers.aggregate(a=Avg("score"))["a"]
+        if avg is None:
+            question_rows.append({
+                "questionText": q.question_text,
+                "avgScore": None,
+                "percentage": None,
+                "label": "Not Assessed",
+                "source": "Employer Survey",
+            })
+            continue
+        pct = round((float(avg) / 5.0) * 100.0, 2)
+        per_q_pcts.append(Decimal(str(pct)))
+        question_rows.append({
+            "questionText": q.question_text,
+            "avgScore": round(float(avg), 2),
+            "percentage": pct,
+            "label": _question_label(pct),
+            "source": "Employer Survey",
+        })
+
+    if not per_q_pcts:
+        return None, question_rows, total_respondents
+
+    avg_pct = float(sum(per_q_pcts) / len(per_q_pcts))
+    return round(avg_pct, 2), question_rows, total_respondents
+
+
+def _build_indirect_breakdown(
+    peo: PEO,
+    cycle: AlumniSurveyCycle | None,
+    employer_cycle: EmployerSurveyCycle | None = None,
+    weight_cfg: PEOSurveyWeightConfig | None = None,
+) -> tuple[float | None, list[dict[str, Any]], dict[str, Any]]:
+    if weight_cfg is None:
+        weight_cfg = PEOSurveyWeightConfig(
+            alumni_weight=Decimal("50.00"),
+            employer_weight=Decimal("50.00"),
+        )
+
+    alumni_pct, alumni_rows, alumni_count = _build_alumni_indirect(peo, cycle)
+    employer_pct, employer_rows, employer_count = _build_employer_indirect(peo, employer_cycle)
+
+    question_rows = alumni_rows + employer_rows
+
+    has_alumni = alumni_pct is not None
+    has_employer = employer_pct is not None
+    combined: float | None = None
+
+    if has_alumni and has_employer:
+        w_a = weight_cfg.alumni_weight / Decimal("100")
+        w_e = weight_cfg.employer_weight / Decimal("100")
+        val = (Decimal(str(alumni_pct)) * w_a) + (Decimal(str(employer_pct)) * w_e)
+        combined = round(float(val), 2)
+    elif has_alumni:
+        combined = alumni_pct
+    elif has_employer:
+        combined = employer_pct
+
+    breakdown_meta = {
+        "alumni": {
+            "percentage": alumni_pct,
+            "responseCount": alumni_count,
+            "weight": _to_float(weight_cfg.alumni_weight) or 0.0,
+        },
+        "employer": {
+            "percentage": employer_pct,
+            "responseCount": employer_count,
+            "weight": _to_float(weight_cfg.employer_weight) or 0.0,
+        },
+        "totalResponses": alumni_count + employer_count,
+    }
+    return combined, question_rows, breakdown_meta
 
 
 def _build_direct_score(
@@ -307,6 +501,8 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
     program = context["program"]
     batch = context["batch"]
     cycle = context["cycle"]
+    employer_cycle = context["employer_cycle"]
+    weight_cfg = context["weight_cfg"]
     peos = context["peos"]
     cqi_records = context["cqi_records"]
     cqi_by_peo = {str(record.peo_id): record for record in cqi_records}
@@ -314,10 +510,17 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
     matrix: list[dict[str, Any]] = []
     chart_data: list[dict[str, Any]] = []
     triggered_count = 0
+    total_alumni_responses = 0
+    total_employer_responses = 0
 
     for idx, peo in enumerate(peos):
         direct_percentage, contributing_gas, mapped_questions = _build_direct_score(peo, batch)
-        indirect_percentage, per_question_rows, total_responses = _build_indirect_breakdown(peo, cycle)
+        indirect_percentage, per_question_rows, indirect_meta = _build_indirect_breakdown(
+            peo, cycle, employer_cycle=employer_cycle, weight_cfg=weight_cfg
+        )
+
+        total_alumni_responses = max(total_alumni_responses, indirect_meta["alumni"]["responseCount"])
+        total_employer_responses = max(total_employer_responses, indirect_meta["employer"]["responseCount"])
 
         available_components: list[tuple[Decimal, Decimal]] = []
         if direct_percentage is not None:
@@ -336,11 +539,13 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
         cqi_record = cqi_by_peo.get(str(peo.id))
         matrix.append(
             {
-                "peoId": str(peo.id),  # Keep this for key, but won't show in UI
+                "peoId": str(peo.id),
                 "description": peo.description or peo.title or "",
                 "mappedQuestions": mapped_questions or [row["questionText"] for row in per_question_rows],
                 "directPercentage": direct_percentage,
                 "indirectPercentage": indirect_percentage,
+                "indirectBreakdown": indirect_meta,
+                "indirectQuestionRows": per_question_rows,
                 "combinedAttainmentPercentage": combined_percentage,
                 "targetPercentage": target_percentage,
                 "status": status,
@@ -361,18 +566,36 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
     overall_status = "cqi_required" if triggered_count > 0 else "achieved"
     target_threshold = _get_target_threshold(peos)
 
+    legacy_resp = 0
+    if cycle:
+        legacy_resp = cycle.responses.filter(is_active=True).values("student_id").distinct().count()
+    combined_total = max(legacy_resp, total_alumni_responses) + total_employer_responses
+
     return {
         "header": {
             "department": _get_program_department(program),
             "program": program.name,
             "evaluationCycleYear": str(year),
-            "totalSurveyResponses": cycle.responses.filter(is_active=True).values("student_id").distinct().count() if cycle else 0,
+            "totalSurveyResponses": combined_total,
+            "totalAlumniSurveyResponses": max(legacy_resp, total_alumni_responses),
+            "totalEmployerSurveyResponses": total_employer_responses,
         },
         "employmentStats": _build_alumni_employment_stats(batch, cycle),
+        "indirectWeightConfig": {
+            "alumniWeight": _to_float(weight_cfg.alumni_weight) or 50.0,
+            "employerWeight": _to_float(weight_cfg.employer_weight) or 50.0,
+        },
         "summary": {
             "targetThreshold": target_threshold,
             "overallStatus": overall_status,
             "chartData": chart_data,
         },
         "matrix": matrix,
+        "questionBreakdown": [
+            {
+                "peoId": row["peoId"],
+                "questions": row.get("indirectQuestionRows", []),
+            }
+            for row in matrix
+        ],
     }

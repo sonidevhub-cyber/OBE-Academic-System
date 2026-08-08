@@ -15,7 +15,6 @@ def create_instructor_profile(sender, instance, created, **kwargs):
                 'name': instance.full_name,
                 'designation': getattr(instance, 'designation', 'Instructor') or 'Instructor',
                 'phone': getattr(instance, 'phone', '') or '',
-                'department': 'General',
             }
         )
 
@@ -29,7 +28,6 @@ def save_instructor_profile(sender, instance, **kwargs):
                 'name': instance.full_name,
                 'designation': getattr(instance, 'designation', 'Instructor') or 'Instructor',
                 'phone': getattr(instance, 'phone', '') or '',
-                'department': 'General',
             }
         )
         if not created:

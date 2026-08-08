@@ -59,7 +59,18 @@ from .views import (
     AlumniSurveyResponseView,
     AlumniSurveyStatusView,
     AlumniEmploymentStatsView,
-    PEOIndirectScoreView
+    EmployerSurveyCycleListView,
+    EmployerSurveyCycleCreateView,
+    EmployerSurveyCycleGenerateTokensView,
+    EmployerSurveyCycleDispatchEmailsView,
+    EmployerSurveyCycleResponsesView,
+    EmployerSurveyPublicView,
+    PEOIndirectScoreView,
+    # Flexible SurveyQuestion views
+    ProgramSurveyQuestionListView,
+    SurveyQuestionListCreateView,
+    SurveyQuestionDetailView,
+    SurveyQuestionLockView,
 )
 from .views.ga_views import EnableResultEditingView
 from .views.peo_views import (
@@ -226,6 +237,15 @@ urlpatterns = [
     path('alumni-survey/<uuid:cycle_id>/', AlumniSurveyResponseView.as_view()),
     path('alumni-survey/<uuid:cycle_id>/student/<uuid:student_id>/', AlumniSurveyResponseView.as_view()),
     path('batches/<uuid:batch_id>/alumni-survey-status/', AlumniSurveyStatusView.as_view()),
+
+    # Employer Survey Cycles + tokenized public survey
+    path('batches/<uuid:batch_id>/employer-survey-cycles/', EmployerSurveyCycleListView.as_view()),
+    path('employer-survey-cycles/', EmployerSurveyCycleCreateView.as_view()),
+    path('employer-survey-cycles/<uuid:cycle_id>/generate-tokens/', EmployerSurveyCycleGenerateTokensView.as_view()),
+    path('employer-survey-cycles/<uuid:cycle_id>/dispatch-emails/', EmployerSurveyCycleDispatchEmailsView.as_view()),
+    path('employer-survey-cycles/<uuid:cycle_id>/responses/', EmployerSurveyCycleResponsesView.as_view()),
+    path('public/employer-survey/<uuid:token>/', EmployerSurveyPublicView.as_view()),
+    path('public/employer-survey/<uuid:token>/submit/', EmployerSurveyPublicView.as_view()),
     
     # PEO Indirect Score
     path('peo/<uuid:peo_id>/batch/<uuid:batch_id>/indirect-score/', PEOIndirectScoreView.as_view()),
@@ -258,4 +278,14 @@ urlpatterns = [
     path('peo-cqi/<uuid:cqi_id>/', PEOCQIDetailView.as_view()),
     path('peo-cqi/<uuid:cqi_id>/submit/', PEOCQISubmitView.as_view()),
     path('peo-cqi/<uuid:cqi_id>/history/', PEOCQIHistoryView.as_view()),
+
+    # ========== FLEXIBLE SurveyQuestion ENDPOINTS (Alumni + Employer shared) ==========
+    # Program scoped list (GET with ?survey_type=ALUMNI/EMPLOYER&peo_id=<uuid>&general=true)
+    path('programs/<uuid:program_id>/survey-questions/', ProgramSurveyQuestionListView.as_view()),
+    # Global list (GET) + create (POST)
+    path('survey-questions/', SurveyQuestionListCreateView.as_view()),
+    # Detail: GET, PATCH, DELETE
+    path('survey-questions/<uuid:pk>/', SurveyQuestionDetailView.as_view()),
+    # Lock action (HOD only)
+    path('survey-questions/<uuid:pk>/lock/', SurveyQuestionLockView.as_view()),
 ]

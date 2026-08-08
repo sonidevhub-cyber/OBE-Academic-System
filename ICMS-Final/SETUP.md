@@ -1,4 +1,4 @@
-# ICMS Project Setup Guide
+# Project Setup Guide
 
 This project has two parts:
 
@@ -225,9 +225,10 @@ EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=True
 EMAIL_USE_SSL=False
-EMAIL_HOST_USER=sonia@gmail.com
-EMAIL_HOST_PASSWORD=...
-DEFAULT_FROM_EMAIL=ICMS <sonia@gmail.com>
+EMAIL_HOST_USER=soniasul645@gmail.com
+EMAIL_HOST_PASSWORD=pkis xauf ctfg cbiw
+DEFAULT_FROM_EMAIL=F.G.P.G <soniasul645@gmail.com>
+FRONTEND_BASE_URL=http://localhost:3000
 PASSWORD_RESET_OTP_LENGTH=6
 PASSWORD_RESET_OTP_EXPIRE_MINUTES=10
 

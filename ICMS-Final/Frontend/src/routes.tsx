@@ -26,6 +26,7 @@ import PEOReportDashboard from './features/peoReport/PEOReportDashboard';
 import StudentOBEList from './pages/StudentOBEList';
 import StudentOBEReport from './pages/StudentOBEReport';
 import { AlumniDashboard, AlumniSurvey } from './pages/alumni';
+import { EmployerSurveyPublicPage } from './pages/employer';
 import ResetPassword from './components/forms/ResetPassword';
 import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
@@ -78,6 +79,9 @@ const AppRoutes: React.FC = () => {
       {/* Redirect root to main page */}
       <Route path="/" element={<MainPage />} />
       <Route path="/rolebased-login" element={<CUIPortalPage />} />
+
+      {/* Public token-authenticated employer survey page (no auth required) */}
+      <Route path="/employer/survey/:token" element={<EmployerSurveyPublicPage />} />
 
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>

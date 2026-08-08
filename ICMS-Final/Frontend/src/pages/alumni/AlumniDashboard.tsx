@@ -22,6 +22,11 @@ import TopbarProfileMenu from '../../components/TopbarProfileMenu';
 import obeService, { AlumniDashboardResponse, AlumniSurveyQuestion, PEO } from '../../api/obeService';
 
 type TabId = 'dashboard' | 'transcript';
+type AlumniAnswerValue = {
+  score?: number;
+  selected_option_label?: string;
+  text_answer?: string;
+};
 
 const sidebarGradient = 'from-purple-800 via-indigo-800 to-blue-800';
 const headerGradient = 'from-pink-500 via-purple-500 to-indigo-500';
@@ -40,6 +45,31 @@ const resolveAlumniStudentIdentifier = (user: any, alumni: AlumniDashboardRespon
   user?.id ||
   null;
 
+const defaultRatingOptions = ['Poor', 'Below Average', 'Average', 'Good', 'Excellent'];
+
+const getQuestionType = (question: AlumniSurveyQuestion) => question.question_type || 'RATING_SCALE';
+
+const getQuestionOptions = (question: AlumniSurveyQuestion) => {
+  if (getQuestionType(question) === 'TEXT') return [];
+  const options = question.effective_options?.length
+    ? question.effective_options
+    : question.custom_options?.length
+      ? question.custom_options
+      : defaultRatingOptions;
+  return options.map(option => String(option));
+};
+
+const getQuestionScopeLabel = (question: AlumniSurveyQuestion) => {
+  const isGeneral =
+    question.is_general === true ||
+    ((question as any).peo_id == null && !question.peo_title && !(question as any).peo_description);
+  if (isGeneral) return 'GENERAL';
+  if (question.peo_order_number) return `PEO-${question.peo_order_number}`;
+  return question.peo_title || question.peo_description || 'PEO';
+};
+
+const QUESTION_OPTIONAL_EMPLOYMENT_STATUSES = ['UNEMPLOYED', 'HOUSEWIFE'];
+
 const AlumniDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
@@ -51,13 +81,15 @@ const AlumniDashboard: React.FC = () => {
   const [surveyCycleId, setSurveyCycleId] = useState<string | null>(null);
   const [surveyQuestions, setSurveyQuestions] = useState<AlumniSurveyQuestion[]>([]);
   const [surveyQuestionsSource, setSurveyQuestionsSource] = useState<'cycle' | 'peo' | null>(null);
-  const [surveyResponses, setSurveyResponses] = useState<Record<string, number>>({});
+  const [surveyResponses, setSurveyResponses] = useState<Record<string, AlumniAnswerValue>>({});
   const [surveyLoading, setSurveyLoading] = useState(true);
   const [surveySubmitting, setSurveySubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [employmentStatus, setEmploymentStatus] = useState<string | null>(null);
   const [organizationName, setOrganizationName] = useState('');
   const [currentDesignation, setCurrentDesignation] = useState('');
+  const [employerContactName, setEmployerContactName] = useState('');
+  const [employerContactEmail, setEmployerContactEmail] = useState('');
   const isSurveyRoute = location.pathname.includes('/alumni/survey');
   const showSurveyModal = !hasSubmitted && (Boolean(surveyCycleId) || isSurveyRoute);
 
@@ -89,14 +121,26 @@ const AlumniDashboard: React.FC = () => {
 
         if (cancelled) return;
 
+        const studentIdentifier = resolveAlumniStudentIdentifier(currentUser, dashboard) || 'guest';
+        const statusPayload = resolvedBatchId
+          ? await obeService
+              .getAlumniSurveyStatus(String(resolvedBatchId), String(studentIdentifier))
+              .catch(() => null)
+          : null;
+
         const activeCycle = cycles.find((cycle: any) => cycle.status === 'ACTIVE') || null;
-        const cycleId = activeCycle?.id || null;
+        const cycleId = statusPayload?.cycle_id || activeCycle?.id || null;
         setSurveyCycleId(cycleId);
 
-        const studentIdentifier = resolveAlumniStudentIdentifier(currentUser, dashboard) || 'guest';
-        const submitted = cycleId
-          ? localStorage.getItem(surveyStorageKey(cycleId, String(studentIdentifier))) === 'true'
-          : false;
+        const submitted = Boolean(statusPayload?.submitted);
+        if (cycleId) {
+          const key = surveyStorageKey(cycleId, String(studentIdentifier));
+          if (submitted) {
+            localStorage.setItem(key, 'true');
+          } else {
+            localStorage.removeItem(key);
+          }
+        }
         setHasSubmitted(submitted);
 
         const loadCycleQuestions = async () => {
@@ -111,6 +155,10 @@ const AlumniDashboard: React.FC = () => {
 
         const loadPeoQuestions = async () => {
           if (!resolvedProgramId) return [];
+          const unified = await obeService.getSurveyQuestions(String(resolvedProgramId), 'ALUMNI').catch(() => []);
+          if (Array.isArray(unified) && unified.length > 0) {
+            return unified as AlumniSurveyQuestion[];
+          }
           const peos: PEO[] = await obeService.getProgramPEOs(String(resolvedProgramId)).catch(() => []);
           const questionGroups = await Promise.all(
             peos.map((peo) => obeService.getPEOAlumniSurveyQuestions(peo.id).catch(() => []))
@@ -125,9 +173,9 @@ const AlumniDashboard: React.FC = () => {
         if (cycleQuestions.length > 0) {
           setSurveyQuestionsSource('cycle');
           setSurveyQuestions(cycleQuestions);
-          const initialResponses: Record<string, number> = {};
+          const initialResponses: Record<string, AlumniAnswerValue> = {};
           cycleQuestions.forEach((question) => {
-            initialResponses[question.id] = 0;
+            initialResponses[question.id] = {};
           });
           setSurveyResponses(initialResponses);
         } else {
@@ -136,9 +184,9 @@ const AlumniDashboard: React.FC = () => {
 
           setSurveyQuestionsSource(fallbackQuestions.length > 0 ? 'peo' : null);
           setSurveyQuestions(fallbackQuestions);
-          const initialResponses: Record<string, number> = {};
+          const initialResponses: Record<string, AlumniAnswerValue> = {};
           fallbackQuestions.forEach((question) => {
-            initialResponses[question.id] = 0;
+            initialResponses[question.id] = {};
           });
           setSurveyResponses(initialResponses);
         }
@@ -172,19 +220,47 @@ const AlumniDashboard: React.FC = () => {
   ];
 
   const openSurvey = () => navigate('/alumni/survey');
+  const isQuestionAnswered = (question: AlumniSurveyQuestion) => {
+    const answer = surveyResponses[question.id] || {};
+    if (getQuestionType(question) === 'TEXT') {
+      return Boolean(answer.text_answer?.trim());
+    }
+    return Boolean(answer.selected_option_label?.trim()) || Boolean(answer.score && answer.score > 0);
+  };
+  const shouldShowSurveyQuestions = employmentStatus
+    ? !QUESTION_OPTIONAL_EMPLOYMENT_STATUSES.includes(employmentStatus)
+    : true;
+  const visibleSurveyQuestions = shouldShowSurveyQuestions ? surveyQuestions : [];
   const answeredCount = useMemo(
-    () => surveyQuestions.filter((question) => (surveyResponses[question.id] || 0) > 0).length,
-    [surveyQuestions, surveyResponses]
+    () => visibleSurveyQuestions.filter(isQuestionAnswered).length,
+    [visibleSurveyQuestions, surveyResponses]
   );
-  const totalItems = surveyQuestions.length + 1; // +1 for employment status
+  const totalItems = visibleSurveyQuestions.length + 1; // +1 for employment status
   const answeredItems = (employmentStatus ? 1 : 0) + answeredCount;
   const progressPercent = totalItems > 0 ? Math.round((answeredItems / totalItems) * 100) : 0;
-  const isComplete = employmentStatus && surveyQuestions.length > 0 && surveyQuestions.every((question) => (surveyResponses[question.id] || 0) > 0);
+  const isComplete = Boolean(employmentStatus) && (
+    shouldShowSurveyQuestions
+      ? visibleSurveyQuestions.length > 0 && visibleSurveyQuestions.every(isQuestionAnswered)
+      : true
+  );
+  const needsEmployerContact = employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED';
 
-  const handleSurveyRating = (questionId: string, rating: number) => {
+  const handleSurveyOptionSelect = (questionId: string, option: string, optionIndex: number) => {
     setSurveyResponses((prev) => ({
       ...prev,
-      [questionId]: rating,
+      [questionId]: {
+        score: optionIndex + 1,
+        selected_option_label: option,
+      },
+    }));
+  };
+
+  const handleSurveyTextAnswer = (questionId: string, text: string) => {
+    setSurveyResponses((prev) => ({
+      ...prev,
+      [questionId]: {
+        text_answer: text,
+      },
     }));
   };
 
@@ -205,6 +281,21 @@ const AlumniDashboard: React.FC = () => {
       return;
     }
 
+    if (needsEmployerContact && !organizationName.trim()) {
+      toast.error('Please enter your organization or company name.');
+      return;
+    }
+
+    if (needsEmployerContact && !employerContactName.trim()) {
+      toast.error('Please enter employer contact person name.');
+      return;
+    }
+
+    if (needsEmployerContact && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(employerContactEmail.trim())) {
+      toast.error('Please enter a valid employer contact email.');
+      return;
+    }
+
     if (!isComplete) {
       toast.error('Please answer all survey questions.');
       return;
@@ -213,13 +304,17 @@ const AlumniDashboard: React.FC = () => {
     setSurveySubmitting(true);
     try {
       await obeService.submitAlumniSurvey(String(surveyCycleId), String(studentIdentifier), {
-        responses: surveyQuestions.map((question) => ({
+        responses: visibleSurveyQuestions.map((question) => ({
           question: question.id,
-          score: surveyResponses[question.id],
+          score: surveyResponses[question.id]?.score,
+          selected_option_label: surveyResponses[question.id]?.selected_option_label,
+          text_answer: surveyResponses[question.id]?.text_answer,
         })),
         employment_status: employmentStatus,
-        organization_name: organizationName,
-        current_designation: currentDesignation,
+        organization_name: organizationName.trim(),
+        current_designation: currentDesignation.trim(),
+        employer_contact_name: employerContactName.trim(),
+        employer_contact_email: employerContactEmail.trim(),
       });
 
       localStorage.setItem(surveyStorageKey(String(surveyCycleId), String(studentIdentifier)), 'true');
@@ -574,7 +669,7 @@ const AlumniDashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    {(employmentStatus === 'EMPLOYED' || employmentStatus === 'SELF_EMPLOYED') && (
+                    {needsEmployerContact && (
                       <div className="space-y-4">
                         <div>
                           <label className="block text-sm font-bold text-gray-500 mb-2 uppercase tracking-wider">
@@ -600,6 +695,30 @@ const AlumniDashboard: React.FC = () => {
                             placeholder="e.g., Software Engineer, SQA, Team Lead"
                           />
                         </div>
+                        <div>
+                          <label className="block text-sm font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                            Employer Contact Person
+                          </label>
+                          <input
+                            type="text"
+                            value={employerContactName}
+                            onChange={(e) => setEmployerContactName(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                            placeholder="e.g., HR manager or direct supervisor"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                            Employer Contact Email
+                          </label>
+                          <input
+                            type="email"
+                            value={employerContactEmail}
+                            onChange={(e) => setEmployerContactEmail(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-indigo-500 focus:outline-none"
+                            placeholder="e.g., hr@company.com"
+                          />
+                        </div>
                       </div>
                     )}
                   </motion.section>
@@ -608,6 +727,30 @@ const AlumniDashboard: React.FC = () => {
                     <div className="mt-8 rounded-[28px] bg-white p-8 border border-gray-100 shadow-sm flex items-center justify-center">
                       <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
                     </div>
+                  ) : !shouldShowSurveyQuestions ? (
+                    <section className="mt-8 bg-white rounded-[28px] p-8 border border-gray-100 shadow-sm">
+                      <div className="flex items-center justify-between gap-4 flex-col md:flex-row">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                            <CheckCircle2 className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-gray-900">Ready to submit</h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                              PEO questions are not required for this employment status.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={handleSurveySubmit}
+                          disabled={surveySubmitting || !isComplete}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-pink-500 px-6 py-4 font-black text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Send className="w-4 h-4" />
+                          {surveySubmitting ? 'Submitting...' : 'Submit Survey'}
+                        </button>
+                      </div>
+                    </section>
                   ) : surveyQuestions.length === 0 ? (
                     <section className="mt-8 bg-white rounded-[28px] p-8 border border-gray-100 shadow-sm text-center">
                       <h2 className="text-2xl font-black text-gray-900">
@@ -622,8 +765,10 @@ const AlumniDashboard: React.FC = () => {
                   ) : (
                     <>
                       <div className="mt-8 space-y-5">
-                        {surveyQuestions.map((question, index) => {
-                          const selectedRating = surveyResponses[question.id] || 0;
+                        {visibleSurveyQuestions.map((question, index) => {
+                          const selected = surveyResponses[question.id] || {};
+                          const questionType = getQuestionType(question);
+                          const questionOptions = getQuestionOptions(question);
                           return (
                             <motion.article
                               key={question.id}
@@ -638,34 +783,41 @@ const AlumniDashboard: React.FC = () => {
                                 </div>
                                 <div className="flex-1">
                                   <p className="text-xs font-black uppercase tracking-[0.2em] text-indigo-500 mb-2">
-                                    {question.peo_title || question.peo_description || 'PEO'}
+                                    {getQuestionScopeLabel(question)}
                                   </p>
                                   <p className="text-gray-700 leading-relaxed text-lg font-medium">
                                     {question.question_text}
                                   </p>
                                 </div>
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                                {[
-                                  { value: 1, label: 'Poor' },
-                                  { value: 2, label: 'Fair' },
-                                  { value: 3, label: 'Average' },
-                                  { value: 4, label: 'Good' },
-                                  { value: 5, label: 'Excellent' },
-                                ].map((rating) => (
-                                  <button
-                                    key={rating.value}
-                                    onClick={() => handleSurveyRating(question.id, rating.value)}
-                                    className={`rounded-2xl border-2 px-4 py-3 font-semibold transition-all ${
-                                      selectedRating === rating.value
-                                        ? 'bg-gradient-to-r from-indigo-600 to-pink-500 text-white border-transparent shadow-lg'
-                                        : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-gray-50'
-                                    }`}
-                                  >
-                                    {rating.label}
-                                  </button>
-                                ))}
-                              </div>
+                              {questionType === 'TEXT' ? (
+                                <textarea
+                                  value={selected.text_answer || ''}
+                                  onChange={(event) => handleSurveyTextAnswer(question.id, event.target.value)}
+                                  rows={4}
+                                  className="w-full rounded-2xl border-2 border-gray-200 bg-white px-4 py-3 font-medium text-gray-700 transition-all focus:border-indigo-400 focus:outline-none"
+                                  placeholder="Write your answer..."
+                                />
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                                  {questionOptions.map((option, optionIndex) => {
+                                    const isSelected = selected.selected_option_label === option || selected.score === optionIndex + 1;
+                                    return (
+                                      <button
+                                        key={`${question.id}-${optionIndex}`}
+                                        onClick={() => handleSurveyOptionSelect(question.id, option, optionIndex)}
+                                        className={`rounded-2xl border-2 px-4 py-3 font-semibold transition-all ${
+                                          isSelected
+                                            ? 'bg-gradient-to-r from-indigo-600 to-pink-500 text-white border-transparent shadow-lg'
+                                            : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-gray-50'
+                                        }`}
+                                      >
+                                        {option}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </motion.article>
                           );
                         })}
@@ -679,7 +831,7 @@ const AlumniDashboard: React.FC = () => {
                             <div>
                               <h3 className="font-black text-gray-900">100% Complete</h3>
                               <p className="text-sm text-gray-500 mt-1">
-                                {answeredCount} of {surveyQuestions.length} questions answered
+                                {answeredCount} of {visibleSurveyQuestions.length} questions answered
                               </p>
                             </div>
                           </div>

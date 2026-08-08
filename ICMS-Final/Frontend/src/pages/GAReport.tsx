@@ -15,7 +15,7 @@ interface GA {
 interface StudentGA {
   ga_id: string;
   ga_code: string;
-  direct_score: number;
+  direct_score: number | null;
   is_below_threshold: boolean;
 }
 
@@ -48,10 +48,10 @@ interface CohortSummary {
   ga_code: string;
   ga_title: string;
   ga_kpi_threshold: number;
-  direct_attainment: number;
-  indirect_attainment: number;
-  final_attainment: number;
-  status: 'ACHIEVED' | 'BELOW_TARGET';
+  direct_attainment: number | null;
+  indirect_attainment: number | null;
+  final_attainment: number | null;
+  status: 'ACHIEVED' | 'BELOW_TARGET' | 'NOT_ASSESSED';
 }
 
 interface GAStatusRow {
@@ -74,6 +74,9 @@ interface AllStudentsReportData {
 }
 
 type BatchCategory = 'all' | 'ongoing' | 'graduated';
+
+const formatPercent = (value: number | null | undefined): string =>
+  value === null || value === undefined ? 'N/A' : `${value.toFixed(1)}%`;
 
 const GAReport: React.FC = () => {
   const [programs, setPrograms] = useState<any[]>([]);
@@ -327,8 +330,8 @@ const GAReport: React.FC = () => {
               student.registration_number,
               student.name,
               ...reportData.gas.map((g) => {
-                const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score || 0;
-                return `${score.toFixed(1)}%`;
+                const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score;
+                return formatPercent(score);
               }),
             ];
             rows.push(row);
@@ -341,8 +344,8 @@ const GAReport: React.FC = () => {
             course.course_code,
             course.course_title,
             ...reportData.gas.map((g) => {
-              const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score ?? 0;
-              return `${score.toFixed(1)}%`;
+              const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
+              return formatPercent(score);
             }),
           ];
           rows.push(row);
@@ -357,19 +360,19 @@ const GAReport: React.FC = () => {
         'Direct Attainment (%)',
         '(From Exams/Labs)',
         '',
-        ...cohortSummary.map((s) => `${s.direct_attainment.toFixed(1)}%`),
+        ...cohortSummary.map((s) => formatPercent(s.direct_attainment)),
       ]);
       rows.push([
         'Indirect Attainment (%)',
         '(From Surveys)',
         '',
-        ...cohortSummary.map((s) => `${s.indirect_attainment.toFixed(1)}%`),
+        ...cohortSummary.map((s) => formatPercent(s.indirect_attainment)),
       ]);
       rows.push([
         'Final Combined Attainment (%)',
         '(80% Direct + 20% Indirect)',
         '',
-        ...cohortSummary.map((s) => `${s.final_attainment.toFixed(1)}%`),
+        ...cohortSummary.map((s) => formatPercent(s.final_attainment)),
       ]);
       rows.push([
         'Status',
@@ -512,9 +515,25 @@ const GAReport: React.FC = () => {
               const summary = reportData.cohort_summary[summaryIdx];
               if (summary) {
                 ws[cellAddress].s = {
-                  fill: { fgColor: { rgb: summary.status === 'ACHIEVED' ? 'C6EFCE' : 'FFC7CE' } },
+                  fill: {
+                    fgColor: {
+                      rgb:
+                        summary.status === 'ACHIEVED'
+                          ? 'C6EFCE'
+                          : summary.status === 'BELOW_TARGET'
+                            ? 'FFC7CE'
+                            : 'E5E7EB',
+                    },
+                  },
                   font: {
-                    color: { rgb: summary.status === 'ACHIEVED' ? '006100' : '9C0006' },
+                    color: {
+                      rgb:
+                        summary.status === 'ACHIEVED'
+                          ? '006100'
+                          : summary.status === 'BELOW_TARGET'
+                            ? '9C0006'
+                            : '374151',
+                    },
                     bold: true,
                   },
                   alignment: { horizontal: 'center' },
@@ -756,10 +775,10 @@ const GAReport: React.FC = () => {
                                 : 'text-gray-900'
                             }`}
                           >
-                            {student.is_dropped || student.is_frozen ? (
+                        {student.is_dropped || student.is_frozen ? (
                               student.is_dropped ? 'Dropped Out' : 'Semester Frozen'
                             ) : (
-                              `${score?.direct_score?.toFixed(1) ?? '0.0'}%`
+                              formatPercent(score?.direct_score)
                             )}
                           </td>
                         );
@@ -784,7 +803,7 @@ const GAReport: React.FC = () => {
                                 : 'text-gray-900'
                             }`}
                           >
-                            {`${(gaScore?.score ?? 0).toFixed(1)}%`}
+                            {formatPercent(gaScore?.score)}
                           </td>
                         );
                       })}
@@ -809,7 +828,7 @@ const GAReport: React.FC = () => {
                         key={ga.ga_id}
                         className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-green-50"
                       >
-                        {summary?.direct_attainment.toFixed(1) ?? '0.0'}%
+                        {formatPercent(summary?.direct_attainment)}
                       </td>
                     );
                   })}
@@ -828,7 +847,7 @@ const GAReport: React.FC = () => {
                         key={ga.ga_id}
                         className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-yellow-50"
                       >
-                        {summary?.indirect_attainment.toFixed(1) ?? '0.0'}%
+                        {formatPercent(summary?.indirect_attainment)}
                       </td>
                     );
                   })}
@@ -847,7 +866,7 @@ const GAReport: React.FC = () => {
                         key={ga.ga_id}
                         className="px-4 py-3 text-center text-sm font-bold text-gray-900 bg-blue-50"
                       >
-                        {summary?.final_attainment.toFixed(1) ?? '0.0'}%
+                        {formatPercent(summary?.final_attainment)}
                       </td>
                     );
                   })}
@@ -867,7 +886,9 @@ const GAReport: React.FC = () => {
                         className={`px-4 py-3 text-center text-sm font-black uppercase ${
                           summary?.status === 'ACHIEVED'
                             ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
+                            : summary?.status === 'BELOW_TARGET'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-700'
                         }`}
                       >
                         {summary?.status ?? 'NOT ASSESSED'}

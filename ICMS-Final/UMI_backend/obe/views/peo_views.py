@@ -3,16 +3,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.contrib.auth import get_user_model
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from core.models import Batch
 from students.models import Student
-from ..models import PEO, GAPEOMapping, GA, AlumniSurveyQuestion, AlumniSurveyCycle, AlumniSurveyResponse, get_peo_indirect_score, PEOCQIRecord, PEOCQISubmissionHistory
-from ..serializers import PEOSerializer, GAPEOMappingSerializer, GASerializer, AlumniSurveyQuestionSerializer, AlumniSurveyCycleSerializer, AlumniSurveyResponseSerializer, PEOCQIRecordSerializer, PEOCQISubmissionHistorySerializer
-from ..services import calculate_all_peo_reports, calculate_peo_report
+from ..models import PEO, GAPEOMapping, GA, AlumniSurveyQuestion, AlumniSurveyCycle, AlumniSurveyResponse, AlumniSurveySubmission, AlumniSurveyAnswer, EmployerSurveyCycle, EmployerSurveyResponse, get_peo_indirect_score, PEOCQIRecord, PEOCQISubmissionHistory, SurveyQuestion, SURVEY_TYPE_ALUMNI, SURVEY_TYPE_EMPLOYER, QUESTION_TYPE_RATING_SCALE, QUESTION_TYPE_SINGLE_SELECT, QUESTION_TYPE_TEXT
+from ..serializers import PEOSerializer, GAPEOMappingSerializer, GASerializer, AlumniSurveyQuestionSerializer, AlumniSurveyCycleSerializer, AlumniSurveyResponseSerializer, PEOCQIRecordSerializer, PEOCQISubmissionHistorySerializer, SurveyQuestionSerializer, EmployerSurveyCycleSerializer, EmployerSurveyResponseSerializer
+from ..services import calculate_all_peo_reports, calculate_peo_report, generate_employer_survey_tokens_for_cycle, dispatch_employer_survey_emails, submit_employer_survey_by_token
 
 User = get_user_model()
 ALUMNI_FEEDBACK_THRESHOLD = Decimal('50.00')
@@ -25,10 +26,18 @@ def _get_alumni_employment_distribution(batch):
     cycle = AlumniSurveyCycle.objects.filter(batch=batch, is_active=True).order_by('-created_at').first()
     if not cycle:
         return {}
-    # Get distinct (student_id, employment_status) pairs
-    responses = cycle.responses.filter(is_active=True, employment_status__isnull=False).values('student_id', 'employment_status').distinct()
+    # Prefer submission rows so status-only submissions (UNEMPLOYED/HOUSEWIFE) are counted.
+    records = cycle.submissions.filter(
+        is_active=True,
+        employment_status__isnull=False
+    ).values('student_id', 'employment_status').distinct()
+    if not records.exists():
+        records = cycle.responses.filter(
+            is_active=True,
+            employment_status__isnull=False
+        ).values('student_id', 'employment_status').distinct()
     distribution = {}
-    for resp in responses:
+    for resp in records:
         status = resp['employment_status']
         distribution[status] = distribution.get(status, 0) + 1
     return distribution
@@ -39,9 +48,19 @@ def _get_top_employers(batch, limit=10):
     cycle = AlumniSurveyCycle.objects.filter(batch=batch, is_active=True).order_by('-created_at').first()
     if not cycle:
         return []
-    responses = cycle.responses.filter(is_active=True, organization_name__isnull=False, organization_name__gt='').values('student_id', 'organization_name').distinct()
+    records = cycle.submissions.filter(
+        is_active=True,
+        organization_name__isnull=False,
+        organization_name__gt=''
+    ).values('student_id', 'organization_name').distinct()
+    if not records.exists():
+        records = cycle.responses.filter(
+            is_active=True,
+            organization_name__isnull=False,
+            organization_name__gt=''
+        ).values('student_id', 'organization_name').distinct()
     employer_counts = {}
-    for resp in responses:
+    for resp in records:
         employer = resp['organization_name']
         employer_counts[employer] = employer_counts.get(employer, 0) + 1
     # Sort by count descending, take top 'limit'
@@ -65,6 +84,9 @@ def _get_alumni_feedback_eligible_count(batch):
 
 
 def _get_alumni_feedback_response_count(cycle):
+    submission_count = cycle.submissions.filter(is_active=True).values('student_id').distinct().count()
+    if submission_count:
+        return submission_count
     return cycle.responses.filter(is_active=True).values('student_id').distinct().count()
 
 
@@ -131,30 +153,54 @@ def _ensure_active_alumni_questions_for_program(program):
     """
     Repair helper for legacy records: make sure every active PEO has one
     active locked alumni survey question so the alumni form can render.
+    Ensures both legacy AlumniSurveyQuestion and NEW SurveyQuestion exist.
     """
     peos = PEO.objects.filter(program=program, is_active=True).order_by('order_number')
+    alumni_template_prefix = "To what extent are you achieving this objective in your current professional role:"
 
     for peo in peos:
-        active_question = peo.alumni_survey_questions.filter(is_active=True).order_by('-created_at').first()
+        # --- Legacy AlumniSurveyQuestion ---
+        active_legacy = peo.alumni_survey_questions.filter(is_active=True).order_by('-created_at').first()
+        if active_legacy:
+            if not active_legacy.is_locked:
+                active_legacy.is_locked = True
+                active_legacy.save(update_fields=['is_locked'])
+        else:
+            question_text = (
+                f"{alumni_template_prefix} {peo.description}"
+                if peo.description
+                else alumni_template_prefix.rstrip(':')
+            )
+            AlumniSurveyQuestion.objects.create(
+                peo=peo,
+                question_text=question_text,
+                is_locked=True,
+                is_active=True
+            )
 
-        if active_question:
-            if not active_question.is_locked:
-                active_question.is_locked = True
-                active_question.save(update_fields=['is_locked'])
-            continue
-
-        question_text = (
-            f"To what extent are you achieving this objective in your current professional role: {peo.description}"
-            if peo.description
-            else "To what extent are you achieving this objective in your current professional role"
-        )
-
-        AlumniSurveyQuestion.objects.create(
+        # --- NEW SurveyQuestion ---
+        peo_template_q = SurveyQuestion.objects.filter(
             peo=peo,
-            question_text=question_text,
-            is_locked=True,
-            is_active=True
-        )
+            survey_type=SURVEY_TYPE_ALUMNI,
+            is_active=True,
+        ).order_by('-created_at').first()
+        if not peo_template_q:
+            employer_q_text = (
+                f"{alumni_template_prefix} {peo.description}"
+                if peo.description
+                else alumni_template_prefix.rstrip(':')
+            )
+            SurveyQuestion.objects.create(
+                survey_type=SURVEY_TYPE_ALUMNI,
+                program=program,
+                peo=peo,
+                question_text=employer_q_text,
+                is_locked=True,
+                is_active=True
+            )
+        elif not peo_template_q.is_locked:
+            peo_template_q.is_locked = True
+            peo_template_q.save(update_fields=['is_locked'])
 
 
 class PEOListCreateView(APIView):
@@ -344,14 +390,73 @@ class GAPEOMatrixView(APIView):
         mappings_data = request.data.get(
             'mappings', []
         )
-        created = []
+        
+        # Group mappings by PEO for equal weight distribution
+        peo_groups = {}
         for m in mappings_data:
-            mapping = GAPEOMapping.objects.create(
-                ga_id=m['ga_id'],
-                peo_id=m['peo_id'],
-                weight=m.get('weight', Decimal('0.00'))
-            )
-            created.append(mapping)
+            peo_id = m['peo_id']
+            if peo_id not in peo_groups:
+                peo_groups[peo_id] = []
+            peo_groups[peo_id].append(m)
+        
+        created = []
+        for peo_id, peo_mappings in peo_groups.items():
+            n = len(peo_mappings)
+            if n == 0:
+                continue
+            
+            # Calculate equal weight default
+            equal_weight = (Decimal('100.00') / Decimal(n)).quantize(Decimal('0.01'))
+            
+            # Process each mapping: use provided weight if explicitly set (>0), else equal
+            processed_weights = []
+            total_weight = Decimal('0.00')
+            for m in peo_mappings:
+                provided_weight = m.get('weight')
+                try:
+                    provided_weight = Decimal(str(provided_weight)) if provided_weight is not None else Decimal('0.00')
+                except (InvalidOperation, ValueError):
+                    provided_weight = Decimal('0.00')
+                
+                if provided_weight > Decimal('0.00'):
+                    processed_weights.append(provided_weight)
+                    total_weight += provided_weight
+                else:
+                    processed_weights.append(None)  # Marked for default equal
+            
+            # Fill in equal weights for those not explicitly set
+            remaining_slots = sum(1 for w in processed_weights if w is None)
+            remaining_total = Decimal('100.00') - total_weight
+            
+            if remaining_slots > 0 and remaining_total > 0:
+                slot_weight = (remaining_total / Decimal(remaining_slots)).quantize(Decimal('0.01'))
+                # Distribute and adjust the last one for rounding
+                assigned = Decimal('0.00')
+                for i in range(len(processed_weights)):
+                    if processed_weights[i] is None:
+                        if i == len([j for j, w in enumerate(processed_weights) if w is None]) - 1 or remaining_slots == 1:
+                            # Last slot: use remainder
+                            processed_weights[i] = (remaining_total - assigned).quantize(Decimal('0.01'))
+                        else:
+                            processed_weights[i] = slot_weight
+                            assigned += slot_weight
+                        remaining_slots -= 1
+            elif remaining_slots > 0:
+                # No remaining total: just set to 0 or equal
+                for i in range(len(processed_weights)):
+                    if processed_weights[i] is None:
+                        processed_weights[i] = equal_weight
+            
+            # Now create all mappings for this PEO
+            for m, final_weight in zip(peo_mappings, processed_weights):
+                # Clamp to 0-100 just in case
+                final_weight = max(Decimal('0.00'), min(Decimal('100.00'), final_weight))
+                mapping = GAPEOMapping.objects.create(
+                    ga_id=m['ga_id'],
+                    peo_id=m['peo_id'],
+                    weight=final_weight
+                )
+                created.append(mapping)
 
         return Response(
             GAPEOMappingSerializer(
@@ -372,11 +477,24 @@ class PEOAlumniSurveyQuestionListView(APIView):
         except PEO.DoesNotExist:
             return Response({'error': 'PEO not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        if not peo.alumni_survey_questions.filter(is_active=True).exists():
+        has_new = SurveyQuestion.objects.filter(
+            peo=peo,
+            survey_type=SURVEY_TYPE_ALUMNI,
+            is_active=True
+        ).exists()
+        if not has_new and not peo.alumni_survey_questions.filter(is_active=True).exists():
             _ensure_active_alumni_questions_for_program(peo.program)
 
-        questions = AlumniSurveyQuestion.objects.filter(peo=peo, is_active=True).order_by('-created_at')
-        return Response(AlumniSurveyQuestionSerializer(questions, many=True).data)
+        questions = SurveyQuestion.objects.filter(
+            peo=peo,
+            survey_type=SURVEY_TYPE_ALUMNI,
+            is_active=True
+        ).order_by('-created_at')
+        if questions.exists():
+            return Response(SurveyQuestionSerializer(questions, many=True).data)
+
+        legacy = AlumniSurveyQuestion.objects.filter(peo=peo, is_active=True).order_by('-created_at')
+        return Response(AlumniSurveyQuestionSerializer(legacy, many=True).data)
 
 
 class AlumniSurveyQuestionDetailView(APIView):
@@ -508,13 +626,18 @@ class AlumniSurveyCycleActivateView(APIView):
         if cycle.status != 'DRAFT':
             return Response({'error': 'Only draft cycles can be activated'}, status=status.HTTP_400_BAD_REQUEST)
             
-        # Get all locked and active alumni survey questions for the program
-        questions = AlumniSurveyQuestion.objects.filter(
+        new_questions = SurveyQuestion.objects.filter(
+            survey_type=SURVEY_TYPE_ALUMNI,
+            program=cycle.batch.program,
+            is_locked=True,
+            is_active=True
+        )
+        legacy_questions = AlumniSurveyQuestion.objects.filter(
             peo__program=cycle.batch.program,
             is_locked=True,
             is_active=True
         )
-        if not questions.exists():
+        if not new_questions.exists() and not legacy_questions.exists():
             return Response({'error': 'No locked alumni survey questions found for this program'}, status=status.HTTP_400_BAD_REQUEST)
 
         if not cycle.due_at:
@@ -680,12 +803,26 @@ class AlumniSurveyResponseView(APIView):
 
         _ensure_active_alumni_questions_for_program(cycle.batch.program)
              
-        questions = AlumniSurveyQuestion.objects.filter(
+        new_questions = SurveyQuestion.objects.filter(
+            survey_type=SURVEY_TYPE_ALUMNI,
+            is_active=True,
+        ).filter(
+            Q(program=cycle.batch.program) | Q(program__isnull=True)
+        ).select_related('peo').order_by('peo__order_number', 'created_at')
+        if new_questions.exists():
+            # Move general (peo is null) questions to the front
+            q_list = list(new_questions)
+            general = [q for q in q_list if q.peo_id is None]
+            peo_mapped = [q for q in q_list if q.peo_id is not None]
+            ordered_qs = general + peo_mapped
+            return Response(SurveyQuestionSerializer(ordered_qs, many=True).data)
+
+        legacy = AlumniSurveyQuestion.objects.filter(
             peo__program=cycle.batch.program,
             is_locked=True,
             is_active=True
         )
-        return Response(AlumniSurveyQuestionSerializer(questions, many=True).data)
+        return Response(AlumniSurveyQuestionSerializer(legacy, many=True).data)
     
     @transaction.atomic
     def post(self, request, cycle_id, student_id):
@@ -705,11 +842,10 @@ class AlumniSurveyResponseView(APIView):
         if cycle.status != 'ACTIVE':
             return Response({'error': 'Alumni feedback is closed'}, status=status.HTTP_400_BAD_REQUEST)
 
-        existing_submission = AlumniSurveyResponse.objects.filter(
-            cycle=cycle,
-            student=student,
-            is_active=True
-        ).exists()
+        existing_submission = (
+            AlumniSurveyResponse.objects.filter(cycle=cycle, student=student, is_active=True).exists()
+            or AlumniSurveySubmission.objects.filter(cycle=cycle, student=student, is_active=True).exists()
+        )
         if existing_submission:
             return Response({'error': 'Alumni survey already submitted'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -717,27 +853,115 @@ class AlumniSurveyResponseView(APIView):
         employment_status = request.data.get('employment_status')
         organization_name = request.data.get('organization_name')
         current_designation = request.data.get('current_designation')
+        employer_contact_name = (request.data.get('employer_contact_name') or '').strip()
+        employer_contact_email = (
+            request.data.get('employer_contact_email')
+            or request.data.get('employer_email')
+            or ''
+        )
+        employer_contact_email = str(employer_contact_email).strip().lower()
+
+        # --- Higher Studies details ---
+        higher_studies_university = (request.data.get('higher_studies_university') or '').strip() or None
+        higher_studies_degree = (request.data.get('higher_studies_degree') or '').strip() or None
+        higher_studies_country = (request.data.get('higher_studies_country') or '').strip() or None
+
+        submission, _ = AlumniSurveySubmission.objects.update_or_create(
+            cycle=cycle,
+            student=student,
+            defaults={
+                'employment_status': employment_status or None,
+                'organization_name': organization_name or None,
+                'current_designation': current_designation or None,
+                'employer_contact_name': employer_contact_name or None,
+                'employer_contact_email': employer_contact_email or None,
+                'higher_studies_university': higher_studies_university,
+                'higher_studies_degree': higher_studies_degree,
+                'higher_studies_country': higher_studies_country,
+                'is_active': True,
+            },
+        )
         
-        # Save employment status on the first response to keep it consistent
-        first_response_saved = False
+        # Save employment status on the first legacy response to keep it consistent
+        first_legacy_saved = False
+        saved_any_new = False
         for resp_data in responses_data:
             question_id = resp_data.get('question')
             score = resp_data.get('score')
-            
+            selected_option_label = resp_data.get('selected_option_label')
+            text_answer = resp_data.get('text_answer')
+
+            # --- NEW: save to AlumniSurveyAnswer using SurveyQuestion (primary path) ---
+            try:
+                sq = SurveyQuestion.objects.get(id=question_id, is_active=True)
+                answer_defaults = {
+                    'score': None,
+                    'selected_option_label': selected_option_label if selected_option_label else None,
+                    'text_answer': text_answer if text_answer else None,
+                    'is_active': True,
+                }
+                if sq.question_type == QUESTION_TYPE_TEXT:
+                    pass
+                else:
+                    # RATING_SCALE or SINGLE_SELECT -> save score if provided (1-based option index)
+                    try:
+                        score_int = int(score)
+                        if 1 <= score_int <= 5:
+                            answer_defaults['score'] = score_int
+                        elif score_int > 0:
+                            # preserve score number even if > 5 (optional large scales)
+                            answer_defaults['score'] = score_int
+                    except (ValueError, TypeError):
+                        pass
+                    # Save selected_option_label explicitly even if score provided (for custom option text fidelity)
+                    if selected_option_label:
+                        answer_defaults['selected_option_label'] = str(selected_option_label)
+
+                AlumniSurveyAnswer.objects.update_or_create(
+                    submission=submission,
+                    question=sq,
+                    defaults=answer_defaults,
+                )
+                saved_any_new = True
+            except SurveyQuestion.DoesNotExist:
+                pass
+
+            # --- LEGACY: save to AlumniSurveyResponse using AlumniSurveyQuestion (compat) ---
             try:
                 question = AlumniSurveyQuestion.objects.get(id=question_id, is_locked=True, is_active=True)
             except AlumniSurveyQuestion.DoesNotExist:
+                try:
+                    sq_match = SurveyQuestion.objects.get(id=question_id, is_active=True)
+                    if sq_match.peo_id:
+                        question = AlumniSurveyQuestion.objects.filter(
+                            peo_id=sq_match.peo_id,
+                            is_locked=True,
+                            is_active=True
+                        ).order_by('-created_at').first()
+                    else:
+                        question = None
+                except SurveyQuestion.DoesNotExist:
+                    question = None
+            if question is None:
                 continue
                 
-            update_dict = {'score': score}
-            if not first_response_saved:
+            # Legacy compat: best-effort numeric score or default to 3 midpoint
+            try:
+                legacy_score = int(score)
+            except (ValueError, TypeError):
+                legacy_score = 3 if text_answer or selected_option_label else None
+            if legacy_score is None:
+                continue
+
+            update_dict = {'score': legacy_score}
+            if not first_legacy_saved:
                 if employment_status:
                     update_dict['employment_status'] = employment_status
                 if organization_name:
                     update_dict['organization_name'] = organization_name
                 if current_designation:
                     update_dict['current_designation'] = current_designation
-                first_response_saved = True
+                first_legacy_saved = True
                 
             AlumniSurveyResponse.objects.update_or_create(
                 cycle=cycle,
@@ -746,8 +970,220 @@ class AlumniSurveyResponseView(APIView):
                 defaults=update_dict
             )
 
+        if not saved_any_new and not first_legacy_saved and responses_data:
+            return Response({'error': 'No valid survey questions matched the submission.'}, status=status.HTTP_400_BAD_REQUEST)
+
         _refresh_alumni_feedback_cycle(cycle)
-        return Response({'success': True})
+        employer_email_summary = None
+        if (
+            employment_status in ('EMPLOYED', 'SELF_EMPLOYED')
+            and employer_contact_email
+        ):
+            employer_cycle, _ = EmployerSurveyCycle.objects.get_or_create(
+                batch=cycle.batch,
+                linked_alumni_cycle=cycle,
+                survey_window=cycle.survey_window,
+                is_active=True,
+                defaults={
+                    'status': 'ACTIVE',
+                    'due_at': cycle.due_at,
+                    'response_threshold': Decimal('30.00'),
+                    'auto_extension_days': 2,
+                    'activated_at': timezone.now(),
+                },
+            )
+            if employer_cycle.status != 'ACTIVE':
+                employer_cycle.status = 'ACTIVE'
+                employer_cycle.activated_at = employer_cycle.activated_at or timezone.now()
+                employer_cycle.save(update_fields=['status', 'activated_at'])
+
+            token_summary = generate_employer_survey_tokens_for_cycle(str(employer_cycle.id))
+            dispatch_summary = dispatch_employer_survey_emails(
+                str(employer_cycle.id),
+                request=request,
+            )
+            employer_email_summary = {
+                **dispatch_summary,
+                'created': token_summary.get('created', 0),
+                'skipped_duplicate': token_summary.get('skipped_duplicate', 0),
+                'missing_email': token_summary.get('missing_email', 0),
+                'total_seeds': token_summary.get('total_seeds', 0),
+            }
+
+        return Response({'success': True, 'employer_email': employer_email_summary})
+
+
+def _can_manage_employer_surveys(user):
+    role = getattr(user, 'role', '')
+    secondary_role = getattr(user, 'secondary_role', '')
+    return role in ('hod', 'coordinator', 'admin') or secondary_role in ('hod', 'coordinator', 'admin')
+
+
+class EmployerSurveyCycleListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        if not _can_manage_employer_surveys(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        cycles = EmployerSurveyCycle.objects.filter(
+            batch_id=batch_id,
+            is_active=True,
+        ).select_related('batch', 'linked_alumni_cycle').order_by('-created_at')
+        return Response(EmployerSurveyCycleSerializer(cycles, many=True).data)
+
+
+class EmployerSurveyCycleCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not _can_manage_employer_surveys(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data.copy()
+        batch_id = data.get('batch')
+        if not batch_id:
+            return Response({'error': 'batch is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = Batch.objects.get(id=batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        linked_alumni_cycle = None
+        linked_alumni_cycle_id = data.get('linked_alumni_cycle')
+        if linked_alumni_cycle_id:
+            linked_alumni_cycle = AlumniSurveyCycle.objects.filter(
+                id=linked_alumni_cycle_id,
+                batch=batch,
+                is_active=True,
+            ).first()
+
+        if linked_alumni_cycle is None:
+            linked_alumni_cycle = AlumniSurveyCycle.objects.filter(
+                batch=batch,
+                survey_window=data.get('survey_window') or '2_YEARS',
+                is_active=True,
+            ).order_by('-created_at').first()
+
+        cycle = EmployerSurveyCycle.objects.create(
+            batch=batch,
+            linked_alumni_cycle=linked_alumni_cycle,
+            survey_window=data.get('survey_window') or '2_YEARS',
+            status=data.get('status') or 'DRAFT',
+            due_at=_resolve_due_at(data, default_days=ALUMNI_FEEDBACK_DEFAULT_DAYS),
+            response_threshold=data.get('response_threshold') or Decimal('30.00'),
+            auto_extension_days=data.get('auto_extension_days') or 2,
+            activated_by=request.user if (data.get('status') == 'ACTIVE') else None,
+            activated_at=timezone.now() if (data.get('status') == 'ACTIVE') else None,
+        )
+        return Response(EmployerSurveyCycleSerializer(cycle).data, status=status.HTTP_201_CREATED)
+
+
+class EmployerSurveyCycleGenerateTokensView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cycle_id):
+        if not _can_manage_employer_surveys(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            summary = generate_employer_survey_tokens_for_cycle(str(cycle_id))
+        except EmployerSurveyCycle.DoesNotExist:
+            return Response({'error': 'Employer survey cycle not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(summary)
+
+
+class EmployerSurveyCycleDispatchEmailsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, cycle_id):
+        if not _can_manage_employer_surveys(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            EmployerSurveyCycle.objects.get(id=cycle_id, is_active=True)
+        except EmployerSurveyCycle.DoesNotExist:
+            return Response({'error': 'Employer survey cycle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        token_summary = generate_employer_survey_tokens_for_cycle(str(cycle_id))
+        email_summary = dispatch_employer_survey_emails(
+            str(cycle_id),
+            request=request,
+            frontend_base_url=request.data.get('frontend_base_url') if isinstance(request.data, dict) else None,
+        )
+        return Response({
+            **email_summary,
+            'created': token_summary.get('created', 0),
+            'skipped_duplicate': token_summary.get('skipped_duplicate', 0),
+            'missing_email': token_summary.get('missing_email', 0),
+            'total_seeds': token_summary.get('total_seeds', 0),
+        })
+
+
+class EmployerSurveyCycleResponsesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, cycle_id):
+        if not _can_manage_employer_surveys(request.user):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            EmployerSurveyCycle.objects.get(id=cycle_id, is_active=True)
+        except EmployerSurveyCycle.DoesNotExist:
+            return Response({'error': 'Employer survey cycle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        responses = EmployerSurveyResponse.objects.filter(
+            cycle_id=cycle_id,
+        ).select_related(
+            'cycle', 'alumni_student', 'alumni_survey_submission',
+        ).prefetch_related('answers', 'answers__question').order_by('-created_at')
+        return Response(EmployerSurveyResponseSerializer(responses, many=True).data)
+
+
+class EmployerSurveyPublicView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get_response(self, token):
+        return EmployerSurveyResponse.objects.filter(
+            response_token=token,
+        ).select_related('cycle', 'cycle__batch', 'cycle__batch__program').first()
+
+    def get(self, request, token):
+        response_obj = self.get_response(token)
+        if response_obj is None:
+            return Response({'valid': False, 'message': 'Survey link not found'}, status=status.HTTP_404_NOT_FOUND)
+        has_answers = response_obj.answers.filter(is_active=True).exists()
+        if has_answers and (response_obj.submitted_at is not None or response_obj.token_used_at is not None):
+            return Response({'valid': False, 'message': 'This survey link has already been used'}, status=status.HTTP_409_CONFLICT)
+        if has_answers and not response_obj.is_active:
+            return Response({'valid': False, 'message': 'This survey link is no longer active'}, status=status.HTTP_410_GONE)
+
+        questions_qs = SurveyQuestion.objects.filter(
+            survey_type='EMPLOYER',
+            is_active=True,
+        ).filter(
+            Q(program=response_obj.cycle.batch.program) | Q(program__isnull=True)
+        ).select_related('peo').order_by('peo__order_number', 'created_at')
+
+        q_list = list(questions_qs)
+        general = [q for q in q_list if q.peo_id is None]
+        peo_mapped = [q for q in q_list if q.peo_id is not None]
+        questions = general + peo_mapped
+
+        return Response({
+            'valid': True,
+            'employer_email': response_obj.employer_email,
+            'employer_organization': response_obj.employer_organization,
+            'employee_name_at_org': response_obj.employee_name_at_org,
+            'questions': SurveyQuestionSerializer(questions, many=True).data,
+        })
+
+    def post(self, request, token):
+        try:
+            result = submit_employer_survey_by_token(str(token), request.data.get('answers', []))
+            return Response(result, status=status.HTTP_201_CREATED)
+        except LookupError as exc:
+            return Response({'message': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        except PermissionError as exc:
+            return Response({'message': str(exc)}, status=status.HTTP_409_CONFLICT)
 
 
 class AlumniSurveyStatusView(APIView):
@@ -786,11 +1222,10 @@ class AlumniSurveyStatusView(APIView):
 
         submitted = False
         if cycle and student:
-            submitted = AlumniSurveyResponse.objects.filter(
-                cycle=cycle,
-                student=student,
-                is_active=True
-            ).exists()
+            submitted = (
+                AlumniSurveySubmission.objects.filter(cycle=cycle, student=student, is_active=True).exists()
+                or AlumniSurveyResponse.objects.filter(cycle=cycle, student=student, is_active=True).exists()
+            )
 
         return Response({
             'enabled': bool(batch.alumni_feedback_enabled),
@@ -1016,4 +1451,178 @@ class PEOCQIHistoryView(APIView):
         except PEOCQIRecord.DoesNotExist:
             return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(PEOCQISubmissionHistorySerializer(cqi.history.all(), many=True).data)
+
+
+# ========== FLEXIBLE SurveyQuestion (Alumni + Employer) VIEWS ==========
+
+class ProgramSurveyQuestionListView(APIView):
+    """List all SurveyQuestions for a program. Filter by ?survey_type=ALUMNI/EMPLOYER or ?peo_id=<uuid>.
+    Authenticated users (including alumni/students) can always read ALUMNI questions for their program.
+    Only HOD / coordinator / admin / teacher can read EMPLOYER or unfiltered lists."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, program_id):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_staff = (user_role in ('hod', 'coordinator', 'admin', 'teacher')
+                    or user_secondary_role in ('hod', 'coordinator', 'admin', 'teacher'))
+
+        qs = SurveyQuestion.objects.filter(program_id=program_id)
+        survey_type = request.query_params.get('survey_type')
+        peo_id = request.query_params.get('peo_id')
+        general = request.query_params.get('general')
+
+        if not is_staff:
+            # Alumni / students can read only ALUMNI-type questions
+            if survey_type and survey_type != SURVEY_TYPE_ALUMNI:
+                return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            survey_type = SURVEY_TYPE_ALUMNI
+
+        if survey_type:
+            qs = qs.filter(survey_type=survey_type)
+        if peo_id:
+            qs = qs.filter(peo_id=peo_id)
+        if general in ('1', 'true', 'True'):
+            qs = qs.filter(peo__isnull=True)
+        elif general in ('0', 'false', 'False'):
+            qs = qs.filter(peo__isnull=False)
+
+        items = list(qs.select_related('peo').order_by('peo__order_number', 'created_at'))
+        general_items = [q for q in items if q.peo_id is None]
+        peo_items = [q for q in items if q.peo_id is not None]
+        ordered = general_items + peo_items
+
+        return Response(SurveyQuestionSerializer(ordered, many=True).data)
+
+
+class SurveyQuestionListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        if user_role not in ('hod', 'coordinator', 'admin', 'teacher') and user_secondary_role not in ('hod', 'coordinator', 'admin', 'teacher'):
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        qs = SurveyQuestion.objects.all()
+        survey_type = request.query_params.get('survey_type')
+        if survey_type:
+            qs = qs.filter(survey_type=survey_type)
+        return Response(SurveyQuestionSerializer(qs, many=True).data)
+
+    def post(self, request):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_hod = user_role == 'hod' or user_secondary_role == 'hod'
+        is_coord = user_role == 'coordinator' or user_secondary_role == 'coordinator'
+        if not (is_hod or is_coord or user_role == 'admin'):
+            return Response({'error': 'Only HODs or coordinators can create survey questions'}, status=status.HTTP_403_FORBIDDEN)
+
+        payload = request.data
+        survey_type = payload.get('survey_type') if payload else None
+        if survey_type not in ('ALUMNI', 'EMPLOYER'):
+            return Response({'error': 'survey_type must be ALUMNI or EMPLOYER'}, status=status.HTTP_400_BAD_REQUEST)
+        if not payload.get('program'):
+            return Response({'error': 'program is required'}, status=status.HTTP_400_BAD_REQUEST)
+        q_text = payload.get('question_text') or ''
+        if not str(q_text).strip():
+            return Response({'error': 'question_text is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            serializer = SurveyQuestionSerializer(data=payload)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to create survey question: {exc.__class__.__name__}: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class SurveyQuestionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return SurveyQuestion.objects.get(pk=pk)
+        except SurveyQuestion.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        obj = self.get_object(pk)
+        if not obj:
+            return Response({'error': 'Survey question not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SurveyQuestionSerializer(obj).data)
+
+    def patch(self, request, pk):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_hod = user_role == 'hod' or user_secondary_role == 'hod'
+        is_coord = user_role == 'coordinator' or user_secondary_role == 'coordinator'
+        if not (is_hod or is_coord or user_role == 'admin'):
+            return Response({'error': 'Only HODs or coordinators can update survey questions'}, status=status.HTTP_403_FORBIDDEN)
+
+        obj = self.get_object(pk)
+        if not obj:
+            return Response({'error': 'Survey question not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        allowed_fields = {
+            'question_text',
+            'question_type',
+            'custom_options',
+            'is_locked',
+            'is_active',
+            'peo',
+            'survey_type',
+            'program',
+        }
+        payload = request.data or {}
+        data = {k: v for k, v in payload.items() if k in allowed_fields}
+        try:
+            serializer = SurveyQuestionSerializer(obj, data=data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to update survey question: {exc.__class__.__name__}: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def delete(self, request, pk):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_hod = user_role == 'hod' or user_secondary_role == 'hod'
+        is_coord = user_role == 'coordinator' or user_secondary_role == 'coordinator'
+        if not (is_hod or is_coord or user_role == 'admin'):
+            return Response({'error': 'Only HODs or coordinators can delete survey questions'}, status=status.HTTP_403_FORBIDDEN)
+
+        obj = self.get_object(pk)
+        if not obj:
+            return Response({'error': 'Survey question not found'}, status=status.HTTP_404_NOT_FOUND)
+        # Soft delete by default
+        obj.is_active = False
+        obj.save(update_fields=['is_active', 'updated_at'])
+        return Response({'success': True})
+
+
+class SurveyQuestionLockView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_hod = user_role == 'hod' or user_secondary_role == 'hod'
+        if not (is_hod or user_role == 'admin'):
+            return Response({'error': 'Only HODs can lock survey questions'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            obj = SurveyQuestion.objects.get(pk=pk)
+        except SurveyQuestion.DoesNotExist:
+            return Response({'error': 'Survey question not found'}, status=status.HTTP_404_NOT_FOUND)
+        obj.is_locked = True
+        obj.save(update_fields=['is_locked', 'updated_at'])
+        return Response(SurveyQuestionSerializer(obj).data)
 
