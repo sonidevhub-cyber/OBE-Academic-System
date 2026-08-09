@@ -238,3 +238,53 @@ class ReportInvalidationLogSerializer(serializers.ModelSerializer):
             "course_id": str(obj.triggered_by_retake.failed_course_id),
             "batch_id": str(obj.triggered_by_retake.current_batch_id),
         }
+
+
+class FailedStudentSerializer(serializers.Serializer):
+    student_id = serializers.CharField()
+    name = serializers.CharField()
+    registration_number = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    last_percentage = serializers.FloatField(required=False, allow_null=True)
+    last_grade = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    current_retake_attempts = serializers.IntegerField(default=0)
+    has_active_retake = serializers.BooleanField(default=False)
+
+
+class PreviousInstructorSerializer(serializers.Serializer):
+    teacher_id = serializers.CharField(allow_null=True, required=False)
+    name = serializers.CharField(allow_null=True, required=False, allow_blank=True)
+    found = serializers.BooleanField(default=False)
+
+
+class PerStudentRetakeResultSerializer(serializers.Serializer):
+    student_id = serializers.CharField()
+    success = serializers.BooleanField()
+    error = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    retake_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    attempt_number = serializers.IntegerField(required=False, allow_null=True)
+
+
+class BulkRetakeAssignmentInputSerializer(serializers.Serializer):
+    batch_id = serializers.UUIDField()
+    course_id = serializers.UUIDField()
+    teacher_id = serializers.UUIDField(required=False, allow_null=True)
+    student_ids = serializers.ListField(child=serializers.UUIDField())
+
+
+class BulkRetakeAssignmentResponseSerializer(serializers.Serializer):
+    results = PerStudentRetakeResultSerializer(many=True)
+    summary = serializers.DictField(required=False)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if "summary" not in ret or not ret["summary"]:
+            results = instance.get("results", [])
+            total = len(results)
+            succeeded = sum(1 for r in results if r.get("success"))
+            failed = total - succeeded
+            ret["summary"] = {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": failed,
+            }
+        return ret

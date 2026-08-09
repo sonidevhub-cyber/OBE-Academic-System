@@ -93,14 +93,19 @@ class MarkAsRepeatView(generics.GenericAPIView):
         if student.promotion_status != 'provisional':
             return Response({'error': 'Student is not in provisional status'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if student.promotion_status == 'repeat':
-            return Response({'error': 'Already marked as repeat'}, status=status.HTTP_400_BAD_REQUEST)
+        if student.promotion_status == 'freeze':
+            return Response({'error': 'Already frozen'}, status=status.HTTP_400_BAD_REQUEST)
 
-        student.promotion_status = 'repeat'
+        student.promotion_status = 'freeze'
         student.current_semester = student.current_semester - 1
         student.save(update_fields=['promotion_status', 'current_semester'])
 
-        return Response({'success': True, 'student_name': student.full_name, 'repeat_semester': student.current_semester}, status=status.HTTP_200_OK)
+        return Response({
+            'success': True,
+            'message': f'{student.full_name} moved to Freeze',
+            'student_name': student.full_name,
+            'repeat_semester': student.current_semester,
+        }, status=status.HTTP_200_OK)
 
 
 class ConfirmPromotionsView(generics.GenericAPIView):
@@ -135,7 +140,7 @@ class PendingTransfersView(APIView):
     def get(self, request):
         students = User.objects.filter(
             role='student',
-            promotion_status='repeat',
+            promotion_status='freeze',
             is_active=True,
         ).select_related('batch', 'original_batch')
 
@@ -159,9 +164,47 @@ class PendingTransfersView(APIView):
                 'current_semester': s.current_semester,
                 'session_type': s.batch.session_type if s.batch else None,
                 'has_eligible_batch': has_eligible,
+                'promotion_status': s.promotion_status,
             })
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+class FailFrozenStudentView(APIView):
+    permission_classes = [IsSAC]
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        try:
+            student = User.objects.select_for_update().get(
+                pk=pk,
+                role='student',
+                is_active=True,
+            )
+        except User.DoesNotExist:
+            return Response({'error': 'Active student not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if student.promotion_status not in ['provisional', 'freeze']:
+            return Response({'error': 'Only provisional or frozen students can be failed/dropped'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            gpa = float(request.data.get('gpa'))
+        except (TypeError, ValueError):
+            return Response({'error': 'Valid GPA is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if gpa >= 2.01:
+            return Response({'error': 'Only students with GPA below 2.01 can be failed/dropped'}, status=status.HTTP_400_BAD_REQUEST)
+
+        student.is_active = False
+        student.promotion_status = 'none'
+        student.save(update_fields=['is_active', 'promotion_status'])
+
+        return Response({
+            'success': True,
+            'message': f'{student.full_name} failed and dropped',
+            'student_name': student.full_name,
+            'gpa': gpa,
+        }, status=status.HTTP_200_OK)
 
 
 class EligibleBatchesView(APIView):

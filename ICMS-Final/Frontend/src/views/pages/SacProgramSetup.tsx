@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -60,10 +60,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [selectedSemester, setSelectedSemester] = useState<Semester | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [alumniBatches, setAlumniBatches] = useState<Batch[]>([]);
   const [masterCurricula, setMasterCurricula] = useState<any[]>([]);
-  
-  const [activeTab, setActiveTab] = useState<'batches' | 'alumni'>('batches');
   
   const [selectedBatchForStudents, setSelectedBatchForStudents] = useState<Batch | null>(null);
   const [batchStudents, setBatchStudents] = useState<BatchStudent[]>([]);
@@ -76,6 +73,8 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
   const [success, setSuccess] = useState<string | null>(null);
   const [graduatingBatch, setGraduatingBatch] = useState<Batch | null>(null);
   const [isGraduating, setIsGraduating] = useState(false);
+  const batchesCacheRef = useRef<Record<string, Batch[]>>({});
+  const curriculaCacheRef = useRef<Record<string, any[]>>({});
 
   // Form States
   const [showProgramForm, setShowProgramForm] = useState(false);
@@ -121,44 +120,37 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
         setSelectedProgram(currentProgram);
       }
 
-      // IMPORTANT:
-      // Program objects coming from getPrograms() may not include `semesters`.
-      // Always refresh currentProgram from detail endpoint so UI shows semesters immediately.
-      if (currentProgram?.id) {
-        const detailRes = await academicStructureService.getProgramDetail(currentProgram.id);
-        setSelectedProgram(detailRes.data);
-      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load programs');
     } finally {
       setLoading(false);
     }
-  }, [selectedProgram?.id]); // Depend on id instead of whole object
+  }, []);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Fetch Courses or Batches based on active tab
+  // Fetch Batches (active only)
   const fetchContent = useCallback(async () => {
     if (!selectedProgram) return;
+    const programId = selectedProgram.id;
+    if (batchesCacheRef.current[programId]) {
+      setBatches(batchesCacheRef.current[programId]);
+      return;
+    }
     setContentLoading(true);
     try {
-      if (activeTab === 'batches') {
-        const response = await batchService.getBatches(selectedProgram.id);
-        // Only show active batches in Batches tab
-        setBatches(response.data.filter(b => b.status === 'active'));
-      } else {
-        const response = await batchService.getBatches(selectedProgram.id);
-        // Show graduated batches in Alumni tab
-        setAlumniBatches(response.data.filter(b => b.status === 'graduated'));
-      }
+      const response = await batchService.getBatches(programId);
+      const activeBatches = response.data.filter(b => b.status === 'active');
+      batchesCacheRef.current[programId] = activeBatches;
+      setBatches(activeBatches);
     } catch (err: any) {
-      setError(`Failed to load ${activeTab}`);
+      setError(`Failed to load batches`);
     } finally {
       setContentLoading(false);
     }
-  }, [selectedProgram, selectedSemester, activeTab]);
+  }, [selectedProgram?.id]);
 
   useEffect(() => {
     fetchContent();
@@ -166,17 +158,21 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
 
   const fetchMasterCurricula = useCallback(async () => {
     if (!selectedProgram) return;
+    const programId = selectedProgram.id;
+    if (curriculaCacheRef.current[programId]) {
+      setMasterCurricula(curriculaCacheRef.current[programId]);
+      return;
+    }
     try {
-      const res = await curriculumService.getMasterCurricula(selectedProgram.id);
-      console.log("Master curricula API response:", res);
+      const res = await curriculumService.getMasterCurricula(programId);
       const data = res.data?.data || res.data || [];
-      console.log("Master curricula data:", data);
+      curriculaCacheRef.current[programId] = data;
       setMasterCurricula(data);
     } catch (error) {
       console.error("Error fetching master curricula:", error);
       toast.error("Could not load master curricula.");
     }
-  }, [selectedProgram]);
+  }, [selectedProgram?.id]);
 
   useEffect(() => {
     if (selectedProgram) {
@@ -249,6 +245,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
         payload.curriculum_version_id = batchForm.curriculum_version_id;
       }
       await batchService.createBatch(selectedProgram.id, payload);
+      delete batchesCacheRef.current[selectedProgram.id];
       setSuccess('Batch created successfully');
       setShowBatchForm(false);
       setBatchForm({
@@ -290,6 +287,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     setSubmitting(true);
     try {
       await batchService.updateBatch(selectedProgram.id, editingBatch.id, editBatchForm);
+      delete batchesCacheRef.current[selectedProgram.id];
       setSuccess('Batch updated successfully');
       setShowEditBatchForm(false);
       setEditingBatch(null);
@@ -312,6 +310,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     
     try {
       await batchService.advanceSemester(selectedProgram.id, batch.id);
+      delete batchesCacheRef.current[selectedProgram.id];
       setSuccess(`${batch.name} advanced successfully`);
       fetchContent();
     } catch (err: any) {
@@ -325,6 +324,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     setIsGraduating(true);
     try {
       const res = await batchService.graduateBatch(selectedProgram.id, graduatingBatch.id);
+      delete batchesCacheRef.current[selectedProgram.id];
       toast.success(`${res.data.batch_name} graduated! ${res.data.alumni_count} students are now Alumni.`);
       setGraduatingBatch(null);
       fetchContent();
@@ -341,6 +341,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
     if (!selectedProgram || !window.confirm('Deactivate this batch?')) return;
     try {
       await batchService.deleteBatch(selectedProgram.id, id);
+      delete batchesCacheRef.current[selectedProgram.id];
       setSuccess('Batch deactivated');
       fetchContent();
     } catch (err) {
@@ -467,50 +468,35 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
           {selectedProgram ? (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-h-[500px]">
               {/* Tabs */}
-              <div className="flex border-b border-gray-100">
-                <button onClick={() => setActiveTab('batches')}
-                  className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'batches' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' : 'text-gray-400 hover:text-gray-600'}`}
-                >
+              <div className="border-b border-gray-100">
+                <div className="px-6 py-4 border-b-2 border-indigo-600 inline-flex items-center gap-2 text-sm font-black text-indigo-600 bg-indigo-50/30">
                   <Users className="w-4 h-4" /> Batches
-                </button>
-                <button onClick={() => setActiveTab('alumni')}
-                  className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'alumni' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                  <GraduationCap className="w-4 h-4" /> Alumni
-                </button>
+                </div>
               </div>
 
               <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
-                    {activeTab === 'batches' 
-                        ? `${selectedProgram.code} Batches`
-                        : `${selectedProgram.code} Alumni Records`
-                    }
+                    {selectedProgram.code} Batches
                   </h2>
                   <p className="text-sm text-gray-500">
-                    {activeTab === 'batches'
-                        ? `${batches.length} active batches`
-                        : `${alumniBatches.length} graduated batches`
-                    }
+                    {batches.length} active batches
                   </p>
                 </div>
-                {activeTab !== 'alumni' && (
-                  <button 
-                    onClick={() => setShowBatchForm(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-                  >
-                    <PlusCircle className="w-4 h-4" />
-                    <span className="text-sm font-medium">Add Batch</span>
-                  </button>
-                )}
+                <button 
+                  onClick={() => setShowBatchForm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">Add Batch</span>
+                </button>
               </div>
 
               {/* Content Forms & Lists */}
               <div className="p-0">
                 {/* Batch Form */}
                 <AnimatePresence>
-                  {showBatchForm && activeTab === 'batches' && (
+                  {showBatchForm && (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                       className="p-6 bg-indigo-50/50 border-b border-indigo-100"
                     >
@@ -575,7 +561,7 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                 </AnimatePresence>
                 
                 <AnimatePresence>
-                  {showEditBatchForm && activeTab === 'batches' && (
+                  {showEditBatchForm && (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
                       className="p-6 bg-purple-50 border-b border-purple-100"
                     >
@@ -641,179 +627,125 @@ const SacProgramSetup: React.FC<SacProgramSetupProps> = ({ onManagePromotion }) 
                 {contentLoading ? (
                   <div className="flex flex-col items-center justify-center py-20 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-indigo-200" />
-                    <p className="text-gray-400 text-sm animate-pulse">Loading {activeTab}...</p>
+                    <p className="text-gray-400 text-sm animate-pulse">Loading batches...</p>
                   </div>
-                ) : activeTab === 'batches' ? (
-                  batches.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-4">
-                      <Users className="w-8 h-8 text-gray-200" />
-                      <p className="text-gray-400 text-sm">No active batches created yet</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="bg-gray-50/50 border-b border-gray-100">
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Batch Name</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Duration</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Curriculum</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Semester</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Status</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {batches.map(b => (
-                            <tr key={b.id} className="hover:bg-gray-50/50 transition-colors group">
-                              <td className="px-6 py-5">
-                                <div className="flex items-center gap-3">
-                                  <div className="p-2 bg-indigo-50 rounded-lg"><Users className="w-4 h-4 text-indigo-600" /></div>
-                                  <span className="font-bold text-gray-900">{b.name}</span>
-                                </div>
-                              </td>
-                              <td className="px-6 py-5 text-center text-sm text-gray-600 font-medium">{b.start_year} - {b.end_year}</td>
-                              <td className="px-6 py-5 text-center">
-                                {b.curriculum_version_no ? (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-100">
-                                    {b.curriculum_version_no}
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-gray-400 italic">No Version</span>
-                                )}
-                              </td>
-                              <td className="px-6 py-5 text-center">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
-                                  Semester {b.current_semester}
+                ) : batches.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-4">
+                    <Users className="w-8 h-8 text-gray-200" />
+                    <p className="text-gray-400 text-sm">No active batches created yet</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-gray-50/50 border-b border-gray-100">
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Batch Name</th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Duration</th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Curriculum</th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Semester</th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Status</th>
+                          <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {batches.map(b => (
+                          <tr key={b.id} className="hover:bg-gray-50/50 transition-colors group">
+                            <td className="px-6 py-5">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-50 rounded-lg"><Users className="w-4 h-4 text-indigo-600" /></div>
+                                <span className="font-bold text-gray-900">{b.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-5 text-center text-sm text-gray-600 font-medium">{b.start_year} - {b.end_year}</td>
+                            <td className="px-6 py-5 text-center">
+                              {b.curriculum_version_no ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-100">
+                                  {b.curriculum_version_no}
                                 </span>
-                              </td>
-                              <td className="px-6 py-5 text-center">
-                                {b.is_active ? (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
-                                    Active
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gray-50 text-gray-400 border border-gray-100">
-                                    Inactive
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-6 py-5 text-right">
-                                <div className="flex justify-end gap-2 transition-opacity">
-                                  <button onClick={() => fetchBatchStudents(b)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="View Students">
-                                    <Search className="w-4 h-4" />
-                                  </button>
-                                  <button onClick={() => handleEditBatch(b)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Edit Batch">
-                                    <Edit3 className="w-4 h-4" />
-                                  </button>
-                                  {b.status === 'active' && b.is_active && (
-                                    <>
-                                      {selectedProgram && b.current_semester < selectedProgram.total_semesters && (
-                                        onManagePromotion ? (
-                                          <button
-                                            onClick={() => onManagePromotion(selectedProgram.id, b.id)}
-                                            title="Manage Promotion"
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all text-xs font-bold"
+                              ) : (
+                                <span className="text-xs text-gray-400 italic">No Version</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-5 text-center">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                Semester {b.current_semester}
+                              </span>
+                            </td>
+                            <td className="px-6 py-5 text-center">
+                              {b.is_active ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gray-50 text-gray-400 border border-gray-100">
+                                  Inactive
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-5 text-right">
+                              <div className="flex justify-end gap-2 transition-opacity">
+                                <button onClick={() => fetchBatchStudents(b)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="View Students">
+                                  <Search className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleEditBatch(b)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Edit Batch">
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                {b.status === 'active' && b.is_active && (
+                                  <>
+                                    {selectedProgram && b.current_semester < selectedProgram.total_semesters && (
+                                      onManagePromotion ? (
+                                        <button
+                                          onClick={() => onManagePromotion(selectedProgram.id, b.id)}
+                                          title="Manage Promotion"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all text-xs font-bold"
+                                        >
+                                          <ClipboardList className="w-3.5 h-3.5" />
+                                          <span>Manage Promotion</span>
+                                        </button>
+                                      ) : (
+                                        <Link
+                                          to={`/sac/programs/${selectedProgram.id}/batches/${b.id}/promotion`}
+                                          title="Manage Promotion"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all text-xs font-bold"
+                                        >
+                                          <ClipboardList className="w-3.5 h-3.5" />
+                                          <span>Manage Promotion</span>
+                                        </Link>
+                                      )
+                                    )}
+                                    {selectedProgram && canGraduateBatch(b, selectedProgram.total_semesters) && (
+                                      <>
+                                        {getGraduationLockReason(b, selectedProgram.total_semesters) ? (
+                                          <button 
+                                            disabled
+                                            title={`Graduation not available: ${getGraduationLockReason(b, selectedProgram.total_semesters)}`}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs font-bold"
                                           >
-                                            <ClipboardList className="w-3.5 h-3.5" />
-                                            <span>Manage Promotion</span>
+                                            <GraduationCap className="w-3.5 h-3.5" />
+                                            <span>Graduate</span>
                                           </button>
                                         ) : (
-                                          <Link
-                                            to={`/sac/programs/${selectedProgram.id}/batches/${b.id}/promotion`}
-                                            title="Manage Promotion"
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all text-xs font-bold"
+                                          <button 
+                                            onClick={() => setGraduatingBatch(b)}
+                                            title="Graduate Batch"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
                                           >
-                                            <ClipboardList className="w-3.5 h-3.5" />
-                                            <span>Manage Promotion</span>
-                                          </Link>
-                                        )
-                                      )}
-                                      {selectedProgram && canGraduateBatch(b, selectedProgram.total_semesters) && (
-                                        <>
-                                          {getGraduationLockReason(b, selectedProgram.total_semesters) ? (
-                                            <button 
-                                              disabled
-                                              title={`Graduation not available: ${getGraduationLockReason(b, selectedProgram.total_semesters)}`}
-                                              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs font-bold"
-                                            >
-                                              <GraduationCap className="w-3.5 h-3.5" />
-                                              <span>Graduate</span>
-                                            </button>
-                                          ) : (
-                                            <button 
-                                              onClick={() => setGraduatingBatch(b)}
-                                              title="Graduate Batch"
-                                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all text-xs font-bold"
-                                            >
-                                              <GraduationCap className="w-3.5 h-3.5" />
-                                              <span>Graduate</span>
-                                            </button>
-                                          )}
-                                        </>
-                                      )}
-                                      <button onClick={() => handleDeleteBatch(b.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                ) : (
-                  alumniBatches.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-4">
-                      <GraduationCap className="w-8 h-8 text-gray-200" />
-                      <p className="text-gray-400 text-sm">No graduated batches found</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="bg-gray-50/50 border-b border-gray-100">
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Batch Name</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Duration</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Graduated On</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Total Alumni</th>
-                            <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                                            <GraduationCap className="w-3.5 h-3.5" />
+                                            <span>Graduate</span>
+                                          </button>
+                                        )}
+                                      </>
+                                    )}
+                                    <button onClick={() => handleDeleteBatch(b.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {alumniBatches.map(b => (
-                            <tr key={b.id} className="hover:bg-gray-50/50 transition-colors group">
-                              <td className="px-6 py-5">
-                                <div className="flex items-center gap-3">
-                                  <div className="p-2 bg-amber-50 rounded-lg"><GraduationCap className="w-4 h-4 text-amber-600" /></div>
-                                  <span className="font-bold text-gray-900">{b.name}</span>
-                                </div>
-                              </td>
-                              <td className="px-6 py-5 text-center text-sm text-gray-600 font-medium">{b.start_year} - {b.end_year}</td>
-                              <td className="px-6 py-5 text-center text-sm text-gray-500">
-                                {b.graduated_at ? new Date(b.graduated_at).toLocaleDateString() : 'N/A'}
-                              </td>
-                              <td className="px-6 py-5 text-center">
-                                <span className="font-bold text-gray-900">{b.student_count}</span>
-                              </td>
-                              <td className="px-6 py-5 text-right">
-                                <div className="flex justify-end gap-2 transition-opacity">
-                                  <button 
-                                    onClick={() => fetchBatchStudents(b)} 
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-600 hover:text-white transition-all text-xs font-bold"
-                                    title="View Alumni"
-                                  >
-                                    <Search className="w-3.5 h-3.5" />
-                                    <span>View Alumni</span>
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>

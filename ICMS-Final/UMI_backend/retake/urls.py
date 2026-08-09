@@ -2,8 +2,11 @@ from django.urls import path
 
 from .views import (
     CourseRetakeCreateView,
+    FailedStudentsLookupView,
     MyAssignedRetakesView,
     PendingRetakeInvalidationsView,
+    PreviousInstructorLookupView,
+    BulkRetakeAssignmentView,
     RetakeAssessmentContextView,
     RetakeInvalidationLogView,
     RecalculateRetakeReportsView,
@@ -20,4 +23,7 @@ urlpatterns = [
     path("invalidation-log/", RetakeInvalidationLogView.as_view(), name="retake-invalidation-log"),
     path("invalidation-log/pending/", PendingRetakeInvalidationsView.as_view(), name="retake-pending-invalidations"),
     path("recalculate-reports/", RecalculateRetakeReportsView.as_view(), name="retake-recalculate-reports"),
+    path("lookup/failed-students/", FailedStudentsLookupView.as_view(), name="retake-failed-students-lookup"),
+    path("lookup/previous-instructor/", PreviousInstructorLookupView.as_view(), name="retake-previous-instructor-lookup"),
+    path("bulk-assign/", BulkRetakeAssignmentView.as_view(), name="retake-bulk-assign"),
 ]

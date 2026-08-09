@@ -4,8 +4,11 @@ export interface Batch {
     id: string;
     name: string; 
     program: any; 
+    program_id?: string;
+    program_name?: string;
     start_year: number; 
     end_year: number; 
+    session_type?: 'fall' | 'spring';
     current_semester: number; 
     student_count: number; 
     is_active: boolean; 
@@ -33,6 +36,12 @@ export interface BatchFlat {
     name: string;
     program_name: string;
     program_id: string;
+    start_year?: number;
+    end_year?: number;
+    session_type?: 'fall' | 'spring';
+    current_semester?: number;
+    student_count?: number;
+    status?: 'active' | 'graduated';
     has_curriculum?: boolean;
 }
 

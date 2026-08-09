@@ -1,9 +1,13 @@
 import { api } from '../../api/api';
 import type {
   AssessmentContext,
+  BulkRetakeAssignmentPayload,
+  BulkRetakeAssignmentResponse,
   CourseRetake,
   CreateRetakePayload,
+  FailedStudentOption,
   InvalidationLogEntry,
+  PreviousInstructorInfo,
   RetakeStatus,
 } from './types';
 
@@ -17,6 +21,48 @@ const unwrapList = <T,>(payload: any): T[] => {
 export async function createRetake(payload: CreateRetakePayload): Promise<CourseRetake> {
   const response = await api.post('retakes/', payload);
   return response.data;
+}
+
+export async function getFailedStudentsForBatchCourse(
+  batchId: string,
+  courseId: string
+): Promise<FailedStudentOption[]> {
+  const response = await api.get('retakes/lookup/failed-students/', {
+    params: {
+      batch_id: batchId,
+      course_id: courseId,
+    },
+  });
+  return unwrapList<FailedStudentOption>(response.data);
+}
+
+export async function getPreviousInstructor(
+  batchId: string,
+  courseId: string
+): Promise<PreviousInstructorInfo> {
+  const response = await api.get('retakes/lookup/previous-instructor/', {
+    params: {
+      batch_id: batchId,
+      course_id: courseId,
+    },
+  });
+  const data = response.data || {};
+  return {
+    teacher_id: data.teacher_id ?? null,
+    name: data.name ?? null,
+    found: Boolean(data.found),
+  };
+}
+
+export async function bulkAssignRetakes(
+  payload: BulkRetakeAssignmentPayload
+): Promise<BulkRetakeAssignmentResponse> {
+  const response = await api.post('retakes/bulk-assign/', payload);
+  const data = response.data || {};
+  return {
+    results: Array.isArray(data.results) ? data.results : [],
+    summary: data.summary || { total: 0, succeeded: 0, failed: 0 },
+  };
 }
 
 export async function getRetakes(): Promise<CourseRetake[]> {

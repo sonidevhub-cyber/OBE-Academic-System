@@ -23,6 +23,11 @@ class StudentSerializer(serializers.ModelSerializer):
     program_id = serializers.UUIDField(source='user.batch.program.id', read_only=True)
     program_name = serializers.CharField(source='user.batch.program.name', read_only=True)
     program_code = serializers.CharField(source='user.batch.program.code', read_only=True)
+    current_semester = serializers.IntegerField(source='user.current_semester', read_only=True, allow_null=True)
+    batch_current_semester = serializers.IntegerField(source='user.batch.current_semester', read_only=True, allow_null=True)
+    promotion_status = serializers.CharField(source='user.promotion_status', read_only=True)
+    batch_start_year = serializers.IntegerField(source='user.batch.start_year', read_only=True, allow_null=True)
+    batch_end_year = serializers.IntegerField(source='user.batch.end_year', read_only=True, allow_null=True)
     courses = serializers.SerializerMethodField()
 
     class Meta:
@@ -32,7 +37,8 @@ class StudentSerializer(serializers.ModelSerializer):
             'registration_number', 'name', 'department', 'phone', 'date_of_birth',
             'gender', 'blood_group', 'guardian_name', 'guardian_contact', 'address',
             'user_email', 'full_name', 'role', 'batch_id', 'batch_name', 'program_id', 
-            'program_name', 'program_code', 'image', 'courses'
+            'program_name', 'program_code', 'current_semester', 'batch_current_semester',
+            'promotion_status', 'batch_start_year', 'batch_end_year', 'image', 'courses'
         ]
         read_only_fields = ['student_id', 'name']
 

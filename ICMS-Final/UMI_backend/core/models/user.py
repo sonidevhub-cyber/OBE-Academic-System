@@ -114,6 +114,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             ('provisional', 'Provisional'), 
             ('confirmed', 'Confirmed'), 
             ('repeat', 'Repeat'), 
+            ('freeze', 'Freeze'), 
         ], 
         default='none' 
     ) 

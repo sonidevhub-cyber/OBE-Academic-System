@@ -129,3 +129,43 @@ export interface InvalidationLogEntry {
   triggeredAt: string;
   resolvedAt: string | null;
 }
+
+export interface FailedStudentOption {
+  student_id: string;
+  name: string;
+  registration_number?: string;
+  last_percentage?: number | null;
+  last_grade?: string | null;
+  current_retake_attempts: number;
+  has_active_retake: boolean;
+}
+
+export interface PreviousInstructorInfo {
+  teacher_id?: string | null;
+  name?: string | null;
+  found: boolean;
+}
+
+export interface PerStudentRetakeResult {
+  student_id: string;
+  success: boolean;
+  error?: string | null;
+  retake_id?: string | null;
+  attempt_number?: number | null;
+}
+
+export interface BulkRetakeAssignmentPayload {
+  batch_id: string;
+  course_id: string;
+  teacher_id?: string | null;
+  student_ids: string[];
+}
+
+export interface BulkRetakeAssignmentResponse {
+  results: PerStudentRetakeResult[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
+}

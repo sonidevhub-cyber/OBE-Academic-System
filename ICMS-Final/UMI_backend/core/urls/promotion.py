@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core.views.promotion import MarkAsRepeatView, ProvisionalPromoteAllView, PendingTransfersView
+from core.views.promotion import MarkAsRepeatView, ProvisionalPromoteAllView, PendingTransfersView, FailFrozenStudentView
 
 urlpatterns = [
     path(
@@ -17,5 +17,10 @@ urlpatterns = [
         'api/students/pending-transfers/',
         PendingTransfersView.as_view(),
         name='pending-transfers',
+    ),
+    path(
+        'api/students/<uuid:pk>/fail-drop/',
+        FailFrozenStudentView.as_view(),
+        name='fail-drop-student',
     ),
 ]

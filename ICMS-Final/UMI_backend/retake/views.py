@@ -1,13 +1,15 @@
-from django.core.exceptions import PermissionDenied
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Max, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from assessments.models import Assessment, StudentAssessment
-from core.models import Batch
-from core.models import Semester
+from assessments.models import Assessment, StudentAssessment, FinalResult
+from assessments.services.clo_service import CLOService
+from core.models import Batch, Course as CoreCourse, Semester
 from obe.models import CourseSession, CourseGAScore, GACQIRecord, GAReport, GAMasterCache
 from obe.services import calculate_all_course_ga_scores
 from students.models import Student
@@ -20,9 +22,15 @@ from .serializers import (
     CourseRetakeCreateSerializer,
     CourseRetakeSerializer,
     CourseRetakeStatusUpdateSerializer,
+    FailedStudentSerializer,
+    PreviousInstructorSerializer,
+    BulkRetakeAssignmentInputSerializer,
+    PerStudentRetakeResultSerializer,
     ReportInvalidationLogSerializer,
     RetakeAssessmentSerializer,
 )
+
+User = get_user_model()
 
 
 def _retake_queryset():
@@ -230,3 +238,371 @@ class RecalculateRetakeReportsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+def _get_student_pass_fail_for_course(student, course_id, batch_id):
+    """Reuse CLOService pass/fail logic (>=50% threshold) for a single student+course+batch.
+    Returns (is_pass: bool, percentage: float|None, grade: str|None) or None if no data.
+    """
+    latest_session = (
+        CourseSession.objects.filter(
+            course_id=course_id,
+            batch_id=batch_id,
+            is_active=True,
+        )
+        .order_by("-semester__number", "-created_at")
+        .select_related("semester")
+        .first()
+    )
+    if not latest_session:
+        final_result = (
+            FinalResult.objects.filter(
+                student=student,
+                course_id=course_id,
+            )
+            .order_by("-id")
+            .first()
+        )
+        if final_result:
+            return final_result.is_pass, float(final_result.total_percentage), final_result.grade
+        return None
+
+    semester_id = latest_session.semester_id
+    try:
+        report_data = CLOService.generate_student_report(
+            course_id=str(course_id),
+            batch_id=str(batch_id),
+            semester_id=str(semester_id),
+        )
+    except Exception:
+        return None
+
+    if isinstance(report_data, dict) and report_data.get("error"):
+        return None
+
+    report_rows = report_data if isinstance(report_data, list) else report_data.get("report", [])
+    student_id_str = str(student.student_id)
+    for row in report_rows:
+        if str(row.get("student_id")) == student_id_str:
+            status_val = row.get("status", "").upper()
+            percentage = row.get("percentage")
+            gpa = row.get("gpa", 0)
+            if percentage and gpa >= 3.5:
+                grade = "A" if percentage >= 85 else ("B" if percentage >= 75 else ("C" if percentage >= 65 else ("D" if percentage >= 50 else "F")))
+            else:
+                grade = None
+            is_pass = status_val == "PASS"
+            return is_pass, float(percentage) if percentage is not None else None, grade
+    return None
+
+
+class FailedStudentsLookupView(APIView):
+    """Given batch_id + course_id, return all students in that batch who FAILED
+    this subject. Excludes students with an active ongoing retake (< 3 attempts).
+    Reuses CLOService pass/fail logic (>= 50% threshold = PASS).
+    """
+    permission_classes = [IsSACOnly]
+
+    def get(self, request):
+        if not is_sac(request.user):
+            raise PermissionDenied("You are not allowed to lookup failed students.")
+
+        batch_id = request.query_params.get("batch_id")
+        course_id = request.query_params.get("course_id")
+        if not batch_id or not course_id:
+            return Response(
+                {"detail": "Both batch_id and course_id are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        batch = get_object_or_404(Batch, pk=batch_id)
+        batch_students = list(
+            Student.objects.filter(
+                Q(user__batch_id=batch_id) | Q(batch_id=batch_id),
+            )
+            .select_related("user")
+            .distinct()
+        )
+        if not batch_students:
+            return Response([])
+
+        latest_session = (
+            CourseSession.objects.filter(
+                course_id=course_id,
+                batch_id=batch_id,
+                is_active=True,
+            )
+            .order_by("-semester__number", "-created_at")
+            .select_related("semester")
+            .first()
+        )
+        semester_id = latest_session.semester_id if latest_session else None
+
+        report_rows_by_student = {}
+        if latest_session and semester_id:
+            try:
+                report_data = CLOService.generate_student_report(
+                    course_id=str(course_id),
+                    batch_id=str(batch_id),
+                    semester_id=str(semester_id),
+                )
+                if not (isinstance(report_data, dict) and report_data.get("error")):
+                    rows = report_data if isinstance(report_data, list) else report_data.get("report", [])
+                    for row in rows:
+                        sid = str(row.get("student_id"))
+                        report_rows_by_student[sid] = row
+            except Exception:
+                report_rows_by_student = {}
+
+        final_results_by_student = {}
+        final_results_qs = FinalResult.objects.filter(
+            student__in=batch_students,
+            course_id=course_id,
+        )
+        for fr in final_results_qs:
+            final_results_by_student[str(fr.student_id)] = fr
+
+        existing_retakes = {}
+        for retake in CourseRetake.objects.filter(
+            student__in=batch_students,
+            failed_course_id=course_id,
+        ):
+            key = str(retake.student_id)
+            if key not in existing_retakes:
+                existing_retakes[key] = {"max_attempt": 0, "has_active_ongoing": False}
+            if retake.attempt_number > existing_retakes[key]["max_attempt"]:
+                existing_retakes[key]["max_attempt"] = retake.attempt_number
+            if retake.is_active and retake.status == "ongoing":
+                existing_retakes[key]["has_active_ongoing"] = True
+
+        failed_students = []
+        for student in batch_students:
+            sid = str(student.student_id)
+            retake_info = existing_retakes.get(sid, {})
+            max_attempt = retake_info.get("max_attempt", 0)
+            has_active_ongoing = retake_info.get("has_active_ongoing", False)
+
+            is_pass = None
+            percentage = None
+            grade = None
+            row = report_rows_by_student.get(sid)
+            if row:
+                status_val = row.get("status", "").upper()
+                percentage = row.get("percentage")
+                is_pass = status_val == "PASS"
+                pct = percentage or 0
+                if pct >= 85:
+                    grade = "A"
+                elif pct >= 75:
+                    grade = "B"
+                elif pct >= 65:
+                    grade = "C"
+                elif pct >= 50:
+                    grade = "D"
+                else:
+                    grade = "F"
+
+            if is_pass is None:
+                fr = final_results_by_student.get(sid)
+                if fr:
+                    is_pass = fr.is_pass
+                    percentage = float(fr.total_percentage)
+                    grade = fr.grade
+
+            if is_pass is None:
+                continue
+
+            if is_pass:
+                continue
+
+            if has_active_ongoing and max_attempt < 3:
+                continue
+
+            if max_attempt >= 3:
+                continue
+
+            failed_students.append({
+                "student_id": sid,
+                "name": student.name,
+                "registration_number": student.registration_number,
+                "last_percentage": percentage,
+                "last_grade": grade,
+                "current_retake_attempts": max_attempt,
+                "has_active_retake": has_active_ongoing,
+            })
+
+        serializer = FailedStudentSerializer(failed_students, many=True)
+        return Response(serializer.data)
+
+
+class PreviousInstructorLookupView(APIView):
+    """Given batch_id + course_id, return the teacher from the most recent
+    active CourseSession for that batch+course pair (order by semester desc).
+    Returns null gracefully if no prior offering exists.
+    """
+    permission_classes = [IsSACOnly]
+
+    def get(self, request):
+        if not is_sac(request.user):
+            raise PermissionDenied("You are not allowed to lookup previous instructors.")
+
+        batch_id = request.query_params.get("batch_id")
+        course_id = request.query_params.get("course_id")
+        if not batch_id or not course_id:
+            return Response(
+                {"detail": "Both batch_id and course_id are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        latest_session = (
+            CourseSession.objects.filter(
+                course_id=course_id,
+                batch_id=batch_id,
+                is_active=True,
+                instructor__isnull=False,
+            )
+            .order_by("-semester__number", "-created_at")
+            .select_related("instructor")
+            .first()
+        )
+
+        if not latest_session or not latest_session.instructor:
+            serializer = PreviousInstructorSerializer({"found": False})
+            return Response(serializer.data)
+
+        teacher = latest_session.instructor
+        serializer = PreviousInstructorSerializer({
+            "teacher_id": str(teacher.id),
+            "name": teacher.full_name,
+            "found": True,
+        })
+        return Response(serializer.data)
+
+
+class BulkRetakeAssignmentView(APIView):
+    """Bulk retake assignment with per-student partial success.
+    Input: { batch_id, course_id, teacher_id (nullable), student_ids: [list] }
+    Output: { results: [ { student_id, success, error?, retake_id?, attempt_number? } ], summary: ... }
+    """
+    permission_classes = [IsSACOnly]
+
+    def post(self, request):
+        if not is_sac(request.user):
+            raise PermissionDenied("You are not allowed to bulk-assign retakes.")
+
+        input_serializer = BulkRetakeAssignmentInputSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        data = input_serializer.validated_data
+
+        batch_id = data["batch_id"]
+        course_id = data["course_id"]
+        teacher_id = data.get("teacher_id")
+        student_ids = data["student_ids"]
+
+        batch = get_object_or_404(Batch, pk=batch_id)
+
+        teacher = None
+        if teacher_id:
+            teacher = User.objects.filter(pk=teacher_id, is_active=True).first()
+            if not teacher:
+                return Response(
+                    {"detail": "Teacher not found or inactive."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if getattr(teacher, "role", None) not in {"instructor", "Teacher", "tvf"}:
+                return Response(
+                    {"detail": "Selected teacher must have role Instructor or Visiting Faculty."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        valid_students = {
+            str(s.student_id): s
+            for s in Student.objects.filter(
+                Q(user__batch_id=batch_id) | Q(batch_id=batch_id),
+                student_id__in=student_ids,
+            ).select_related("user").distinct()
+        }
+
+        results = []
+        course = get_object_or_404(CoreCourse, pk=course_id)
+
+        for sid in student_ids:
+            sid_str = str(sid)
+            student = valid_students.get(sid_str)
+            entry = {"student_id": sid_str, "success": False}
+
+            if not student:
+                entry["error"] = "Student does not belong to the selected batch."
+                results.append(entry)
+                continue
+
+            last_attempt = (
+                CourseRetake.objects.filter(
+                    student=student,
+                    failed_course=course,
+                )
+                .aggregate(max_attempt=Max("attempt_number"))
+                .get("max_attempt")
+                or 0
+            )
+            next_attempt = last_attempt + 1
+            if next_attempt > 3:
+                entry["error"] = "Already at max retake attempts (3) for this course."
+                results.append(entry)
+                continue
+
+            existing_active = CourseRetake.objects.filter(
+                student=student,
+                failed_course=course,
+                is_active=True,
+                status="ongoing",
+            ).exists()
+            if existing_active:
+                entry["error"] = "An active ongoing retake already exists for this student and course."
+                results.append(entry)
+                continue
+
+            try:
+                retake = CourseRetake.objects.create(
+                    student=student,
+                    failed_course=course,
+                    failed_batch=batch,
+                    current_batch=batch,
+                    retake_teacher=teacher,
+                    attempt_number=next_attempt,
+                    status="ongoing",
+                    is_active=True,
+                )
+                if next_attempt > 1:
+                    CourseRetake.objects.filter(
+                        student=student,
+                        failed_course=course,
+                        is_active=True,
+                    ).exclude(pk=retake.pk).update(is_active=False)
+                entry["success"] = True
+                entry["retake_id"] = str(retake.pk)
+                entry["attempt_number"] = next_attempt
+            except (ValidationError, Exception) as exc:
+                msg = str(exc)
+                if not msg and hasattr(exc, "message_dict"):
+                    parts = []
+                    for key, msgs in exc.message_dict.items():
+                        for m in msgs:
+                            parts.append(f"{key}: {m}" if key != "__all__" else m)
+                    msg = "; ".join(parts)
+                entry["error"] = msg or "Failed to create retake record."
+
+            results.append(entry)
+
+        per_student = PerStudentRetakeResultSerializer(results, many=True).data
+        total = len(results)
+        succeeded = sum(1 for r in results if r.get("success"))
+        response_payload = {
+            "results": per_student,
+            "summary": {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": total - succeeded,
+            },
+        }
+        return Response(response_payload, status=status.HTTP_200_OK)

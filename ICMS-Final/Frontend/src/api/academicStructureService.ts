@@ -28,7 +28,7 @@ export interface Course {
   program_id: string;
   semester_number?: number;
   program_name?: string;
-  parent_course_id?: string;
+  parent_course?: string | null;
 }
 
 const academicStructureService = {

@@ -5,7 +5,7 @@ from django.urls import include, path
 # Do NOT import from `core.urls` as a module.
 
 from core.views.batch import AllBatchesView
-from core.views.promotion import PendingTransfersView, EligibleBatchesView, TransferStudentView
+from core.views.promotion import PendingTransfersView, EligibleBatchesView, TransferStudentView, FailFrozenStudentView
 from core.views.user import UserListCreateView
 
 urlpatterns = [
@@ -22,6 +22,7 @@ urlpatterns = [
     path('students/pending-transfers/', PendingTransfersView.as_view()),
     path('students/<uuid:pk>/eligible-batches/', EligibleBatchesView.as_view()),
     path('students/<uuid:pk>/transfer/', TransferStudentView.as_view()),
+    path('students/<uuid:pk>/fail-drop/', FailFrozenStudentView.as_view()),
 
     # Your core.urls.user mounts list at '' (not 'users/'), but UMI_backend/UMI_backend/urls.py mounts this module at 'api/'.
     # So the correct route becomes: /api/users/ -> '' path in core/urls/user.py.

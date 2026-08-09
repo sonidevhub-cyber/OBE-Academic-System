@@ -44,6 +44,7 @@ interface Student {
   registration_number?: string;
   id?: string;
   name: string;
+  full_name?: string;
   email?: string;
   user_email?: string;
   phone?: string;
@@ -54,11 +55,15 @@ interface Student {
   batch_id?: string;
   program_id?: string;
   batch_name?: string;
+  program_name?: string;
+  program_code?: string;
   father_guardian?: string;
   image?: string;
   attendance_percentage?: number;
   gpa?: number;
   performance_notes?: string;
+  current_semester?: number;
+  promotion_status?: string;
 }
 
 interface StudentManagementProps {
@@ -91,18 +96,38 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
       setPrograms(progRes.data);
       
       const batchRes = await batchService.getAllBatches();
-      setBatches(batchRes.data as any);
+      const batchList = (batchRes.data || []) as Batch[];
+      setBatches(batchList);
+
+      if (!selectedBatchId && batchList.length > 0) {
+        const latestBatch = [...batchList].sort((a, b) => {
+          const yearDiff = Number(b.start_year || 0) - Number(a.start_year || 0);
+          if (yearDiff !== 0) return yearDiff;
+          return String(b.name || '').localeCompare(String(a.name || ''));
+        })[0];
+
+        setSelectedProgramId(latestBatch.program_id || (latestBatch.program?.id ? String(latestBatch.program.id) : null));
+        setSelectedBatchId(latestBatch.id);
+      }
     } catch (err) {
       console.error('Failed to fetch programs/batches', err);
     }
-  }, []);
+  }, [selectedBatchId]);
 
   const fetchStudents = useCallback(async (page: number = 1) => {
+    if (!selectedBatchId) {
+      setStudents([]);
+      setTotalPages(1);
+      setTotalCount(0);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const filters: any = { page, page_size: 20 };
-      if (selectedBatchId) filters.batch = selectedBatchId;
+      const filters: any = { page, page_size: 100, batch: selectedBatchId, role: 'student' };
+      if (searchTerm) filters.search = searchTerm;
       
       const response = await studentService.getAllStudents(filters);
       
@@ -127,14 +152,23 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
     } finally {
       setLoading(false);
     }
-  }, [selectedBatchId]);
+  }, [selectedBatchId, searchTerm]);
+
+  useEffect(() => {
+    if (activeTab === 'students') {
+      fetchProgramsAndBatches();
+    }
+  }, [activeTab, fetchProgramsAndBatches]);
 
   useEffect(() => {
     if (activeTab === 'students') {
       fetchStudents(currentPage);
-      fetchProgramsAndBatches();
     }
-  }, [activeTab, currentPage, fetchStudents, fetchProgramsAndBatches]);
+  }, [activeTab, currentPage, fetchStudents]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedBatchId, searchTerm]);
 
   const handleDeleteStudent = useCallback(async (id: string | number) => {
     if (window.confirm('Are you sure you want to delete this student?')) {
@@ -147,24 +181,42 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
     }
   }, []);
 
+  const filteredBatches = useMemo(() => {
+    return batches
+      .filter(b => !selectedProgramId || b.program_id === selectedProgramId || String((b as any).program?.id || '') === selectedProgramId)
+      .sort((a, b) => {
+        const yearDiff = Number(b.start_year || 0) - Number(a.start_year || 0);
+        if (yearDiff !== 0) return yearDiff;
+        return String(b.name || '').localeCompare(String(a.name || ''));
+      });
+  }, [batches, selectedProgramId]);
+
+  const selectedBatch = useMemo(
+    () => batches.find(b => b.id === selectedBatchId) || null,
+    [batches, selectedBatchId]
+  );
+
   const filteredStudents = useMemo(() => {
-    if (!Array.isArray(students)) return [];
+    if (!selectedBatchId || !Array.isArray(students)) return [];
     
     // Only show active students (not alumni) in the Student Management tab
     let filtered = students.filter(student => student.role === 'student' || !student.role);
     
     if (selectedProgramId) {
-      filtered = filtered.filter(student => student.program_id === selectedProgramId);
+      filtered = filtered.filter(student => !student.program_id || String(student.program_id) === String(selectedProgramId));
     }
 
     if (selectedBatchId) {
-      filtered = filtered.filter(student => student.batch_id === selectedBatchId);
+      filtered = filtered.filter(student => !student.batch_id || String(student.batch_id) === String(selectedBatchId));
     }
     
     if (searchTerm) {
       filtered = filtered.filter(student =>
-        student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (student.name || student.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (student.registration_number?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (student.custom_id?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
         (student.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (student.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
         (student.semester?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false)
       );
     }
@@ -189,8 +241,12 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           <select
             value={selectedProgramId || ''}
             onChange={(e) => {
-              setSelectedProgramId(e.target.value || null);
-              setSelectedBatchId(null); // Reset batch when program changes
+              const nextProgramId = e.target.value || null;
+              setSelectedProgramId(nextProgramId);
+              const nextBatch = [...batches]
+                .filter(b => !nextProgramId || b.program_id === nextProgramId || String((b as any).program?.id || '') === nextProgramId)
+                .sort((a, b) => Number(b.start_year || 0) - Number(a.start_year || 0))[0];
+              setSelectedBatchId(nextBatch?.id || null);
             }}
             className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
@@ -204,13 +260,12 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
             onChange={(e) => setSelectedBatchId(e.target.value || null)}
             className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="">All Batches</option>
-            {batches
-              .filter(b => !selectedProgramId || (b as any).program_id === selectedProgramId)
-              .map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))
-            }
+            <option value="">Select Batch</option>
+            {filteredBatches.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.name}{b.session_type ? ` (${b.session_type})` : ''}
+              </option>
+            ))}
           </select>
           <button
             onClick={() => {
@@ -250,7 +305,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-purple-600 mb-1">
-                {selectedBatchId ? `Batch: ${batches.find(b => b.id === selectedBatchId)?.name}` : selectedProgramId ? `Program: ${programs.find(p => p.id === selectedProgramId)?.code}` : 'Filtered Results'}
+                {selectedBatch ? `Batch: ${selectedBatch.name}` : 'Selected Batch'}
               </p>
               <p className="text-3xl font-bold text-purple-900">{filteredStudents.length}</p>
             </div>
@@ -267,7 +322,9 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
             <div>
               <p className="text-sm font-medium text-amber-600 mb-1">Average GPA</p>
               <p className="text-3xl font-bold text-amber-900">
-                {students.length > 0 ? (students.reduce((sum, s) => sum + (s.gpa || 0), 0) / students.length).toFixed(1) : '0.0'}
+                {filteredStudents.some(s => typeof s.gpa === 'number')
+                  ? (filteredStudents.reduce((sum, s) => sum + (s.gpa || 0), 0) / filteredStudents.filter(s => typeof s.gpa === 'number').length).toFixed(1)
+                  : 'N/A'}
               </p>
             </div>
             <div className="p-3 bg-amber-500 rounded-full shadow-lg">
@@ -282,11 +339,21 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
       <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-800">
-            {filteredStudents.length} Students
+            {selectedBatch ? `${selectedBatch.name} Students` : 'Select a batch to view students'}
           </h3>
         </div>
 
-        {loading ? (
+        {!selectedBatchId ? (
+          <div className="text-center py-16 px-6">
+            <div className="mx-auto h-14 w-14 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+              <svg className="h-7 w-7 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M5 19h14a2 2 0 002-2v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p className="text-gray-800 font-semibold">Please select a batch first</p>
+            <p className="text-sm text-gray-500 mt-1">Students are shown only for the selected batch.</p>
+          </div>
+        ) : loading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
           </div>
@@ -310,15 +377,15 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
                           {student.image ? (
-                            <img className="h-10 w-10 rounded-full object-cover" src={getFullImageUrl(student.image)} alt={student.name} />
+                            <img className="h-10 w-10 rounded-full object-cover" src={getFullImageUrl(student.image)} alt={student.name || student.full_name || 'Student'} />
                           ) : (
                             <div className="h-10 w-10 rounded-full bg-indigo-500 flex items-center justify-center">
-                              <span className="text-white font-medium text-sm">{student.name.charAt(0)}</span>
+                              <span className="text-white font-medium text-sm">{(student.name || student.full_name || 'S').charAt(0)}</span>
                             </div>
                           )}
                         </div>
                         <div className="ml-4 min-w-0 flex-1">
-                          <div className="text-sm font-medium text-gray-900 truncate">{student.name}</div>
+                          <div className="text-sm font-medium text-gray-900 truncate">{student.name || student.full_name}</div>
                           <div className="text-sm text-gray-500 truncate">ID: {student.registration_number || student.custom_id || student.student_id}</div>
                         </div>
                       </div>
@@ -340,8 +407,8 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                       <div className="text-sm text-gray-500 truncate">{student.phone}</div>
                     </td>
                     <td className="px-4 py-4">
-                      <div className="text-sm text-gray-900">GPA: {student.gpa?.toFixed(2) || 'N/A'}</div>
-                      <div className="text-sm text-gray-500">Att: {student.attendance_percentage?.toFixed(1) || 'N/A'}%</div>
+                      <div className="text-sm text-gray-900">Semester: {student.current_semester || selectedBatch?.current_semester || 'N/A'}</div>
+                      <div className="text-sm text-gray-500">Status: {student.promotion_status || 'Active'}</div>
                     </td>
                     <td className="px-4 py-4 text-sm font-medium">
                       <div className="flex items-center space-x-2">
@@ -395,7 +462,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
         {totalPages > 1 && (
           <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
             <div className="text-sm text-gray-500">
-              Showing {((currentPage - 1) * 20) + 1} to {Math.min(currentPage * 20, totalCount)} of {totalCount} students
+              Showing {((currentPage - 1) * 100) + 1} to {Math.min(currentPage * 100, totalCount)} of {totalCount} students
             </div>
             <div className="flex space-x-2">
               <button
@@ -444,7 +511,7 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
           </div>
         )}
 
-        {filteredStudents.length === 0 && !loading && (
+        {selectedBatchId && filteredStudents.length === 0 && !loading && (
           <div className="text-center py-12">
             <p className="text-gray-500">No students found</p>
           </div>

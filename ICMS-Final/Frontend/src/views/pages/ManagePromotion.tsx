@@ -14,11 +14,12 @@ import {
   History,
   MoveHorizontal
 } from 'lucide-react';
-import promotionService, { StudentPromotion, EligibleBatch } from '../../api/promotionService';
+import promotionService, { DropoutRiskFlag, StudentPromotion, EligibleBatch } from '../../api/promotionService';
 import batchService, { Batch } from '../../api/batchService';
 import academicStructureService, { Program } from '../../api/academicStructureService';
 import { toast } from 'react-toastify';
 import TransferModal from '../../components/sac/TransferModal';
+import DropoutRiskBadge from '../../components/sac/DropoutRiskBadge';
 
 interface ManagePromotionProps {
   programId?: string;
@@ -41,12 +42,15 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [riskFlagsByStudent, setRiskFlagsByStudent] = useState<Record<string, DropoutRiskFlag[]>>({});
 
   // Modals
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [showConfirmAllModal, setShowConfirmAllModal] = useState(false);
   const [studentToRepeat, setStudentToRepeat] = useState<StudentPromotion | null>(null);
   const [studentToTransfer, setStudentToTransfer] = useState<StudentPromotion | null>(null);
+  const [studentToFail, setStudentToFail] = useState<StudentPromotion | null>(null);
+  const [failGpa, setFailGpa] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!programId || !batchId) return;
@@ -69,9 +73,29 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
     }
   }, [programId, batchId]);
 
+  const fetchRiskFlags = useCallback(async () => {
+    if (!batchId) return;
+
+    try {
+      const res = await promotionService.getRiskFlags(batchId);
+      const lookup = res.data.reduce<Record<string, DropoutRiskFlag[]>>((acc, item) => {
+        acc[item.student_id] = item.flags || [];
+        return acc;
+      }, {});
+      setRiskFlagsByStudent(lookup);
+    } catch (err) {
+      console.error('Failed to load dropout risk flags:', err);
+      setRiskFlagsByStudent({});
+    }
+  }, [batchId]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    fetchRiskFlags();
+  }, [fetchRiskFlags]);
 
   const handlePromoteAll = async () => {
     if (!programId || !batchId) return;
@@ -112,7 +136,36 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
       setStudentToRepeat(null);
       fetchData();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to mark as repeat');
+      toast.error(err.response?.data?.error || 'Failed to move to Freeze');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleFailDrop = async () => {
+    if (!studentToFail) return;
+
+    const gpa = Number(failGpa);
+    if (!Number.isFinite(gpa)) {
+      toast.error('Enter a valid GPA');
+      return;
+    }
+
+    if (gpa >= 2.01) {
+      toast.error('Only GPA below 2.01 can be failed/dropped');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await promotionService.failDropStudent(studentToFail.id, gpa);
+      toast.success(res.data.message || 'Student failed and dropped');
+      setStudentToFail(null);
+      setFailGpa('');
+      fetchData();
+      fetchRiskFlags();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to drop student');
     } finally {
       setActionLoading(false);
     }
@@ -127,7 +180,7 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
     );
   }
 
-  const allNone = students.every(s => s.promotion_status === 'none' || s.promotion_status === 'confirmed' || s.promotion_status === 'repeat');
+  const allNone = students.every(s => s.promotion_status === 'none' || s.promotion_status === 'confirmed' || s.promotion_status === 'repeat' || s.promotion_status === 'freeze');
   const hasProvisional = students.some(s => s.promotion_status === 'provisional');
 
   return (
@@ -155,7 +208,7 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
             <RefreshCw className="w-8 h-8 text-indigo-600" />
             <span>Manage Promotion</span>
           </h1>
-          <p className="text-gray-500 mt-1">Handle provisional promotions and repeats for {batch?.name}.</p>
+          <p className="text-gray-500 mt-1">Handle provisional promotions and frozen repeat cases for {batch?.name}.</p>
         </div>
         <div className="flex gap-3">
           {allNone && !hasProvisional && batch && batch.current_semester < (program?.total_semesters || 8) && (
@@ -240,14 +293,23 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
                 <td colSpan={6} className="px-6 py-20 text-center text-gray-400 italic">No students found in this batch.</td>
               </tr>
             ) : (
-              students.map((student) => (
+              students.map((student) => {
+                const dropoutRiskFlags = riskFlagsByStudent[student.id] || [];
+                const hasDropoutRisk = dropoutRiskFlags.length > 0;
+
+                return (
                 <tr key={student.id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-6 py-5">
                     <span className="text-sm font-bold text-indigo-600">
                       {student.custom_id || student.id.slice(0, 8)}
                     </span>
                   </td>
-                  <td className="px-6 py-5 font-bold text-gray-900">{student.full_name}</td>
+                  <td className="px-6 py-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-gray-900">{student.full_name}</span>
+                      <DropoutRiskBadge flags={dropoutRiskFlags} />
+                    </div>
+                  </td>
                   <td className="px-6 py-5 text-gray-500 text-sm">{student.email}</td>
                   <td className="px-6 py-5 text-center">
                     <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
@@ -258,26 +320,39 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
                     <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase border ${
                       student.promotion_status === 'provisional' ? 'bg-amber-50 text-amber-600 border-amber-100' :
                       student.promotion_status === 'confirmed' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                      student.promotion_status === 'repeat' ? 'bg-red-50 text-red-600 border-red-100' :
+                      student.promotion_status === 'repeat' || student.promotion_status === 'freeze' ? 'bg-red-50 text-red-600 border-red-100' :
                       'bg-gray-100 text-gray-500 border-gray-200'
                     }`}>
-                      {student.promotion_status === 'none' ? 'Not Promoted' : student.promotion_status}
+                      {student.promotion_status === 'none' ? 'Not Promoted' : student.promotion_status === 'freeze' ? 'Freeze' : student.promotion_status}
                     </span>
                   </td>
                   <td className="px-6 py-5 text-right">
                     <div className="flex justify-end gap-2">
                       {student.promotion_status === 'provisional' && (
-                        <button 
-                          onClick={() => setStudentToRepeat(student)}
-                          className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-all"
-                        >
-                          Mark as Repeat
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => setStudentToRepeat(student)}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition-all"
+                          >
+                            Move to Freeze
+                          </button>
+                          {hasDropoutRisk && (
+                            <button 
+                              onClick={() => {
+                                setStudentToFail(student);
+                                setFailGpa('');
+                              }}
+                              className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-all"
+                            >
+                              Fail Drop
+                            </button>
+                          )}
+                        </>
                       )}
-                      {student.promotion_status === 'repeat' && (
+                      {(student.promotion_status === 'repeat' || student.promotion_status === 'freeze') && (
                         <button 
                           onClick={() => setStudentToTransfer(student)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-all ml-auto"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-100 transition-all ml-auto"
                         >
                           <MoveHorizontal className="w-3.5 h-3.5" />
                           <span>Transfer</span>
@@ -287,7 +362,8 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
                     </div>
                   </td>
                 </tr>
-              ))
+              );
+              })
             )}
           </tbody>
         </table>
@@ -309,7 +385,7 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
                 All <span className="font-bold text-gray-900">{students.length}</span> students will be moved to <span className="font-bold text-indigo-600">Semester {(batch?.current_semester || 0) + 1}</span> provisionally.
               </p>
               <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
-                <p className="text-sm text-emerald-800 font-medium">You can mark failed students as Repeat after external results arrive.</p>
+                <p className="text-sm text-emerald-800 font-medium">You can move failed students to Freeze after external results arrive.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setShowPromoteModal(false)} className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all">Cancel</button>
@@ -341,7 +417,7 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
             <div className="p-6 space-y-4">
               <p className="text-gray-600">All provisionally promoted students will be permanently confirmed.</p>
               <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                <p className="text-sm text-blue-800 font-medium">Make sure you have checked external results and marked failed students as Repeat first.</p>
+                <p className="text-sm text-blue-800 font-medium">Make sure you have checked external results and moved failed students to Freeze first.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setShowConfirmAllModal(false)} className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all">Cancel</button>
@@ -366,16 +442,16 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
             <div className="p-6 border-b border-gray-100 flex justify-between items-center">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-red-600" />
-                Mark as Repeat
+                Move to Freeze
               </h2>
               <button onClick={() => setStudentToRepeat(null)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-gray-600">
-                Mark <span className="font-bold text-gray-900">{studentToRepeat.full_name}</span> as Repeat?
+                Move <span className="font-bold text-gray-900">{studentToRepeat.full_name}</span> to Freeze?
               </p>
               <div className="p-4 bg-red-50 rounded-xl border border-red-100">
-                <p className="text-sm text-red-800 font-medium">They will be moved back to Semester {(studentToRepeat.current_semester || 0) - 1}. This is based on external result.</p>
+                <p className="text-sm text-red-800 font-medium">They will be frozen in Semester {(studentToRepeat.current_semester || 0) - 1} and appear in the Freeze tab.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setStudentToRepeat(null)} className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all">Cancel</button>
@@ -385,7 +461,54 @@ const ManagePromotion: React.FC<ManagePromotionProps> = ({
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-100 font-bold disabled:opacity-50"
                 >
                   {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
-                  <span>Mark as Repeat</span>
+                  <span>Move to Freeze</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fail Drop Modal */}
+      {studentToFail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+                Fail and Drop
+              </h2>
+              <button onClick={() => setStudentToFail(null)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-gray-600">
+                Drop <span className="font-bold text-gray-900">{studentToFail.full_name}</span> from promotion?
+              </p>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">GPA</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="4"
+                  step="0.01"
+                  value={failGpa}
+                  onChange={(event) => setFailGpa(event.target.value)}
+                  placeholder="Must be below 2.01"
+                  className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none transition-all"
+                />
+              </div>
+              <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                <p className="text-sm text-red-800 font-medium">This will deactivate the student only if GPA is below 2.01.</p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setStudentToFail(null)} className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-600 font-bold hover:bg-gray-50 transition-all">Cancel</button>
+                <button 
+                  onClick={handleFailDrop}
+                  disabled={actionLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-100 font-bold disabled:opacity-50"
+                >
+                  {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
+                  <span>Fail Drop</span>
                 </button>
               </div>
             </div>
