@@ -4,11 +4,11 @@ import { motion } from "framer-motion";
 import { FaTasks, FaUsers } from "react-icons/fa";
 import { toast } from "react-toastify";
 import { InstructorCourse } from "../../api/instructorCourseService";
-// import PresentationRubrics from "./PresentationRubrics";
 import CQI from "./CQI";
+// Nayi alag file import karein jo aapne banai hai edit/history ke liye
+import EditAssessmentView from "./EditAssessmentView";
 
 const TaskIcon = FaTasks as unknown as React.FC<any>;
-const UserIcon = FaUsers as unknown as React.FC<any>;
 
 type Student = {
   student_id: string;
@@ -24,9 +24,10 @@ type CLO = {
 };
 
 type Question = {
-  clo: string;
+  id?: string;
+  clo: string | null;
   description: string;
-  level: string;
+  level: string | null;
   kpi: number;
   marks: number;
 };
@@ -70,9 +71,19 @@ const BLOOM_DISPLAY_MAP: Record<string, string> = {
   K6: "C6 - Creating",
 };
 
-const formatBloomLevel = (level: string) => {
+const formatBloomLevel = (level: string | null) => {
+  if (!level) return "-";
   const code = level?.trim().split(" ")[0];
   return BLOOM_DISPLAY_MAP[code] || level;
+};
+
+const ASSESSMENT_LIMITS: Record<string, number> = {
+  quiz: 3,
+  assignment: 3,
+  presentation: 1,
+  midterm: 1,
+  final: 1,
+  sessional: 1,
 };
 
 interface Props {
@@ -86,6 +97,7 @@ interface Props {
   historySemesterId?: string | number;
   retakeStudentId?: string;
   retakeId?: string;
+  initialEditAssessment?: any; 
 }
 
 const ManageClass: React.FC<Props> = ({
@@ -99,6 +111,7 @@ const ManageClass: React.FC<Props> = ({
   historySemesterId,
   retakeStudentId,
   retakeId,
+  initialEditAssessment, 
 }) => {
   const isRetakeMode = Boolean(retakeStudentId || retakeId);
   const effectiveCurriculumVersionId = String(
@@ -106,6 +119,32 @@ const ManageClass: React.FC<Props> = ({
     selectedCourse?.curriculum_version_id ??
     ''
   );
+  const courseType = String(
+  selectedCourse?.course_type || ""
+).toLowerCase();
+
+const isLabCourse = courseType === "lab";
+console.log("Selected Course:", selectedCourse);
+console.log("Course Type:", selectedCourse?.course_type);
+console.log("Is Lab:", isLabCourse);
+  // EDIT STATE: Srif yahi ek dafa declare karna hai
+  const [activeEditAssessmentId, setActiveEditAssessmentId] = useState<string | null>(
+    initialEditAssessment ? String(initialEditAssessment.id || initialEditAssessment) : null
+  );
+  const assessmentLimits = isLabCourse
+  ? {
+      project: 1,
+      midterm: 1,
+      final: 1,
+    }
+  : ASSESSMENT_LIMITS;
+
+  useEffect(() => {
+    if (initialEditAssessment) {
+      const assessmentId = initialEditAssessment.id || initialEditAssessment;
+      setActiveEditAssessmentId(String(assessmentId));
+    }
+  }, [initialEditAssessment]);
 
   const [type, setType] = useState("");
   const [title, setTitle] = useState("");
@@ -121,10 +160,21 @@ const ManageClass: React.FC<Props> = ({
 
   const [students, setStudents] = useState<Student[]>([]);
   const [clos, setClos] = useState<CLO[]>([]);
-  const [marks, setMarks] = useState<{ [key: string]: number }>({});
+  const [marks, setMarks] = useState<{ [key: string]: number | string }>({});
   const [checkedCQI, setCheckedCQI] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [assessmentHistory, setAssessmentHistory] = useState<AssessmentHistoryItem[]>([]);
+
+  const [assessmentCounts, setAssessmentCounts] = useState<Record<string, number>>({
+    quiz: 0,
+    assignment: 0,
+    presentation: 0,
+    midterm: 0,
+    final: 0,
+    sessional: 0,
+    project: 0,
+  });
+
   const [workflow, setWorkflow] = useState<CourseWorkflowState>({
     internals_locked: Boolean(selectedCourse?.internals_locked),
     internal_complete_awaiting_final: Boolean(selectedCourse?.internal_complete_awaiting_final),
@@ -142,17 +192,112 @@ const ManageClass: React.FC<Props> = ({
       ? canCreateFinal && type === "final"
       : Boolean(workflow.permitted_actions?.can_create_assessments ?? true)
   );
-  // ================= TYPE RESET =================
-  const handleTypeChange = (value: string) => {
-    setType(value);
+
+  const resetForm = () => {
+    setTitle("");
+    setType("");
+    setTotalMarks("");
+    setDate("");
     setQuestions([{ clo: "", description: "", level: "", kpi: 0, marks: 0 }]);
     setMarks({});
+  };
+
+  const loadAssessmentCounts = async () => {
+    if (!courseId || !batchId || !semesterNumber) return;
+
+    try {
+      const res = await api.get("assessments/history/", {
+        params: {
+          course: courseId,
+          batch: batchId,
+          semester: semesterNumber,
+        },
+      });
+
+      const assessments = Array.isArray(res.data) ? res.data : [];
+
+      const counts = {
+        quiz: 0,
+        assignment: 0,
+        presentation: 0,
+        midterm: 0,
+        final: 0,
+        sessional: 0,
+        project: 0,
+      };
+
+      assessments.forEach((assessment: any) => {
+        const assessmentType = String(assessment.type || "").toLowerCase();
+        if (assessmentType in counts) {
+          counts[assessmentType as keyof typeof counts]++;
+        }
+      });
+
+      setAssessmentCounts(counts);
+    } catch (error) {
+      console.error("Failed to load assessment counts:", error);
+    }
+  };
+
+  useEffect(() => {
+    loadAssessmentCounts();
+  }, [courseId, batchId, semesterNumber]);
+
+const handleTypeChange = (value: string) => {
+  const limit = isLabCourse
+    ? assessmentLimits[value as keyof typeof assessmentLimits]
+    : ASSESSMENT_LIMITS[value];
+
+  if (limit !== undefined && assessmentCounts[value] >= limit) {
+    toast.error(
+      `${value === "sessional" ? "Student Performance" : value} can only be created ${limit} time${
+        limit > 1 ? "s" : ""
+      }.`
+    );
+    return;
+  }
+
+  setType(value);
+  setMarks({});
+
+  if (value === "sessional") {
+    setQuestions([
+      {
+        clo: null,
+        description: "Student Performance Marks",
+        level: null,
+        kpi: 0,
+        marks: Number(totalMarks) || 0,
+      },
+    ]);
+  } else {
+    // Project, Midterm, Final, Quiz etc.
+    // sab mein CLO mapping same rahegi
+    setQuestions([
+      {
+        clo: "",
+        description: "",
+        level: "",
+        kpi: 0,
+        marks: 0,
+      },
+    ]);
+  }
+};
+
+  const handleTotalMarksChange = (value: string) => {
+    setTotalMarks(value);
+    if (type === "sessional") {
+      setQuestions([
+        { clo: null, description: "Student Performance Marks", level: null, kpi: 0, marks: Number(value) || 0 }
+      ]);
+    }
   };
 
   const loadWorkflow = async () => {
     if (!courseId || !batchId) return;
     try {
-      const res = await api.get("/assessments/course-session-status/", {
+      const res = await api.get("assessments/course-session-status/", {
         params: {
           course: courseId,
           batch: batchId,
@@ -188,8 +333,8 @@ const ManageClass: React.FC<Props> = ({
 
     try {
       setLockingInternals(true);
-      await api.post(`/assessments/course-sessions/${workflow.course_session_id}/lock-internals/`);
-      toast.success("Internal assessments locked. Provisional reports refreshed.");
+      await api.post(`assessments/course-sessions/${workflow.course_session_id}/lock-internals/`);
+      toast.success("Internal assessments locked.");
       await loadWorkflow();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Failed to lock internal assessments.");
@@ -198,30 +343,21 @@ const ManageClass: React.FC<Props> = ({
     }
   };
 
-  // ================= FETCH CLO =================
   useEffect(() => {
-    if (!courseId || !effectiveCurriculumVersionId) {
-      console.log("Course ID or curriculum version ID missing for CLO fetch", {
-        courseId,
-        effectiveCurriculumVersionId,
-      });
-      return;
-    }
+    if (!courseId || !effectiveCurriculumVersionId) return;
 
     const fetchClos = async () => {
       try {
-        const res = await api.get(`/obe/courses/${courseId}/versions/${effectiveCurriculumVersionId}/clos/`);
+        const res = await api.get(`obe/courses/${courseId}/versions/${effectiveCurriculumVersionId}/clos/`);
         const versionClos = Array.isArray(res.data) ? res.data : [];
 
         if (versionClos.length > 0) {
-          console.log("CLO API response (version-specific):", versionClos);
           setClos(versionClos);
           return;
         }
 
-        const fallbackRes = await api.get(`/obe/courses/${courseId}/clo-ga-matrix/`);
+        const fallbackRes = await api.get(`obe/courses/${courseId}/clo-ga-matrix/`);
         const fallbackClos = Array.isArray(fallbackRes.data?.clos) ? fallbackRes.data.clos : [];
-        console.log("CLO API response (course fallback):", fallbackClos);
         setClos(fallbackClos);
       } catch (err) {
         console.error("Failed to fetch CLOs:", err);
@@ -232,11 +368,10 @@ const ManageClass: React.FC<Props> = ({
     fetchClos();
   }, [courseId, effectiveCurriculumVersionId]);
 
-  // ================= FETCH STUDENTS =================
   useEffect(() => {
     if (!batchId) return;
 
-    api.get(`/students/?batch=${batchId}`)
+    api.get(`students/?batch=${batchId}`)
       .then(res => {
         const data = res.data;
         let studentList = [];
@@ -262,166 +397,95 @@ const ManageClass: React.FC<Props> = ({
       })
       .catch(() => setStudents([]));
   }, [batchId, retakeStudentId]);
-  // 🔥 CHECK REJECTED CQI
-  useEffect(() => {
-  if (!courseId || !batchId || !semesterNumber) {
-    console.log("Missing params:", { courseId, batchId, semesterNumber });
-    return;
-  }
-
-  api.get(`/assessments/cqi/check-status/`, {
-    params: {
-      course: courseId,
-      batch: batchId,
-      semester: semesterNumber
-    }
-  })
-  .then(res => {
-
-    const items = res.data.items || [];
-
-    // 🔥 Check agar koi bhi rejected hai
-    const rejected = items.filter((i: any) => i.status === "rejected");
-
-    if (rejected.length > 0) {
-      setShowCQI(true);
-      toast.error("Some CQIs rejected. Please update.");
-    }
-
-    setCheckedCQI(true);
-
-  })
-  .catch(() => {});
-}, [courseId, batchId, semesterNumber]);
-useEffect(() => {
-
-    if (!courseId || clos.length === 0) return;
-
-    const fetchPreviousCQI = async () => {
-
-        const list: any[] = [];
-
-        for (const clo of clos) {
-
-            try {
-
-                const res = await api.get(
-                    "/assessments/previous-cqi/",
-                    {
-                        params: {
-                            course: courseId,
-                            clo: clo.id
-                        }
-                    }
-                );
-
-                if (res.data.show_previous_cqi) {
-                    list.push(res.data);
-                }
-
-            } catch (err) {}
-
-        }
-
-        setPreviousCQI(list);
-
-    };
-
-    fetchPreviousCQI();
-
-}, [courseId, clos]);
 
   const loadAssessmentHistory = async () => {
-      if (!isRetakeMode || !retakeStudentId || !courseId || !batchId || !semesterNumber) {
-        setAssessmentHistory([]);
-        return;
+    if (!isRetakeMode || !retakeStudentId || !courseId || !batchId || !semesterNumber) {
+      setAssessmentHistory([]);
+      return;
+    }
+
+    try {
+      setHistoryLoading(true);
+      const params: any = {};
+
+      if (retakeId) {
+        params.retake_id = retakeId;
+      } else {
+        const preferredHistoryBatchId = historyBatchId || batchId;
+        const preferredHistorySemesterNumber = String(historySemesterId || semesterNumber || '');
+        params.course = courseId;
+        params.batch = preferredHistoryBatchId;
+        params.semester = preferredHistorySemesterNumber;
       }
 
-      try {
-        setHistoryLoading(true);
+      const historyResponse = await api.get('assessments/history/', { params });
+      let assessmentRows = Array.isArray(historyResponse.data) ? historyResponse.data : [];
 
-        const params: any = {};
-
-        if (retakeId) {
-          params.retake_id = retakeId;
-        } else {
-          const preferredHistoryBatchId = historyBatchId || batchId;
-          const preferredHistorySemesterNumber = String(historySemesterId || semesterNumber || '');
-          params.course = courseId;
-          params.batch = preferredHistoryBatchId;
-          params.semester = preferredHistorySemesterNumber;
-        }
-
-        const historyResponse = await api.get('/assessments/history/', { params });
-
-        let assessmentRows = Array.isArray(historyResponse.data) ? historyResponse.data : [];
-
-        if (assessmentRows.length === 0) {
-          const fallbackHistoryResponse = await api.get('/assessments/history/', {
-            params: {
-              course: courseId,
-              batch: batchId,
-              semester: semesterNumber,
-            },
-          });
-          assessmentRows = Array.isArray(fallbackHistoryResponse.data) ? fallbackHistoryResponse.data : [];
-        }
-
-        const detailedHistory = await Promise.all(
-          assessmentRows.map(async (assessment: any) => {
-            try {
-              const marksResponse = await api.get(`/assessments/history/${assessment.id}/`);
-              const studentRows = Array.isArray(marksResponse.data?.students) ? marksResponse.data.students : [];
-              const matchedStudent = studentRows.find((row: any) => String(row.student_id || '') === String(retakeStudentId));
-
-              if (!matchedStudent) return null;
-
-              return {
-                id: String(assessment.id),
-                title: assessment.title,
-                type: assessment.type,
-                date: assessment.date,
-                total_marks: Number(assessment.total_marks || 0),
-                obtained: Number(matchedStudent.total || 0),
-                questions_count: Array.isArray(matchedStudent.questions) ? matchedStudent.questions.length : 0,
-                is_finalized: Boolean(assessment.is_finalized),
-              } as AssessmentHistoryItem;
-            } catch (error) {
-              console.error('Failed to load assessment history detail', error);
-              return null;
-            }
-          })
-        );
-
-        setAssessmentHistory(detailedHistory.filter(Boolean) as AssessmentHistoryItem[]);
-      } catch (error) {
-        console.error('Failed to load assessment history', error);
-        setAssessmentHistory([]);
-      } finally {
-        setHistoryLoading(false);
+      if (assessmentRows.length === 0) {
+        const fallbackHistoryResponse = await api.get('assessments/history/', {
+          params: {
+            course: courseId,
+            batch: batchId,
+            semester: semesterNumber,
+          },
+        });
+        assessmentRows = Array.isArray(fallbackHistoryResponse.data) ? fallbackHistoryResponse.data : [];
       }
-    };
+
+      const detailedHistory = await Promise.all(
+        assessmentRows.map(async (assessment: any) => {
+          try {
+            const marksResponse = await api.get(`assessments/history/${assessment.id}/`);
+            const studentRows = Array.isArray(marksResponse.data?.students) ? marksResponse.data.students : [];
+            const matchedStudent = studentRows.find((row: any) => String(row.student_id || row.id || '') === String(retakeStudentId));
+
+            if (!matchedStudent) return null;
+
+            return {
+              id: String(assessment.id),
+              title: assessment.title,
+              type: assessment.type,
+              date: assessment.date,
+              total_marks: Number(assessment.total_marks || 0),
+              obtained: Number(matchedStudent.total || matchedStudent.obtained_marks || 0),
+              questions_count: Array.isArray(matchedStudent.questions) ? matchedStudent.questions.length : 0,
+              is_finalized: Boolean(assessment.is_finalized),
+            } as AssessmentHistoryItem;
+          } catch (error) {
+            console.error('Failed to load assessment history detail', error);
+            return null;
+          }
+        })
+      );
+
+      setAssessmentHistory(detailedHistory.filter(Boolean) as AssessmentHistoryItem[]);
+    } catch (error) {
+      console.error('Failed to load assessment history', error);
+      setAssessmentHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadAssessmentHistory();
   }, [isRetakeMode, retakeStudentId, courseId, batchId, semesterNumber, historyBatchId, historySemesterId, retakeId]);
-  // ================= CLO SELECT =================
+
   const handleCLOChange = (value: string, index: number) => {
+    const selected = clos.find(c => c.id === value);
+    if (!selected) return;
 
-  const selected = clos.find(c => c.id === value);
-  if (!selected) return;
+    const updated = [...questions];
+    updated[index] = {
+      clo: value,
+      description: selected.description,
+      level: selected.bloom_level,
+      kpi: selected.kpi_target,
+      marks: 0
+    };
 
-  const updated = [...questions];
-  updated[index] = {
-    clo: value,
-    description: selected.description,
-    level: selected.bloom_level,
-    kpi: selected.kpi_target,
-    marks: 0
+    setQuestions(updated);
   };
-
-  setQuestions(updated);
-};
 
   const handleQuestionMarks = (value: string, index: number) => {
     const updated = [...questions];
@@ -430,39 +494,37 @@ useEffect(() => {
   };
 
   const addCLO = () => {
+    const last = questions[questions.length - 1];
 
-  // Agar last row complete nahi hai to nayi row na add ho
-  const last = questions[questions.length - 1];
-
-  if (!last.clo) {
-    toast.error("Please select CLO first.");
-    return;
-  }
-
-  setQuestions([
-    ...questions,
-    {
-      clo: "",
-      description: "",
-      level: "",
-      kpi: 0,
-      marks: 0
+    if (!last.clo) {
+      toast.error("Please select CLO first.");
+      return;
     }
-  ]);
-};
 
-  // ================= MARKS =================
-  const handleMarksChange = (key: string, value: string) => {
-    setMarks({ ...marks, [key]: Number(value) });
+    setQuestions([
+      ...questions,
+      {
+        clo: "",
+        description: "",
+        level: "",
+        kpi: 0,
+        marks: 0
+      }
+    ]);
   };
 
-  // ================= SUBMIT =================
+  const handleMarksChange = (key: string, value: string) => {
+    setMarks((prevMarks) => ({
+      ...prevMarks,
+      [key]: value === "" ? "" : Number(value)
+    }));
+  };
+
   const handleSubmit = async () => {
     try {
       if (saving) return;
 
-      setSaving(true);
-
+      // CREATE MODE VALIDATIONS
       if (!title || !type || !totalMarks || !date) {
         toast.error("Fill all fields");
         return;
@@ -473,583 +535,576 @@ useEffect(() => {
         return;
       }
 
+      setSaving(true);
 
-      // ================= NORMAL ASSESSMENT =================
-      const totalQ = questions.reduce((sum, q) => sum + q.marks, 0);
-
-      if (totalQ !== Number(totalMarks)) {
-        toast.error("Question marks must equal total marks");
+      const limit = ASSESSMENT_LIMITS[type];
+      if (limit !== undefined && assessmentCounts[type] >= limit) {
+        toast.error(`${type} assessment limit reached. Maximum allowed: ${limit}.`);
+        setSaving(false);
         return;
       }
-      // ================= FINAL CLO VALIDATION =================
-if (type === "final") {
 
-    const res = await api.post("/assessments/clo-coverage/", {
+      if (type !== "sessional") {
+        const totalQ = questions.reduce((sum, q) => sum + Number(q.marks), 0);
+
+        if (totalQ !== Number(totalMarks)) {
+          toast.error("Question marks must equal total marks");
+          setSaving(false);
+          return;
+        }
+      }
+
+      if (type === "final") {
+        const res = await api.post("assessments/clo-coverage/", {
+          course: courseId,
+          batch: batchId,
+          semester: semesterId,
+          curriculum_version: effectiveCurriculumVersionId,
+          current_clos: questions.map(q => q.clo),
+        });
+
+        if (!res.data.all_clos_covered) {
+          toast.error(
+            "Please assess these CLOs before Final: " +
+            res.data.missing_clos.map((c: any) => `CLO ${c.order}`).join(", ")
+          );
+          setSaving(false);
+          return;
+        }
+      }
+
+      const cleanQuestions = type === "sessional"
+        ? [{ clo: null, description: "Student Performance Marks", level: null, marks: Number(totalMarks) }]
+        : questions.map(q => ({
+            clo: q.clo,
+            description: q.description,
+            level: q.level,
+            marks: Number(q.marks)
+          }));
+
+      const res = await api.post("assessments/create/", {
         course: courseId,
         batch: batchId,
         semester: semesterId,
-        curriculum_version: effectiveCurriculumVersionId,
-        current_clos: questions.map(q => q.clo),
-    });
-
-    if (!res.data.all_clos_covered) {
-
-        toast.error(
-            "Please assess these CLOs before Final: " +
-            res.data.missing_clos
-                .map((c: any) => `CLO ${c.order}`)
-                .join(", ")
-        );
-
-        return;
-    }
-}
-
-      const cleanQuestions = questions.map(q => ({
-        clo: q.clo,
-        description: q.description,
-        level: q.level,
-        marks: Number(q.marks)
-      }));
-
-      const res = await api.post("/assessments/create/", {
-            course: courseId,
-            batch: batchId,
-            semester: semesterId,
-            semester_number: Number(semesterNumber),
-            title,
-            type,
-            total_marks: Number(totalMarks),
-            date,
-            questions: cleanQuestions,
-            retake_id: retakeId
-        });
+        semester_number: Number(semesterNumber),
+        title,
+        type,
+        total_marks: Number(totalMarks),
+        date,
+        questions: cleanQuestions,
+        retake_id: retakeId
+      });
 
       const assessmentId = res.data.assessment_id;
       const backendQuestions = res.data.questions;
 
-      const cloMap: any = {};
-      backendQuestions.forEach((q: any) => {
-        cloMap[q.clo] = q.id;
-      });
-
       const payload: any[] = [];
 
       students.forEach(s => {
-        questions.forEach((q, index) => {
-          const key = `${s.student_id}-${index}`;
-
+        const sId = s.student_id || (s as any).id;
+        if (type === "sessional") {
+          const key = `${sId}-0`;
           payload.push({
-            student_id: s.student_id,
-            question_id: backendQuestions[index].id,
+            student_id: sId,
+            question_id: backendQuestions[0].id,
             marks: Number(marks[key] || 0)
           });
-        });
+        } else {
+          questions.forEach((q, index) => {
+            const key = `${sId}-${index}`;
+            payload.push({
+              student_id: sId,
+              question_id: backendQuestions[index].id,
+              marks: Number(marks[key] || 0)
+            });
+          });
+        }
       });
 
       const response = await api.post(
-  `/assessments/${assessmentId}/enter-marks/`,
-  payload
-);
+        `assessments/${assessmentId}/enter-marks/`,
+        payload
+      );
 
-// 🔥 Refresh assessment history if in retake mode
-if (isRetakeMode) {
-  await loadAssessmentHistory();
-}
-await loadWorkflow();
+      if (isRetakeMode) {
+        await loadAssessmentHistory();
+      }
 
-// 🔥 CQI trigger
-if (response.data.trigger_cqi) {
+      await loadAssessmentCounts();
+      await loadWorkflow();
 
-    const cqiCheck = await api.get(
-        `/assessments/cqi/check/${assessmentId}/`
-    );
+      if (response.data.trigger_cqi) {
+        const cqiCheck = await api.get(`assessments/cqi/check/${assessmentId}/`);
+        setWeakClos(cqiCheck.data.weak_clos || []);
+        setShowCQI(true);
+      } else {
+        toast.success("Assessment saved successfully.");
+      }
 
-    setWeakClos(cqiCheck.data.weak_clos || []);
-    setShowCQI(true);
+      toast.success("Assessment completed ✅");
+      resetForm();
 
-}
-else {
-
-    toast.success("Assessment saved successfully.");
-
-}
-
-toast.success("Assessment completed ✅");
-setTitle("");
-setType("");
-setTotalMarks("");
-setDate("");
-
-setQuestions([
-  {
-    clo: "",
-    description: "",
-    level: "",
-    kpi: 0,
-    marks: 0,
-  },
-]);
-
-setMarks({});
-                        
     } catch (err: any) {
-      console.error(err?.response?.data);
-      toast.error(JSON.stringify(err?.response?.data));
-    }finally {
-    setSaving(false);
-}
+      console.error("Submit error:", err?.response?.data || err);
+      toast.error(err?.response?.data?.error || "An error occurred while saving marks.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="p-5 bg-white rounded shadow">
 
-        {isRetakeMode && (
-          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
-            Retake mode is active. This assessment is limited to the assigned retake student.
+        {/* AGAR EDIT VIEW ACTIVE HO TOH SIRF WOH DIKHAYEIN */}
+        {activeEditAssessmentId ? (
+          <div className="mb-6">
+            <EditAssessmentView
+              assessmentId={activeEditAssessmentId}
+              onClose={() => setActiveEditAssessmentId(null)}
+              onSuccess={() => {
+                loadAssessmentHistory();
+                loadAssessmentCounts();
+              }}
+            />
           </div>
-        )}
+        ) : (
+          <>
+            {isRetakeMode && (
+              <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
+                Retake mode is active. This assessment is limited to the assigned retake student.
+              </div>
+            )}
 
-        {isRetakeMode && (
-          <div className="mb-6 rounded-2xl border border-gray-100 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-4 py-3">
-              <h3 className="text-lg font-bold text-gray-900">Assessment History</h3>
-              <p className="text-sm text-gray-500">
-                Assessments marked for this student in the current course and batch.
-              </p>
-            </div>
-            <div className="p-4">
-              {historyLoading ? (
-                <div className="py-4 text-sm font-medium text-gray-500">Loading assessment history...</div>
-              ) : assessmentHistory.length === 0 ? (
-                <div className="py-4 text-sm font-medium text-gray-500">
-                  No assessments found for this student yet.
+            {isRetakeMode && (
+              <div className="mb-6 rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-4 py-3">
+                  <h3 className="text-lg font-bold text-gray-900">Assessment History</h3>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left">
+                <div className="p-4">
+                  {historyLoading ? (
+                    <div className="py-4 text-sm font-medium text-gray-500">Loading assessment history...</div>
+                  ) : assessmentHistory.length === 0 ? (
+                    <div className="py-4 text-sm font-medium text-gray-500">
+                      No assessments found for this student yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-left">
+                        <thead>
+                          <tr className="border-b border-gray-100 text-xs font-black uppercase tracking-widest text-gray-400">
+                            <th className="pb-3 pr-4">Assessment</th>
+                            <th className="pb-3 pr-4">Type</th>
+                            <th className="pb-3 pr-4">Date</th>
+                            <th className="pb-3 pr-4">Status</th>
+                            <th className="pb-3 pr-4">Marks</th>
+                            <th className="pb-3 pr-4">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {assessmentHistory.map((item) => (
+                            <tr key={item.id} className="border-b border-gray-50 last:border-b-0">
+                              <td className="py-3 pr-4 font-semibold text-gray-900">{item.title}</td>
+                              <td className="py-3 pr-4 text-sm text-gray-600 capitalize">{item.type}</td>
+                              <td className="py-3 pr-4 text-sm text-gray-600">{item.date}</td>
+                              <td className="py-3 pr-4 text-sm">
+                                <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                  item.is_finalized ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {item.is_finalized ? 'Finalized' : 'In Progress'}
+                                </span>
+                              </td>
+                              <td className="py-3 pr-4 text-sm font-semibold text-gray-700">
+                                {item.obtained}/{item.total_marks}
+                              </td>
+                              <td className="py-3 pr-4 text-sm">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveEditAssessmentId(item.id)}
+                                  className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-semibold"
+                                >
+                                  Edit Marks
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!isRetakeMode && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    workflow.final_submitted
+                      ? "bg-slate-200 text-slate-700"
+                      : isAwaitingFinal
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-emerald-100 text-emerald-700"
+                  }`}>
+                    {workflow.final_submitted ? "Finalized" : isAwaitingFinal ? "Awaiting Final Result" : "Ongoing"}
+                  </span>
+                </div>
+                {!workflow.internals_locked && !isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={handleLockInternals}
+                    disabled={lockingInternals}
+                    className="rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-400"
+                  >
+                    {lockingInternals ? "Locking..." : "Lock Internal Assessments"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* INPUT FORM FIELDS (CREATE MODE ONLY) */}
+            {!isReadOnly && (
+              <div className="grid grid-cols-4 gap-4 mb-6">
+                <input
+                  placeholder="Title"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  className="border p-2 rounded"
+                />
+
+                <select
+  value={type}
+  onChange={e => handleTypeChange(e.target.value)}
+  className="border p-2 rounded"
+>
+  <option value="">Type</option>
+
+  {isLabCourse ? (
+    <>
+      <option
+        value="project"
+        disabled={assessmentCounts.project >= 1}
+      >
+        Project (50%)
+      </option>
+
+      <option
+        value="midterm"
+        disabled={assessmentCounts.midterm >= 1}
+      >
+        Midterm (20%)
+      </option>
+
+      <option
+        value="final"
+        disabled={assessmentCounts.final >= 1}
+      >
+        Final (30%)
+      </option>
+    </>
+  ) : (
+    <>
+      {!isAwaitingFinal && (
+        <>
+          <option
+            value="quiz"
+            disabled={assessmentCounts.quiz >= ASSESSMENT_LIMITS.quiz}
+          >
+            Quiz ({assessmentCounts.quiz}/{ASSESSMENT_LIMITS.quiz})
+          </option>
+
+          <option
+            value="assignment"
+            disabled={assessmentCounts.assignment >= ASSESSMENT_LIMITS.assignment}
+          >
+            Assignment ({assessmentCounts.assignment}/{ASSESSMENT_LIMITS.assignment})
+          </option>
+
+          <option
+            value="presentation"
+            disabled={assessmentCounts.presentation >= ASSESSMENT_LIMITS.presentation}
+          >
+            Presentation ({assessmentCounts.presentation}/{ASSESSMENT_LIMITS.presentation})
+          </option>
+
+          <option
+            value="midterm"
+            disabled={assessmentCounts.midterm >= ASSESSMENT_LIMITS.midterm}
+          >
+            Mid ({assessmentCounts.midterm}/{ASSESSMENT_LIMITS.midterm})
+          </option>
+
+          <option
+            value="sessional"
+            disabled={assessmentCounts.sessional >= ASSESSMENT_LIMITS.sessional}
+          >
+            Student Performance ({assessmentCounts.sessional}/{ASSESSMENT_LIMITS.sessional})
+          </option>
+        </>
+      )}
+
+      <option
+        value="final"
+        disabled={assessmentCounts.final >= ASSESSMENT_LIMITS.final}
+      >
+        Final ({assessmentCounts.final}/{ASSESSMENT_LIMITS.final})
+      </option>
+    </>
+  )}
+</select>
+
+                <input
+                  type="number"
+                  placeholder="Total Marks"
+                  value={totalMarks}
+                  onChange={e => handleTotalMarksChange(e.target.value)}
+                  className="border p-2 rounded"
+                />
+
+                <input
+                  type="date"
+                  value={date}
+                  onChange={e => setDate(e.target.value)}
+                  className="border p-2 rounded"
+                />
+              </div>
+            )}
+
+            {/* CLO SECTION */}
+            {!isReadOnly && (
+              <>
+                <div>
+                  {type !== "sessional" ? (
+                    <>
+                      <h3 className="font-bold flex gap-2 items-center mb-2">
+                        <TaskIcon />
+                        CLO Mapping
+                      </h3>
+
+                      <table className="w-full border mt-3">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="border p-2">Questions</th>
+                            <th className="border p-2">CLO</th>
+                            <th className="border p-2">Description</th>
+                            <th className="border p-2">Bloom</th>
+                            <th className="border p-2">KPI</th>
+                            <th className="border p-2">Marks</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {questions.map((q, index) => {
+                            const matchedCLO = clos.find(c => String(c.id) === String(q.clo));
+                            return (
+                              <tr key={index}>
+                                <td className="border p-2 font-semibold text-center">
+                                  Q{index + 1}
+                                </td>
+                                <td className="border p-2">
+                                  <select
+                                    value={q.clo || ""}
+                                    onChange={(e) => handleCLOChange(e.target.value, index)}
+                                    className="w-full border rounded p-1"
+                                  >
+                                    <option value="">Select CLO</option>
+                                    {clos.map(c => (
+                                      <option key={c.id} value={c.id}>
+                                        CLO {c.order_number}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="border p-2">{q.description || matchedCLO?.description || "-"}</td>
+                                <td className="border p-2">{formatBloomLevel(q.level || matchedCLO?.bloom_level || null)}</td>
+                                <td className="border p-2">{q.kpi || matchedCLO?.kpi_target || 0}%</td>
+                                <td className="border p-2">
+                                  <input
+                                    type="number"
+                                    value={q.marks}
+                                    className="border w-20 p-1 text-center"
+                                    onChange={(e) => handleQuestionMarks(e.target.value, index)}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+
+                      <button
+                        onClick={addCLO}
+                        className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                      >
+                        + Add Question
+                      </button>
+                    </>
+                  ) : (
+                    <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded my-4 text-sm font-medium">
+                      ℹ️ Student Performance is a marks-only assessment. CLO Mapping is not required.
+                    </div>
+                  )}
+                </div>
+
+                {/* STUDENTS MARKS INPUT TABLE */}
+                <div className="overflow-auto mt-5">
+                  <table className="w-full border">
                     <thead>
-                      <tr className="border-b border-gray-100 text-xs font-black uppercase tracking-widest text-gray-400">
-                        <th className="pb-3 pr-4">Assessment</th>
-                        <th className="pb-3 pr-4">Type</th>
-                        <th className="pb-3 pr-4">Date</th>
-                        <th className="pb-3 pr-4">Status</th>
-                        <th className="pb-3 pr-4">Marks</th>
-                        <th className="pb-3 pr-4">Questions</th>
+                      <tr className="bg-gray-100">
+                        <th className="border p-2">Student</th>
+                        {type === "sessional" ? (
+                          <th className="border p-2">Obtained Marks (out of {totalMarks || 0})</th>
+                        ) : questions.length > 0 ? (
+                          questions.map((q, index) => {
+                            const matchedCLO = clos.find(c => String(c.id) === String(q.clo));
+                            return (
+                              <th key={index} className="border p-2">
+                                {matchedCLO
+                                  ? `Q${index + 1} (CLO ${matchedCLO.order_number})`
+                                  : `Q${index + 1}`}
+                              </th>
+                            );
+                          })
+                        ) : (
+                          <th className="border p-2">Marks</th>
+                        )}
+                        <th className="border p-2">Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {assessmentHistory.map((item) => {
-                        const percentage = item.total_marks > 0
-                          ? ((item.obtained / item.total_marks) * 100).toFixed(1)
-                          : '0.0';
+                      {students.map(student => {
+                        const sId = student.student_id || (student as any).id;
+                        let total = 0;
+
+                        if (type === "sessional") {
+                          const key = `${sId}-0`;
+                          const rawVal = marks[key] ?? 0;
+                          const value = rawVal === "" ? "" : Number(rawVal);
+                          total = Number(value) || 0;
+
+                          return (
+                            <tr key={sId}>
+                              <td className="border p-2 font-medium">{student.name}</td>
+                              <td className="border p-2 text-center">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={Number(totalMarks) || 0}
+                                  className="border w-24 text-center p-1 rounded font-semibold focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                                  value={value}
+                                  onChange={(e) => {
+                                    const valStr = e.target.value;
+                                    if (valStr === "") {
+                                      handleMarksChange(key, "");
+                                      return;
+                                    }
+                                    const val = Number(valStr);
+                                    const maxVal = Number(totalMarks) || 0;
+                                    if (val <= maxVal) {
+                                      handleMarksChange(key, valStr);
+                                    }
+                                  }}
+                                />
+                              </td>
+                              <td className="border p-2 font-bold text-green-700 bg-green-50 text-center">
+                                {total}
+                              </td>
+                            </tr>
+                          );
+                        }
 
                         return (
-                          <tr key={item.id} className="border-b border-gray-50 last:border-b-0">
-                            <td className="py-3 pr-4 font-semibold text-gray-900">{item.title}</td>
-                            <td className="py-3 pr-4 text-sm text-gray-600 capitalize">{item.type}</td>
-                            <td className="py-3 pr-4 text-sm text-gray-600">{item.date}</td>
-                            <td className="py-3 pr-4 text-sm">
-                              <span className={`rounded-full px-2 py-1 text-xs font-bold ${
-                                item.is_finalized
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-amber-100 text-amber-700'
-                              }`}>
-                                {item.is_finalized ? 'Finalized' : 'In Progress'}
-                              </span>
+                          <tr key={sId}>
+                            <td className="border p-2 font-medium">{student.name}</td>
+                            {questions.length > 0 ? (
+                              questions.map((q, index) => {
+                                const key = `${sId}-${index}`;
+                                const rawVal = marks[key] ?? 0;
+                                const value = rawVal === "" ? "" : Number(rawVal);
+                                total += Number(value) || 0;
+
+                                return (
+                                  <td key={index} className="border p-2 text-center">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={q.marks || Number(totalMarks) || 100}
+                                      className="border w-20 text-center p-1 rounded font-semibold focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                                      value={value}
+                                      onChange={(e) => {
+                                        const valStr = e.target.value;
+                                        if (valStr === "") {
+                                          handleMarksChange(key, "");
+                                          return;
+                                        }
+                                        const val = Number(valStr);
+                                        const maxAllowed = q.marks || Number(totalMarks) || 100;
+                                        if (val <= maxAllowed) {
+                                          handleMarksChange(key, valStr);
+                                        }
+                                      }}
+                                    />
+                                  </td>
+                                );
+                              })
+                            ) : (
+                              <td className="border p-2 text-center">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={Number(totalMarks) || 100}
+                                  className="border w-24 text-center p-1 rounded font-semibold focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                                  value={marks[`${sId}-0`] ?? 0}
+                                  onChange={(e) => handleMarksChange(`${sId}-0`, e.target.value)}
+                                />
+                              </td>
+                            )}
+                            <td className="border p-2 font-bold text-green-700 bg-green-50 text-center">
+                              {total}
                             </td>
-                            <td className="py-3 pr-4 text-sm font-semibold text-gray-700">
-                              {item.obtained}/{item.total_marks} ({percentage}%)
-                            </td>
-                            <td className="py-3 pr-4 text-sm text-gray-600">{item.questions_count}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
 
-        {!isRetakeMode && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                workflow.final_submitted
-                  ? "bg-slate-200 text-slate-700"
-                  : isAwaitingFinal
-                    ? "bg-amber-100 text-amber-800"
-                    : "bg-emerald-100 text-emerald-700"
-              }`}>
-                {workflow.final_submitted ? "Finalized" : isAwaitingFinal ? "Awaiting Final Result" : "Ongoing"}
-              </span>
-              {isAwaitingFinal && (
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                  Provisional CLO/GA
-                </span>
-              )}
-            </div>
-            {!workflow.internals_locked && !isReadOnly && (
-              <button
-                type="button"
-                onClick={handleLockInternals}
-                disabled={lockingInternals}
-                className="rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-400"
-              >
-                {lockingInternals ? "Locking..." : "Lock Internal Assessments"}
-              </button>
+                <button
+                  disabled={saving || !canCreateAssessment}
+                  onClick={handleSubmit}
+                  className={`w-full mt-6 py-2 rounded text-white font-medium ${
+                    saving || !canCreateAssessment
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
+                >
+                  {saving ? "Saving..." : "Save Assessment"}
+                </button>
+              </>
             )}
-          </div>
-        )}
-
-        {isAwaitingFinal && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-            Internal assessments are locked. Enter Final marks only.
-          </div>
-        )}
-
-        {isReadOnly && (
-          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            This course assessment screen is read-only.
-          </div>
-        )}
-
-        {/* FORM */}
-        {!isReadOnly && (
-        <div className="grid grid-cols-4 gap-4 mb-6">
-
-          <input
-            placeholder="Title"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            className="border p-2 rounded"
-          />
-
-          <select
-            value={type}
-            onChange={e => handleTypeChange(e.target.value)}
-            className="border p-2 rounded"
-          >
-            <option value="">Type</option>
-            {!isAwaitingFinal && <option value="quiz">Quiz</option>}
-            {!isAwaitingFinal && <option value="assignment">Assignment</option>}
-            {!isAwaitingFinal && <option value="presentation">Presentation</option>}
-            {!isAwaitingFinal && <option value="midterm">Mid</option>}
-            {!isAwaitingFinal && <option value="sessional">Sessional Assessment</option>}
-            <option value="final">Final</option>
-          </select>
-
-          <input
-            type="number"
-            placeholder="Total Marks"
-            value={totalMarks}
-            onChange={e => setTotalMarks(e.target.value)}
-            className="border p-2 rounded"
-          />
-
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            className="border p-2 rounded"
-          />
-
-        </div>
-        )}
-
-        {/* CLO SECTION */}
-        {!isReadOnly && (
-        <>
-        <div>
-        {/* Previous Approved CQI */}
-
-{previousCQI.length > 0 && (
-
-<div className="bg-green-50 border rounded p-4 mb-5">
-
-<h2 className="font-bold text-green-700">
-Previous Approved CQI
-</h2>
-
-{previousCQI.map((item, index) => (
-
-<div
-key={index}
-className="border rounded p-3 mt-3"
->
-
-<p><b>CLO:</b> {item.clo}</p>
-
-<p><b>Reason:</b> {item.reason}</p>
-
-<p><b>Action Plan:</b> {item.action_plan}</p>
-
-</div>
-
-))}
-
-</div>
-
-)}
-  <h3 className="font-bold flex gap-2 items-center mb-2">
-    <TaskIcon />
-    CLO Mapping
-  </h3>
-
- <table className="w-full border mt-3">
-
-<thead className="bg-gray-100">
-
-<tr>
-<th className="border p-2">Questions</th>
-<th className="border p-2">CLO</th>
-
-<th className="border p-2">Description</th>
-
-<th className="border p-2">Bloom</th>
-
-<th className="border p-2">KPI</th>
-
-<th className="border p-2">Marks</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-{questions.map((q,index)=>(
-
-<tr key={index}>
-  <td className="border p-2 font-semibold text-center">
-  Q{index + 1}
-</td>
-
-<td className="border p-2">
-
-<select
-value={q.clo}
-onChange={(e)=>handleCLOChange(e.target.value,index)}
-className="w-full border rounded p-1"
->
-
-<option>Select CLO</option>
-
-{clos.map(c=>(
-
-<option key={c.id} value={c.id}>
-CLO {c.order_number}
-</option>
-
-))}
-
-</select>
-
-</td>
-
-<td className="border p-2">
-
-{q.description}
-
-</td>
-
-<td className="border p-2">
-
-{formatBloomLevel(q.level)}
-
-</td>
-
-<td className="border p-2">
-
-{q.kpi}%
-
-</td>
-
-<td className="border p-2">
-
-<input
-type="number"
-value={q.marks}
-className="border w-20 p-1"
-onChange={(e)=>handleQuestionMarks(e.target.value,index)}
-/>
-
-</td>
-
-</tr>
-
-))}
-
-</tbody>
-
-</table>
-  <button
-  onClick={addCLO}
-  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded"
->
-  + Add Question
-</button>
-</div>
-
-
-
-        {/* STUDENTS NORMAL */}
-       
-         <div className="overflow-auto mt-5">
-
-<table className="w-full border">
-
-<thead>
-
-<tr className="bg-gray-100">
-
-<th className="border p-2">
-
-Student
-
-</th>
-
-{questions.map((q,index)=>(
-
-<th
-key={index}
-className="border p-2"
->
-
-{q.clo
-  ? `Q${index + 1} (CLO ${clos.find(c => c.id === q.clo)?.order_number})`
-  : `Q${index + 1}`}
-
-</th>
-
-))}
-
-<th className="border p-2">
-
-Total
-
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-{students.map(student=>{
-
-let total=0;
-
-return(
-
-<tr key={student.student_id}>
-
-<td className="border p-2">
-
-{student.name}
-
-</td>
-
-{questions.map((q,index)=>{
-
-const key=`${student.student_id}-${index}`;
-
-const value=marks[key]||0;
-
-total+=value;
-
-return(
-
-<td
-key={index}
-className="border p-2"
->
-
-<input
-  type="number"
-  min={0}
-  max={q.marks}
-  className="border w-16 text-center"
-  value={value}
-  onChange={(e) => {
-    const val = Number(e.target.value);
-
-    if (val <= q.marks) {
-      handleMarksChange(key, e.target.value);
-    }
-  }}
-/>
-</td>
-
-);
-
-})}
-
-<td className="border p-2 font-bold text-green-700 bg-green-50">
-
-{total}
-
-</td>
-
-</tr>
-
-);
-
-})}
-
-</tbody>
-
-</table>
-
-</div>
-        
-
-        <button
-    disabled={saving || !canCreateAssessment}
-    onClick={handleSubmit}
-    className={`w-full mt-6 py-2 rounded text-white ${
-        saving || !canCreateAssessment
-            ? "bg-gray-400 cursor-not-allowed"
-            : "bg-blue-600"
-    }`}
->
-    {saving ? "Saving..." : "Save Assessment"}
-</button>
-
-
-        </>
+          </>
         )}
       </div>
+
       {showCQI && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-
-    {/* MODAL BOX */}
-    <div className="bg-white w-[90%] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl shadow-lg p-6 relative">
-
-      {/* CLOSE BUTTON */}
-      <button
-        onClick={() => setShowCQI(false)}
-        className="absolute top-3 right-3 text-red-500 font-bold text-lg"
-      >
-        ✕
-      </button>
-
-      {/* CQI COMPONENT */}
-      <CQI
-        weakClos={weakClos}
-        courseId={courseId}
-        batchId={batchId}
-        semesterNumber={semesterNumber}
-        semesterId={semesterId}
-        onComplete={() => setShowCQI(false)}
-      />
-
-    </div>
-  </div>
-)}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white w-[90%] max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl shadow-lg p-6 relative">
+            <button
+              onClick={() => setShowCQI(false)}
+              className="absolute top-3 right-3 text-red-500 font-bold text-lg"
+            >
+              ✕
+            </button>
+            <CQI
+              weakClos={weakClos}
+              courseId={courseId}
+              batchId={batchId}
+              semesterNumber={semesterNumber}
+              semesterId={semesterId}
+              onComplete={() => setShowCQI(false)}
+            />
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

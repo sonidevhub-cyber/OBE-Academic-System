@@ -25,7 +25,7 @@ const MasterCurriculumDetailPage = () => {
         if (!id) return;
         setLoading(true);
         try {
-            const response = await curriculumService.getVersion(parseInt(id, 10));
+            const response = await curriculumService.getVersion(id);
             setCurriculum(response.data);
         } catch (error) {
             toast.error("Failed to load curriculum details.");
@@ -60,7 +60,11 @@ const MasterCurriculumDetailPage = () => {
             const createdCourse = createCourseResponse.data?.data || createCourseResponse.data;
             const courseIdToAdd = createdCourse.id;
             
-            await curriculumService.addCourseToVersion(parseInt(id, 10), courseIdToAdd, selectedSemester);
+            await curriculumService.addCourseToVersion(
+    id,
+    courseIdToAdd,
+    selectedSemester
+);
             toast.success("Course added successfully!");
             setShowAddCourseModal(false);
             fetchCurriculumDetails(); // Refresh the curriculum details

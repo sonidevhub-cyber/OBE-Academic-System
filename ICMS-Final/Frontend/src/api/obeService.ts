@@ -915,7 +915,7 @@ class OBEService {
     return response.data;
   }
 
-  async saveCLOGAMappings(courseId: string, versionId: number, mappings: any[]): Promise<any> {
+  async saveCLOGAMappings(courseId: string, versionId: string, mappings: any[]): Promise<any> {
     const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clo-ga-matrix/`, { mappings });
     return response.data;
   }

@@ -3,7 +3,7 @@ from rest_framework import serializers
 from core.models.batch import Batch
 from core.models.course import Course # Import Course model
 from core.models.semester import Semester # Import Semester model
-
+from curriculum.services import branch_version_if_needed
 
 class BatchCreateSerializer(serializers.ModelSerializer):
     program_id = serializers.UUIDField(write_only=True, required=False)
@@ -30,7 +30,7 @@ class BatchCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         from core.models.program import Program
         from curriculum.models import CurriculumVersion
-        from curriculum.services import clone_curriculum_for_batch
+        # from curriculum.services import clone_curriculum_for_batch
 
         program_id = validated_data.pop('program_id')
         curriculum_version_id = validated_data.pop('curriculum_version_id', None)
@@ -54,7 +54,7 @@ class BatchCreateSerializer(serializers.ModelSerializer):
                     user = program.created_by
                 
                 if user:
-                    clone_curriculum_for_batch(master_version, new_batch, user)
+                    branch_version_if_needed(master_version, new_batch, user)
 
             except CurriculumVersion.DoesNotExist:
                 # Handle case where master version is not found

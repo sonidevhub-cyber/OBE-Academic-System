@@ -5,6 +5,7 @@ export interface InstructorCourse {
   course_id: number | string;
   course_name: string;
   course_code: string;
+  course_type?: string; 
   course_description?: string;
   credits?: number;
   semester_id?: number | string;

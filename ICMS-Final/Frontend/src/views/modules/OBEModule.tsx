@@ -12,14 +12,20 @@ const OBEModule: React.FC = () => {
   const [courses, setCourses] = useState<InstructorCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // EDIT STATE
+  const [selectedAssessment, setSelectedAssessment] = useState<any>(null);
+
+  const handleEditAssessmentFromHistory = (assessment: any) => {
+    setSelectedAssessment(assessment); 
+    setActiveTab("assessment"); // Switch to Assessment tab in Edit Mode
+  };
 
   useEffect(() => {
     console.log("Fetching courses...");
     setLoading(true);
     instructorCourseService.getMyCourses()
       .then(res => {
-        console.log("Courses API response:", res);
-        
         let data: any;
         if (Array.isArray(res.data)) {
           data = res.data;
@@ -30,8 +36,6 @@ const OBEModule: React.FC = () => {
         } else {
           data = [];
         }
-        
-        console.log("Processed courses data:", data);
         setCourses(data);
       })
       .catch(err => {
@@ -50,17 +54,15 @@ const OBEModule: React.FC = () => {
       const selected = courses.find(
         (c) => String(c.allocation_id) === e.target.value
       );
-      console.log("Selected course:", selected);
       setSelectedCourse(selected || null);
     }
   };
 
   const tabs = [
     { id: "assessment", label: "Assessment" },
-    {id: "history", label: "Assessment History"},
+    { id: "history", label: "Assessment History" },
     { id: "reports", label: "Course Report" },
     { id: "attainment", label: "Attainment Analysis" }
-
   ];
 
   return (
@@ -97,19 +99,23 @@ const OBEModule: React.FC = () => {
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              if (tab.id === "assessment") {
+                // Manual click par edit mode clear kar dein taake Fresh Assessment Form khule
+                setSelectedAssessment(null); 
+              }
+              setActiveTab(tab.id);
+            }}
             className={`pb-2 ${
               activeTab === tab.id
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-gray-500"
+                ? "border-b-2 border-blue-600 text-blue-600 font-semibold"
+                : "text-gray-500 hover:text-gray-700"
             }`}
           >
             {tab.label}
           </button>
         ))}
       </div>
-
-
 
       {/* CONTENT */}
       <div className="bg-white rounded-xl shadow p-5">
@@ -127,6 +133,8 @@ const OBEModule: React.FC = () => {
             semesterId={String(selectedCourse.semester_id || '')}
             semesterNumber={String(selectedCourse.semester_no || '')}
             selectedCourse={selectedCourse}
+            // UPDATE: Is prop ka lagna zaroori tha
+            initialEditAssessment={selectedAssessment} 
           />
         )}
 
@@ -142,7 +150,8 @@ const OBEModule: React.FC = () => {
           <AssessmentHistory
             courseId={String(selectedCourse.course_id)}
             batchId={String(selectedCourse.batch_id)}
-            semesterId={String(selectedCourse.semester_id)}
+            semesterNumber={String(selectedCourse.semester_no ?? "")}
+            onEditAssessment={handleEditAssessmentFromHistory}
           />
         )}
 
