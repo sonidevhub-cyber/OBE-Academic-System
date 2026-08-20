@@ -37,33 +37,108 @@ INTERNAL_ASSESSMENT_TYPES = {'quiz', 'assignment', 'presentation', 'midterm'}
 
 # 🔥 MAIN ASSESSMENT MODEL
 class Assessment(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
 
-    course = models.ForeignKey('core.Course', on_delete=models.CASCADE, null=True, blank=True)
-    batch = models.ForeignKey('core.Batch', on_delete=models.CASCADE,null=True, blank=True)
-    semester = models.ForeignKey('core.Semester', on_delete=models.CASCADE ,null=True, blank=True)
+    course = models.ForeignKey(
+        'core.Course',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
 
-    instructor = models.ForeignKey('core.CustomUser', on_delete=models.CASCADE)
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+
+    semester = models.ForeignKey(
+        'core.Semester',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+
+    instructor = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.CASCADE
+    )
 
     title = models.CharField(max_length=255)
-    assessment_type = models.CharField(max_length=20, choices=ASSESSMENT_TYPES)
 
-    total_marks = models.DecimalField(max_digits=6, decimal_places=2)
-    weightage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    assessment_type = models.CharField(
+        max_length=20,
+        choices=ASSESSMENT_TYPES
+    )
+
+    total_marks = models.DecimalField(
+        max_digits=6,
+        decimal_places=2
+    )
+
+    weightage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0
+    )
 
     assessment_date = models.DateField()
 
-    # 🔥 IMPORTANT (OBE FLOW)
+    # IMPORTANT: OBE FLOW
     is_finalized = models.BooleanField(default=False)
     is_locked = models.BooleanField(default=False)
-    
-    # 🔥 RETAKE SUPPORT
-    course_retake = models.ForeignKey('retake.CourseRetake', on_delete=models.CASCADE, null=True, blank=True, related_name='assessments')
-    
+
+    # RETAKE SUPPORT
+    course_retake = models.ForeignKey(
+        'retake.CourseRetake',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='assessments'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        self.weightage = Decimal(WEIGHTAGE_MAP.get(self.assessment_type, 0))
+
+        # =====================================================
+        # LAB COURSE WEIGHTAGES
+        # Project = 50%
+        # Midterm = 20%
+        # Final = 30%
+        # =====================================================
+        if (
+            self.course
+            and str(self.course.course_type).upper() == "LAB"
+        ):
+            LAB_WEIGHTAGE_MAP = {
+                "project": Decimal("50"),
+                "midterm": Decimal("20"),
+                "final": Decimal("30"),
+            }
+
+            self.weightage = LAB_WEIGHTAGE_MAP.get(
+                self.assessment_type,
+                Decimal("0")
+            )
+
+        # =====================================================
+        # THEORY COURSE WEIGHTAGES
+        # Existing system behavior
+        # =====================================================
+        else:
+            self.weightage = Decimal(
+                WEIGHTAGE_MAP.get(
+                    self.assessment_type,
+                    0
+                )
+            )
+
         super().save(*args, **kwargs)
 
     def __str__(self):
