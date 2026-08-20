@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import {
   Box,
@@ -49,6 +49,7 @@ interface CourseHistoryRecord {
 interface CurriculumCourseHistoryProps {
   versionId: string | number;
   courseId?: string | number;
+  currentSemester?: number | null;
 }
 
 /* ============================================================
@@ -60,6 +61,7 @@ const CurriculumCourseHistory: React.FC<
 > = ({
   versionId,
   courseId,
+  currentSemester,
 }) => {
   const [history, setHistory] = useState<
     CourseHistoryRecord[]
@@ -91,10 +93,6 @@ const CurriculumCourseHistory: React.FC<
       let url =
         `curriculum-versions/${versionId}/course-history/`;
 
-      /*
-       * If a specific course is selected,
-       * only fetch history for that course.
-       */
       if (
         courseId !== undefined &&
         courseId !== null &&
@@ -113,10 +111,21 @@ const CurriculumCourseHistory: React.FC<
       const response =
         await api.get(url);
 
+      console.log(
+        '📚 Course history API response:',
+        response.data
+      );
+
       const data =
         response.data?.data ??
+        response.data?.history ??
         response.data ??
         [];
+
+      console.log(
+        '📚 Parsed course history:',
+        data
+      );
 
       setHistory(
         Array.isArray(data)
@@ -214,9 +223,68 @@ const CurriculumCourseHistory: React.FC<
   };
 
   /* ============================================================
+     ACTION COLOR
+  ============================================================ */
+
+  const getActionColor = (
+    record: CourseHistoryRecord
+  ) => {
+    const action =
+      getAction(record);
+
+    if (
+      action.includes('add') ||
+      action.includes('create')
+    ) {
+      return {
+        bg: 'rgba(34, 197, 94, 0.10)',
+        color: '#15803d',
+        border: 'rgba(34, 197, 94, 0.25)',
+      };
+    }
+
+    if (
+      action.includes('delete') ||
+      action.includes('remove')
+    ) {
+      return {
+        bg: 'rgba(239, 68, 68, 0.10)',
+        color: '#dc2626',
+        border: 'rgba(239, 68, 68, 0.25)',
+      };
+    }
+
+    if (
+      action.includes('move') ||
+      action.includes('semester')
+    ) {
+      return {
+        bg: 'rgba(245, 158, 11, 0.10)',
+        color: '#b45309',
+        border: 'rgba(245, 158, 11, 0.25)',
+      };
+    }
+
+    if (
+      action.includes('update') ||
+      action.includes('edit')
+    ) {
+      return {
+        bg: 'rgba(59, 130, 246, 0.10)',
+        color: '#2563eb',
+        border: 'rgba(59, 130, 246, 0.25)',
+      };
+    }
+
+    return {
+      bg: 'rgba(100, 116, 139, 0.10)',
+      color: '#475569',
+      border: 'rgba(100, 116, 139, 0.25)',
+    };
+  };
+
+  /* ============================================================
      ACTION ICON
-     
-     No @mui/icons-material required.
   ============================================================ */
 
   const getActionIcon = (
@@ -229,81 +297,31 @@ const CurriculumCourseHistory: React.FC<
       action.includes('add') ||
       action.includes('create')
     ) {
-      return (
-        <Box
-          component="span"
-          sx={{
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          ＋
-        </Box>
-      );
+      return '＋';
     }
 
     if (
       action.includes('delete') ||
       action.includes('remove')
     ) {
-      return (
-        <Box
-          component="span"
-          sx={{
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          🗑
-        </Box>
-      );
+      return '🗑';
     }
 
     if (
       action.includes('move') ||
       action.includes('semester')
     ) {
-      return (
-        <Box
-          component="span"
-          sx={{
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          ↕
-        </Box>
-      );
+      return '↕';
     }
 
     if (
       action.includes('update') ||
       action.includes('edit')
     ) {
-      return (
-        <Box
-          component="span"
-          sx={{
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          ✎
-        </Box>
-      );
+      return '✎';
     }
 
-    return (
-      <Box
-        component="span"
-        sx={{
-          fontSize: 20,
-          lineHeight: 1,
-        }}
-      >
-        ↻
-      </Box>
-    );
+    return '↻';
   };
 
   /* ============================================================
@@ -350,6 +368,61 @@ const CurriculumCourseHistory: React.FC<
   };
 
   /* ============================================================
+     CURRENT SEMESTER FILTER
+  ============================================================ */
+
+  const filteredHistory = useMemo(() => {
+    if (
+      currentSemester === null ||
+      currentSemester === undefined
+    ) {
+      return history;
+    }
+
+    return history.filter(
+      (record) => {
+        const oldSemester =
+          record.old_semester;
+
+        const newSemester =
+          record.new_semester;
+
+        const semesterNo =
+          record.semester_no;
+
+        if (
+          semesterNo !== null &&
+          semesterNo !== undefined &&
+          semesterNo === currentSemester
+        ) {
+          return true;
+        }
+
+        if (
+          newSemester !== null &&
+          newSemester !== undefined &&
+          newSemester === currentSemester
+        ) {
+          return true;
+        }
+
+        if (
+          oldSemester !== null &&
+          oldSemester !== undefined &&
+          oldSemester === currentSemester
+        ) {
+          return true;
+        }
+
+        return false;
+      }
+    );
+  }, [
+    history,
+    currentSemester,
+  ]);
+
+  /* ============================================================
      SEMESTER CHANGE
   ============================================================ */
 
@@ -362,9 +435,6 @@ const CurriculumCourseHistory: React.FC<
     const newSemester =
       record.new_semester;
 
-    /*
-     * Actual semester movement
-     */
     if (
       oldSemester !== null &&
       oldSemester !== undefined &&
@@ -372,21 +442,30 @@ const CurriculumCourseHistory: React.FC<
       newSemester !== undefined
     ) {
       return (
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="center"
-          mt={1}
+        <Box
+          sx={{
+            mt: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            flexWrap: 'wrap',
+          }}
         >
           <Chip
             size="small"
             label={`Semester ${oldSemester}`}
+            sx={{
+              borderRadius: 1.5,
+              fontWeight: 600,
+              backgroundColor:
+                'rgba(100, 116, 139, 0.08)',
+            }}
             variant="outlined"
           />
 
           <Typography
-            component="span"
             color="text.secondary"
+            fontWeight={700}
           >
             →
           </Typography>
@@ -394,24 +473,35 @@ const CurriculumCourseHistory: React.FC<
           <Chip
             size="small"
             label={`Semester ${newSemester}`}
+            sx={{
+              borderRadius: 1.5,
+              fontWeight: 600,
+              backgroundColor:
+                'rgba(59, 130, 246, 0.08)',
+              color: 'primary.main',
+            }}
             variant="outlined"
           />
-        </Stack>
+        </Box>
       );
     }
 
-    /*
-     * Only one semester available
-     */
     if (
       record.semester_no !== null &&
       record.semester_no !== undefined
     ) {
       return (
-        <Box mt={1}>
+        <Box mt={1.5}>
           <Chip
             size="small"
             label={`Semester ${record.semester_no}`}
+            sx={{
+              borderRadius: 1.5,
+              fontWeight: 600,
+              backgroundColor:
+                'rgba(59, 130, 246, 0.08)',
+              color: 'primary.main',
+            }}
             variant="outlined"
           />
         </Box>
@@ -431,14 +521,16 @@ const CurriculumCourseHistory: React.FC<
     const action =
       getAction(record);
 
-    /*
-     * Don't display raw data for every record.
-     * Only show it when available and useful.
-     */
-
     if (
       !record.old_data &&
       !record.new_data
+    ) {
+      return null;
+    }
+
+    if (
+      action.includes('semester') ||
+      action.includes('move')
     ) {
       return null;
     }
@@ -471,14 +563,24 @@ const CurriculumCourseHistory: React.FC<
     const newCreditHours =
       newData.credit_hours;
 
-    /*
-     * For semester changes, the semester section
-     * above is more useful.
-     */
-    if (
-      action.includes('semester') ||
-      action.includes('move')
-    ) {
+    const hasChanges =
+      (
+        oldName &&
+        newName &&
+        oldName !== newName
+      ) ||
+      (
+        oldCode &&
+        newCode &&
+        oldCode !== newCode
+      ) ||
+      (
+        oldCreditHours !== undefined &&
+        newCreditHours !== undefined &&
+        oldCreditHours !== newCreditHours
+      );
+
+    if (!hasChanges) {
       return null;
     }
 
@@ -486,8 +588,10 @@ const CurriculumCourseHistory: React.FC<
       <Box
         mt={2}
         sx={{
-          backgroundColor:
-            'rgba(0,0,0,0.02)',
+          background:
+            'linear-gradient(135deg, rgba(248,250,252,1), rgba(241,245,249,0.65))',
+          border:
+            '1px solid rgba(148,163,184,0.18)',
           borderRadius: 2,
           p: 2,
         }}
@@ -496,7 +600,7 @@ const CurriculumCourseHistory: React.FC<
           variant="body2"
           color="text.secondary"
           mb={1}
-          fontWeight={600}
+          fontWeight={700}
         >
           Changes
         </Typography>
@@ -506,7 +610,7 @@ const CurriculumCourseHistory: React.FC<
           oldName !== newName && (
             <Typography
               variant="body2"
-              mb={0.5}
+              mb={0.7}
             >
               <strong>Name:</strong>{' '}
               {oldName} → {newName}
@@ -518,22 +622,17 @@ const CurriculumCourseHistory: React.FC<
           oldCode !== newCode && (
             <Typography
               variant="body2"
-              mb={0.5}
+              mb={0.7}
             >
               <strong>Code:</strong>{' '}
               {oldCode} → {newCode}
             </Typography>
           )}
 
-        {oldCreditHours !==
-          undefined &&
-          newCreditHours !==
-            undefined &&
-          oldCreditHours !==
-            newCreditHours && (
-            <Typography
-              variant="body2"
-            >
+        {oldCreditHours !== undefined &&
+          newCreditHours !== undefined &&
+          oldCreditHours !== newCreditHours && (
+            <Typography variant="body2">
               <strong>
                 Credit Hours:
               </strong>{' '}
@@ -555,9 +654,9 @@ const CurriculumCourseHistory: React.FC<
         display="flex"
         justifyContent="center"
         alignItems="center"
-        py={6}
+        py={8}
       >
-        <CircularProgress />
+        <CircularProgress size={32} />
       </Box>
     );
   }
@@ -568,7 +667,12 @@ const CurriculumCourseHistory: React.FC<
 
   if (error) {
     return (
-      <Alert severity="error">
+      <Alert
+        severity="error"
+        sx={{
+          borderRadius: 2,
+        }}
+      >
         {error}
       </Alert>
     );
@@ -585,75 +689,120 @@ const CurriculumCourseHistory: React.FC<
           HEADER
       ====================================================== */}
 
-      <Box
-        display="flex"
-        alignItems="center"
-        gap={1.5}
-        mb={3}
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2.5,
+          mb: 3,
+          borderRadius: 3,
+          border:
+            '1px solid rgba(148,163,184,0.18)',
+          background:
+            'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+        }}
       >
-
         <Box
-          sx={{
-            width: 40,
-            height: 40,
-            borderRadius: 2,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor:
-              'primary.main',
-            color: 'white',
-            fontSize: 22,
-          }}
+          display="flex"
+          alignItems="center"
+          justifyContent="space-between"
+          gap={2}
+          flexWrap="wrap"
         >
-          ↻
-        </Box>
-
-        <Box>
-
-          <Typography
-            variant="h6"
-            fontWeight={700}
+          <Box
+            display="flex"
+            alignItems="center"
+            gap={1.5}
           >
-            Course History
-          </Typography>
+            <Box
+              sx={{
+                width: 46,
+                height: 46,
+                borderRadius: 2.5,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background:
+                  'linear-gradient(135deg, #1976d2, #1565c0)',
+                color: 'white',
+                fontSize: 23,
+                boxShadow:
+                  '0 6px 18px rgba(25,118,210,0.22)',
+              }}
+            >
+              ↻
+            </Box>
 
-          <Typography
-            variant="body2"
-            color="text.secondary"
-          >
-            Track changes made to
-            curriculum courses and
-            their semesters.
-          </Typography>
+            <Box>
+              <Typography
+                variant="h6"
+                fontWeight={750}
+                sx={{
+                  letterSpacing: '-0.2px',
+                }}
+              >
+                Course History
+              </Typography>
 
+              <Typography
+                variant="body2"
+                color="text.secondary"
+              >
+                Track changes made to curriculum
+                courses and semesters.
+              </Typography>
+            </Box>
+          </Box>
+
+          {currentSemester !== null &&
+            currentSemester !== undefined && (
+              <Chip
+                label={`Current Semester ${currentSemester}`}
+                sx={{
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  px: 0.5,
+                  backgroundColor:
+                    'rgba(25,118,210,0.08)',
+                  color: 'primary.main',
+                  border:
+                    '1px solid rgba(25,118,210,0.18)',
+                }}
+                variant="outlined"
+              />
+            )}
         </Box>
-      </Box>
+      </Paper>
 
       {/* ======================================================
           EMPTY STATE
       ====================================================== */}
 
-      {history.length === 0 && (
+      {filteredHistory.length === 0 && (
         <Paper
           elevation={0}
           sx={{
             border:
-              '1px solid',
-            borderColor:
-              'divider',
+              '1px solid rgba(148,163,184,0.18)',
             borderRadius: 3,
-            p: 5,
+            p: 6,
             textAlign: 'center',
+            background:
+              'linear-gradient(135deg, #ffffff, #f8fafc)',
           }}
         >
-
           <Box
             sx={{
-              fontSize: 48,
-              mb: 1,
-              color:
-                'text.secondary',
+              width: 64,
+              height: 64,
+              mx: 'auto',
+              mb: 2,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor:
+                'rgba(100,116,139,0.08)',
+              fontSize: 30,
             }}
           >
             🎓
@@ -661,7 +810,7 @@ const CurriculumCourseHistory: React.FC<
 
           <Typography
             variant="h6"
-            fontWeight={600}
+            fontWeight={700}
           >
             No Course History
           </Typography>
@@ -670,12 +819,14 @@ const CurriculumCourseHistory: React.FC<
             variant="body2"
             color="text.secondary"
             mt={1}
+            maxWidth={500}
+            mx="auto"
           >
-            No changes have been
-            recorded for this
-            curriculum course yet.
+            {currentSemester !== null &&
+            currentSemester !== undefined
+              ? `No course changes have been recorded for Semester ${currentSemester}.`
+              : 'No course changes have been recorded for this curriculum.'}
           </Typography>
-
         </Paper>
       )}
 
@@ -683,190 +834,278 @@ const CurriculumCourseHistory: React.FC<
           HISTORY LIST
       ====================================================== */}
 
-      {history.length > 0 && (
+      {filteredHistory.length > 0 && (
         <Stack spacing={2}>
 
-          {history.map(
-            (
-              record,
-              index
-            ) => (
+          {filteredHistory.map(
+            (record, index) => {
 
-              <Paper
-                key={
-                  record.id ??
-                  index
-                }
-                elevation={0}
-                sx={{
-                  border:
-                    '1px solid',
-                  borderColor:
-                    'divider',
-                  borderRadius: 3,
-                  p: 2.5,
-                }}
-              >
+              const actionStyle =
+                getActionColor(record);
 
-                {/* TOP ROW */}
-
-                <Box
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems={{
-                    xs:
-                      'flex-start',
-                    sm:
-                      'center',
+              return (
+                <Paper
+                  key={
+                    record.id ??
+                    index
+                  }
+                  elevation={0}
+                  sx={{
+                    border:
+                      '1px solid rgba(148,163,184,0.20)',
+                    borderRadius: 3,
+                    p: 2.5,
+                    backgroundColor: '#fff',
+                    transition:
+                      'all 0.2s ease',
+                    '&:hover': {
+                      borderColor:
+                        'rgba(25,118,210,0.25)',
+                      boxShadow:
+                        '0 8px 25px rgba(15,23,42,0.07)',
+                      transform:
+                        'translateY(-1px)',
+                    },
                   }}
-                  flexDirection={{
-                    xs:
-                      'column',
-                    sm:
-                      'row',
-                  }}
-                  gap={1}
                 >
+
+                  {/* TOP ROW */}
 
                   <Box
                     display="flex"
-                    alignItems="center"
-                    gap={1}
+                    justifyContent="space-between"
+                    alignItems={{
+                      xs: 'flex-start',
+                      sm: 'center',
+                    }}
+                    flexDirection={{
+                      xs: 'column',
+                      sm: 'row',
+                    }}
+                    gap={1.5}
                   >
+                    <Box
+                      display="flex"
+                      alignItems="center"
+                      gap={1.2}
+                    >
+                      {/* ACTION ICON */}
 
-                    {getActionIcon(
-                      record
-                    )}
+                      <Box
+                        sx={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 1.8,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor:
+                            actionStyle.bg,
+                          color:
+                            actionStyle.color,
+                          fontSize: 19,
+                          fontWeight: 700,
+                          border:
+                            `1px solid ${actionStyle.border}`,
+                        }}
+                      >
+                        {getActionIcon(
+                          record
+                        )}
+                      </Box>
+
+                      <Box>
+                        <Typography
+                          fontWeight={750}
+                          sx={{
+                            color:
+                              'text.primary',
+                          }}
+                        >
+                          {getActionLabel(
+                            record
+                          )}
+                        </Typography>
+
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                        >
+                          Curriculum change
+                        </Typography>
+                      </Box>
+                    </Box>
 
                     <Typography
-                      fontWeight={700}
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        whiteSpace:
+                          'nowrap',
+                      }}
                     >
-                      {getActionLabel(
-                        record
+                      {formatDate(
+                        record.created_at ||
+                          record.timestamp
                       )}
                     </Typography>
-
                   </Box>
 
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
+                  <Divider
+                    sx={{
+                      my: 2,
+                    }}
+                  />
+
+                  {/* COURSE INFO */}
+
+                  <Box
+                    display="flex"
+                    gap={3}
+                    flexWrap="wrap"
                   >
-                    {formatDate(
-                      record.created_at ||
-                        record.timestamp
+                    <Box
+                      sx={{
+                        minWidth: 220,
+                        flex: 1,
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        fontWeight={600}
+                      >
+                        COURSE
+                      </Typography>
+
+                      <Typography
+                        fontWeight={700}
+                        mt={0.4}
+                      >
+                        {getCourseName(
+                          record
+                        )}
+                      </Typography>
+                    </Box>
+
+                    {record.course_code && (
+                      <Box
+                        sx={{
+                          minWidth: 150,
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          fontWeight={600}
+                        >
+                          COURSE CODE
+                        </Typography>
+
+                        <Typography
+                          fontWeight={600}
+                          mt={0.4}
+                        >
+                          {record.course_code}
+                        </Typography>
+                      </Box>
                     )}
-                  </Typography>
-
-                </Box>
-
-                <Divider
-                  sx={{
-                    my: 2,
-                  }}
-                />
-
-                {/* COURSE */}
-
-                <Box mb={1.5}>
-
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                  >
-                    Course
-                  </Typography>
-
-                  <Typography
-                    fontWeight={600}
-                  >
-                    {getCourseName(
-                      record
-                    )}
-                  </Typography>
-
-                </Box>
-
-                {/* COURSE CODE */}
-
-                {record.course_code && (
-                  <Box mb={1.5}>
-
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                    >
-                      Course Code
-                    </Typography>
-
-                    <Typography>
-                      {
-                        record.course_code
-                      }
-                    </Typography>
-
                   </Box>
-                )}
 
-                {/* SEMESTER */}
+                  {/* SEMESTER */}
 
-                {renderSemesterChange(
-                  record
-                )}
+                  {renderSemesterChange(
+                    record
+                  )}
 
-                {/* DATA CHANGES */}
+                  {/* DATA CHANGES */}
 
-                {renderDataDetails(
-                  record
-                )}
+                  {renderDataDetails(
+                    record
+                  )}
 
-                {/* CHANGED BY */}
+                  {/* FOOTER */}
 
-                {record.changed_by_name && (
-                  <Box mt={2}>
-
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
+                  {(record.changed_by_name ||
+                    record.reason) && (
+                    <Box
+                      mt={2.5}
+                      pt={2}
+                      sx={{
+                        borderTop:
+                          '1px solid rgba(148,163,184,0.15)',
+                      }}
                     >
-                      Changed By
-                    </Typography>
+                      <Box
+                        display="flex"
+                        gap={4}
+                        flexWrap="wrap"
+                      >
 
-                    <Typography
-                      variant="body2"
-                      fontWeight={600}
-                    >
-                      {
-                        record.changed_by_name
-                      }
-                    </Typography>
+                        {/* CHANGED BY */}
 
-                  </Box>
-                )}
+                        {record.changed_by_name && (
+                          <Box
+                            sx={{
+                              minWidth: 220,
+                              flex: 1,
+                            }}
+                          >
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              fontWeight={600}
+                            >
+                              CHANGED BY
+                            </Typography>
 
-                {/* REASON */}
+                            <Typography
+                              variant="body2"
+                              fontWeight={650}
+                              mt={0.4}
+                            >
+                              {
+                                record.changed_by_name
+                              }
+                            </Typography>
+                          </Box>
+                        )}
 
-                {record.reason && (
-                  <Box mt={2}>
+                        {/* REASON */}
 
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                    >
-                      Reason
-                    </Typography>
+                        {record.reason && (
+                          <Box
+                            sx={{
+                              minWidth: 220,
+                              flex: 1,
+                            }}
+                          >
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              fontWeight={600}
+                            >
+                              REASON
+                            </Typography>
 
-                    <Typography
-                      variant="body2"
-                    >
-                      {record.reason}
-                    </Typography>
+                            <Typography
+                              variant="body2"
+                              mt={0.4}
+                            >
+                              {
+                                record.reason
+                              }
+                            </Typography>
+                          </Box>
+                        )}
 
-                  </Box>
-                )}
+                      </Box>
+                    </Box>
+                  )}
 
-              </Paper>
-            )
+                </Paper>
+              );
+            }
           )}
 
         </Stack>

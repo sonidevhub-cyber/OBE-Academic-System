@@ -601,14 +601,11 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
                     curriculum_mode
                 )
 
-                new_version.current_semester = (
-                    current_semester
-                )
+                new_version.curriculum_mode = curriculum_mode
 
                 new_version.save(
                     update_fields=[
-                        'curriculum_mode',
-                        'current_semester'
+                        'curriculum_mode'
                     ]
                 )
 
@@ -886,14 +883,12 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
             curriculum_mode
         )
 
-        version.current_semester = (
-            current_semester
-        )
+        version.curriculum_mode = curriculum_mode
 
         version.save(
             update_fields=[
-                'curriculum_mode',
-                'current_semester'
+                'curriculum_mode'
+                
             ]
         )
 
