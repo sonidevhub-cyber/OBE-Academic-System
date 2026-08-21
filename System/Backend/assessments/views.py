@@ -1313,7 +1313,9 @@ class AssessmentMarksView(APIView):
                 "id": str(assessment.id),
                 "title": assessment.title,
                 "type": assessment.assessment_type,
+                "date": assessment.assessment_date,
                 "total_marks": float(assessment.total_marks),
+                "is_finalized": assessment.is_finalized,
             },
             "allow_editing": session.allow_result_editing if session else False,
             "students": result

@@ -9,7 +9,6 @@ import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
 import AssignedRetakesPanel from '../../features/retake/AssignedRetakesPanel';
 import RetakeResultEntryPage from '../pages/RetakeResultEntryPage';
-import { getRetakeAssessmentContext } from '../../features/retake/retakeApi';
 import ModularDashboardShell from '../../components/layout/ModularDashboardShell';
 import DashboardStatCard from '../../components/layout/DashboardStatCard';
 import { instructorCourseService, InstructorCourse } from '../../api/instructorCourseService';
@@ -229,18 +228,16 @@ const ModularInstructorDashboard: React.FC = () => {
         }
         return (
           <AssignedRetakesPanel
-            onOpenResults={async (retakeId) => {
-              try {
-                const assessmentContext = await getRetakeAssessmentContext(retakeId);
-                navigate(`/teacher?retake_id=${encodeURIComponent(retakeId)}&tab=retakes`, {
-                  state: {
-                    assessmentContext,
-                  },
-                });
-              } catch (error) {
-                console.error('Failed to load retake assessment context before navigation', error);
-                navigate(`/teacher?retake_id=${encodeURIComponent(retakeId)}&tab=retakes`);
-              }
+            onOpenResults={(group) => {
+              const firstRetakeId = group.retakes[0]?.id;
+              if (!firstRetakeId) return;
+
+              navigate(`/teacher?retake_id=${encodeURIComponent(firstRetakeId)}&tab=retakes`, {
+                state: {
+                  retakeGroup: group,
+                  retake: group.retakes[0],
+                },
+              });
             }}
           />
         );

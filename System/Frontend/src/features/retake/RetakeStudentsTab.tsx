@@ -54,7 +54,6 @@ const RetakeStudentsTab: React.FC = () => {
       setOpeningRetakeId(retakeId);
       const assessmentContext = await getRetakeAssessmentContext(retakeId);
 
-      // TODO: verify exact routing/state mechanism used by existing Assessment screen
       navigate(`/teacher?retake_id=${encodeURIComponent(retakeId)}&tab=retakes`, {
         state: {
           assessmentContext,

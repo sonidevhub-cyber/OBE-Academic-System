@@ -288,16 +288,30 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
   };
 
   const toggleAllStudents = () => {
-    if (selectedStudentIds.size === failedStudents.length) {
+    const eligibleStudentIds = failedStudents
+      .filter((s) => s.is_retake_eligible !== false)
+      .map((s) => s.student_id);
+
+    if (eligibleStudentIds.length === 0) {
+      setSelectedStudentIds(new Set());
+      return;
+    }
+
+    if (selectedStudentIds.size === eligibleStudentIds.length) {
       setSelectedStudentIds(new Set());
     } else {
-      setSelectedStudentIds(new Set(failedStudents.map((s) => s.student_id)));
+      setSelectedStudentIds(new Set(eligibleStudentIds));
     }
   };
 
   const selectedStudentsForSummary = useMemo(() => {
     return failedStudents.filter((s) => selectedStudentIds.has(s.student_id));
   }, [failedStudents, selectedStudentIds]);
+
+  const retakeEligibleStudents = useMemo(
+    () => failedStudents.filter((s) => s.is_retake_eligible !== false),
+    [failedStudents]
+  );
 
   const handleConfirmAssign = async () => {
     if (selectedStudentIds.size === 0) {
@@ -452,19 +466,19 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h4 className="text-sm font-black uppercase tracking-widest text-gray-500">
-                3. Students who failed this subject
+                3. Batch students and retake status
               </h4>
               <p className="mt-1 text-xs text-gray-500">
-                Auto-detected from existing results. Multi-select for bulk assignment.
+                All selected-batch students are shown. Select failed students or passed students taking improvement.
               </p>
             </div>
-            {failedStudents.length > 0 && (
+            {retakeEligibleStudents.length > 0 && (
               <button
                 type="button"
                 onClick={toggleAllStudents}
                 className="rounded-lg bg-gray-200 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-300"
               >
-                {selectedStudentIds.size === failedStudents.length
+                {selectedStudentIds.size === retakeEligibleStudents.length
                   ? 'Deselect All'
                   : 'Select All'}
               </button>
@@ -480,11 +494,10 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
             <div className="rounded-xl border border-dashed border-gray-200 bg-white p-8 text-center">
               <AlertCircle className="mx-auto mb-3 h-8 w-8 text-gray-300" />
               <p className="text-sm font-semibold text-gray-600">
-                No failed students found for this batch + subject.
+                No students found for this batch + subject.
               </p>
               <p className="mt-1 text-xs text-gray-400">
-                Either all students passed, results are not finalized, or eligible
-                students already have an active retake.
+                Check that students are enrolled in the selected batch.
               </p>
             </div>
           ) : (
@@ -507,6 +520,7 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                   {failedStudents.map((student) => {
                     const result = getResultForStudent(student.student_id);
                     const isChecked = selectedStudentIds.has(student.student_id);
+                    const isRetakeEligible = student.is_retake_eligible !== false;
                     return (
                       <tr
                         key={student.student_id}
@@ -524,7 +538,12 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            onChange={() => toggleStudent(student.student_id)}
+                            disabled={!isRetakeEligible}
+                            onChange={() => {
+                              if (isRetakeEligible) {
+                                toggleStudent(student.student_id);
+                              }
+                            }}
                             className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                         </td>
@@ -578,9 +597,33 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                             <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">
                               Has active retake
                             </span>
+                          ) : student.eligibility_status === 'passed' ? (
+                            <span
+                              className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700"
+                              title={student.eligibility_reason || ''}
+                            >
+                              Improvement
+                            </span>
+                          ) : student.eligibility_status === 'no_result' ? (
+                            <span
+                              className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700"
+                              title={student.eligibility_reason || ''}
+                            >
+                              Manual retake
+                            </span>
+                          ) : student.eligibility_status === 'max_attempts' ? (
+                            <span
+                              className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
+                              title={student.eligibility_reason || ''}
+                            >
+                              Max attempts
+                            </span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">
-                              Eligible
+                            <span
+                              className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
+                              title={student.eligibility_reason || ''}
+                            >
+                              Failed
                             </span>
                           )}
                         </td>

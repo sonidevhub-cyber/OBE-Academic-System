@@ -3,12 +3,13 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { AlertTriangle, ArrowLeft } from 'lucide-react';
 
 import { getRetakeAssessmentContext } from './retakeApi';
-import type { AssessmentContext, CourseRetake } from './types';
+import type { AssessmentContext, CourseRetake, RetakeAssessmentGroup } from './types';
 import ManageClass from '../../views/pages/ManageClass';
 import RetakeBadge from './retakeBadge';
 
 type RetakeAssessmentLocationState = {
   retake?: CourseRetake;
+  retakeGroup?: RetakeAssessmentGroup;
   assessmentContext?: AssessmentContext;
 };
 
@@ -29,7 +30,17 @@ const RetakeAssessmentWrapper: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assessmentContext, setAssessmentContext] = useState<AssessmentContext | null>(state?.assessmentContext || null);
-  const [retake, setRetake] = useState<CourseRetake | null>(state?.retake || null);
+  const retake = state?.retake || null;
+  const retakeGroup = state?.retakeGroup || null;
+  const groupRetakes = retakeGroup?.retakes || (retake ? [retake] : []);
+  const studentIds = groupRetakes.map((item) => normalizeId(item.student?.id)).filter(Boolean);
+  const retakeIdByStudentId = groupRetakes.reduce<Record<string, string>>((acc, item) => {
+    const studentId = normalizeId(item.student?.id);
+    if (studentId) {
+      acc[studentId] = normalizeId(item.id);
+    }
+    return acc;
+  }, {});
 
   useEffect(() => {
     let cancelled = false;
@@ -70,16 +81,17 @@ const RetakeAssessmentWrapper: React.FC = () => {
     };
   }, [assessmentContext, retakeId]);
 
-  const currentSemester = assessmentContext?.currentSemester ?? retake?.current_batch?.current_semester ?? 1;
+  const currentSemester = assessmentContext?.currentSemester ?? retakeGroup?.currentSemester ?? retake?.current_batch?.current_semester ?? 1;
   const semesterNumber = String(currentSemester || 1);
   const semesterId = String(currentSemester || 1);
-  const batchId = assessmentContext?.batchId || normalizeId(retake?.current_batch?.id);
-  const courseId = assessmentContext?.courseId || normalizeId(retake?.failed_course?.id);
+  const batchId = assessmentContext?.batchId || retakeGroup?.batchId || normalizeId(retake?.current_batch?.id);
+  const courseId = assessmentContext?.courseId || retakeGroup?.courseId || normalizeId(retake?.failed_course?.id);
   const studentId = assessmentContext?.studentId || normalizeId(retake?.student?.id);
   const studentName = assessmentContext?.studentName || retake?.student?.name || 'Student';
-  const attemptNumber = assessmentContext?.attemptNumber ?? retake?.attempt_number ?? 1;
-  const status = assessmentContext?.status ?? retake?.status ?? 'ongoing';
-  const curriculumVersionId = assessmentContext?.curriculumVersionId || normalizeId(retake?.current_batch?.curriculum_version_id);
+  const attemptNumber = assessmentContext?.attemptNumber ?? retakeGroup?.attemptNumber ?? retake?.attempt_number ?? 1;
+  const status = assessmentContext?.status ?? retakeGroup?.status ?? retake?.status ?? 'ongoing';
+  const curriculumVersionId = assessmentContext?.curriculumVersionId || retakeGroup?.curriculumVersionId || normalizeId(retake?.current_batch?.curriculum_version_id);
+  const isGroupMode = groupRetakes.length > 1;
 
   if (loading) {
     return (
@@ -89,7 +101,7 @@ const RetakeAssessmentWrapper: React.FC = () => {
     );
   }
 
-  if (error || !retakeId || !courseId || !batchId || !studentId) {
+  if (error || !retakeId || !courseId || !batchId || (!studentId && studentIds.length === 0)) {
     return (
       <div className="space-y-4 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
         <div>
@@ -123,10 +135,14 @@ const RetakeAssessmentWrapper: React.FC = () => {
               <RetakeBadge attemptNumber={Number(attemptNumber) || 1} status={status} />
             </div>
             <p className="mt-1 text-sm font-medium text-indigo-900/80">
-              Attempt {attemptNumber} for {studentName}
+              {isGroupMode
+                ? `Attempt ${attemptNumber} for ${groupRetakes.length} students in ${retakeGroup?.batchName || 'this batch'}`
+                : `Attempt ${attemptNumber} for ${studentName}`}
             </p>
             <p className="mt-1 text-xs font-medium text-indigo-900/70">
-              This view reuses the existing assessment entry flow and limits it to the retake student.
+              {isGroupMode
+                ? 'This grouped view saves each student against their own retake record.'
+                : 'This view reuses the existing assessment entry flow and limits it to the retake student.'}
             </p>
           </div>
         </div>
@@ -142,15 +158,11 @@ const RetakeAssessmentWrapper: React.FC = () => {
         historyBatchId={retake?.failed_batch?.id}
         historySemesterId={semesterId}
         retakeStudentId={studentId}
+        retakeStudentIds={studentIds}
         retakeId={retakeId}
+        retakeIdByStudentId={retakeIdByStudentId}
+        retakeGroupLabel={isGroupMode ? `${retakeGroup?.courseName || 'Course'} - ${retakeGroup?.batchName || 'Batch'} - Attempt ${attemptNumber}` : undefined}
       />
-
-      {!assessmentContext?.assessmentStructure?.length ? (
-        <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900">
-          TODO: verify exact routing/state mechanism used by existing Assessment screen if you want to pass the fetched
-          assessment structure directly instead of relying on the current ManageClass filtering.
-        </div>
-      ) : null}
     </div>
   );
 };

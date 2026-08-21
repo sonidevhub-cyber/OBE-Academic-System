@@ -19,8 +19,6 @@ import DashboardStatCard from '../../components/layout/DashboardStatCard';
 import CurriculumVersionListPage from '../modules/curriculum/CurriculumVersionListPage';
 import CurriculumVersionDetailPage from '../modules/curriculum/CurriculumVersionDetailPage';
 import CourseAllocationBulkModule from '../modules/coordinator/CourseAllocationBulkModule';
-import TeacherManagement from '../pages/TeacherManagement';
-import SacProgramSetup from '../pages/SacProgramSetup';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import { coordinatorService } from '../../api/coordinatorService';
@@ -211,8 +209,6 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
-    { id: 'instructors', label: 'Instructors', icon: Users },
-    { id: 'programs', label: 'Programs & Batches', icon: GraduationCap },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
   ];
 
@@ -395,10 +391,6 @@ const ModularCoordinatorDashboard: React.FC = () => {
         return <CoordinatorCLOReportModule />;
       case 'ga-reports':
         return <CoordinatorGAReportModule />;
-      case 'instructors':
-        return <TeacherManagement activeTab={activeTab} />;
-      case 'programs':
-        return <SacProgramSetup onManagePromotion={() => {}} />;
       case 'feedback':
         return <CoordinatorFeedbackView />;
       default:

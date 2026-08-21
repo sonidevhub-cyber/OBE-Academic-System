@@ -248,6 +248,10 @@ class FailedStudentSerializer(serializers.Serializer):
     last_grade = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     current_retake_attempts = serializers.IntegerField(default=0)
     has_active_retake = serializers.BooleanField(default=False)
+    is_pass = serializers.BooleanField(required=False, allow_null=True)
+    is_retake_eligible = serializers.BooleanField(default=False)
+    eligibility_status = serializers.CharField(required=False, allow_blank=True)
+    eligibility_reason = serializers.CharField(required=False, allow_blank=True)
 
 
 class PreviousInstructorSerializer(serializers.Serializer):

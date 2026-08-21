@@ -17,10 +17,11 @@ class QuestionDetailSerializer(serializers.ModelSerializer):
 class AssessmentDetailSerializer(serializers.ModelSerializer):
     questions = QuestionDetailSerializer(many=True, read_only=True)
     type = serializers.CharField(source='assessment_type', read_only=True)
+    date = serializers.DateField(source='assessment_date', read_only=True)
     
     class Meta:
         model = Assessment
-        fields = ['id', 'title', 'type', 'total_marks', 'questions']
+        fields = ['id', 'title', 'type', 'date', 'total_marks', 'is_finalized', 'questions']
 
 class QuestionSerializer(serializers.Serializer):
     clo = serializers.UUIDField()

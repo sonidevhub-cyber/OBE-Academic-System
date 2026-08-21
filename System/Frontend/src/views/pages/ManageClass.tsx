@@ -32,15 +32,25 @@ type Question = {
   marks: number;
 };
 
+type AssessmentHistoryQuestion = {
+  question: string;
+  clo: string;
+  marks_obtained: number;
+  total: number;
+};
+
 type AssessmentHistoryItem = {
   id: string;
+  studentId?: string;
+  studentName?: string;
   title: string;
   type: string;
-  date: string;
+  date?: string;
   total_marks: number;
   obtained: number;
   questions_count: number;
   is_finalized: boolean;
+  questions: AssessmentHistoryQuestion[];
 };
 
 type CourseWorkflowState = {
@@ -77,6 +87,25 @@ const formatBloomLevel = (level: string | null) => {
   return BLOOM_DISPLAY_MAP[code] || level;
 };
 
+const formatAssessmentDate = (value?: string) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const formatAssessmentType = (value: string) => {
+  if (!value) return "-";
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
 const ASSESSMENT_LIMITS: Record<string, number> = {
   quiz: 3,
   assignment: 3,
@@ -85,6 +114,16 @@ const ASSESSMENT_LIMITS: Record<string, number> = {
   final: 1,
   sessional: 1,
 };
+
+const createEmptyAssessmentCounts = (): Record<string, number> => ({
+  quiz: 0,
+  assignment: 0,
+  presentation: 0,
+  midterm: 0,
+  final: 0,
+  sessional: 0,
+  project: 0,
+});
 
 interface Props {
   courseId: string;
@@ -96,7 +135,10 @@ interface Props {
   historyBatchId?: string;
   historySemesterId?: string | number;
   retakeStudentId?: string;
+  retakeStudentIds?: string[];
   retakeId?: string;
+  retakeIdByStudentId?: Record<string, string>;
+  retakeGroupLabel?: string;
   initialEditAssessment?: any; 
 }
 
@@ -110,10 +152,32 @@ const ManageClass: React.FC<Props> = ({
   historyBatchId,
   historySemesterId,
   retakeStudentId,
+  retakeStudentIds,
   retakeId,
+  retakeIdByStudentId,
+  retakeGroupLabel,
   initialEditAssessment, 
 }) => {
-  const isRetakeMode = Boolean(retakeStudentId || retakeId);
+  const retakeStudentIdSet = new Set(
+    (retakeStudentIds && retakeStudentIds.length > 0 ? retakeStudentIds : retakeStudentId ? [retakeStudentId] : [])
+      .map((id) => String(id))
+  );
+  const primaryRetakeStudentId = retakeStudentIds?.[0] || retakeStudentId;
+  const isGroupedRetakeMode = retakeStudentIdSet.size > 1;
+  const isRetakeMode = Boolean(retakeStudentIdSet.size || retakeId);
+  const selectedRetakeIds = Array.from(
+    new Set(
+      [
+        ...Object.values(retakeIdByStudentId || {}),
+        retakeId,
+      ]
+        .filter(Boolean)
+        .map((id) => String(id))
+    )
+  );
+  const retakeScopeKey = selectedRetakeIds.join("|");
+  const selectedStudentIds = Array.from(retakeStudentIdSet);
+  const selectedStudentScopeKey = selectedStudentIds.join("|");
   const effectiveCurriculumVersionId = String(
     curriculumVersionId ??
     selectedCourse?.curriculum_version_id ??
@@ -165,15 +229,7 @@ console.log("Is Lab:", isLabCourse);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [assessmentHistory, setAssessmentHistory] = useState<AssessmentHistoryItem[]>([]);
 
-  const [assessmentCounts, setAssessmentCounts] = useState<Record<string, number>>({
-    quiz: 0,
-    assignment: 0,
-    presentation: 0,
-    midterm: 0,
-    final: 0,
-    sessional: 0,
-    project: 0,
-  });
+  const [assessmentCounts, setAssessmentCounts] = useState<Record<string, number>>(createEmptyAssessmentCounts);
 
   const [workflow, setWorkflow] = useState<CourseWorkflowState>({
     internals_locked: Boolean(selectedCourse?.internals_locked),
@@ -206,6 +262,45 @@ console.log("Is Lab:", isLabCourse);
     if (!courseId || !batchId || !semesterNumber) return;
 
     try {
+      if (isRetakeMode) {
+        if (selectedRetakeIds.length === 0) {
+          setAssessmentCounts(createEmptyAssessmentCounts());
+          return;
+        }
+
+        const responses = await Promise.all(
+          selectedRetakeIds.map((currentRetakeId) =>
+            api.get("assessments/history/", {
+              params: { retake_id: currentRetakeId },
+            })
+          )
+        );
+
+        const scopedCounts = responses.map((res) => {
+          const counts = createEmptyAssessmentCounts();
+          const assessments = Array.isArray(res.data) ? res.data : [];
+
+          assessments.forEach((assessment: any) => {
+            const assessmentType = String(assessment.type || "").toLowerCase();
+            if (assessmentType in counts) {
+              counts[assessmentType] += 1;
+            }
+          });
+
+          return counts;
+        });
+
+        setAssessmentCounts(
+          scopedCounts.reduce((maxCounts, counts) => {
+            Object.keys(maxCounts).forEach((key) => {
+              maxCounts[key] = Math.max(maxCounts[key], counts[key] || 0);
+            });
+            return maxCounts;
+          }, createEmptyAssessmentCounts())
+        );
+        return;
+      }
+
       const res = await api.get("assessments/history/", {
         params: {
           course: courseId,
@@ -214,22 +309,13 @@ console.log("Is Lab:", isLabCourse);
         },
       });
 
+      const counts = createEmptyAssessmentCounts();
       const assessments = Array.isArray(res.data) ? res.data : [];
-
-      const counts = {
-        quiz: 0,
-        assignment: 0,
-        presentation: 0,
-        midterm: 0,
-        final: 0,
-        sessional: 0,
-        project: 0,
-      };
 
       assessments.forEach((assessment: any) => {
         const assessmentType = String(assessment.type || "").toLowerCase();
         if (assessmentType in counts) {
-          counts[assessmentType as keyof typeof counts]++;
+          counts[assessmentType] += 1;
         }
       });
 
@@ -241,7 +327,7 @@ console.log("Is Lab:", isLabCourse);
 
   useEffect(() => {
     loadAssessmentCounts();
-  }, [courseId, batchId, semesterNumber]);
+  }, [courseId, batchId, semesterNumber, isRetakeMode, retakeScopeKey]);
 
 const handleTypeChange = (value: string) => {
   const limit = isLabCourse
@@ -384,11 +470,14 @@ const handleTypeChange = (value: string) => {
         } else if (data?.students) {
           studentList = data.students;
         }
-        const filteredStudents = retakeStudentId
+        const filteredStudents = retakeStudentIdSet.size > 0
           ? studentList.filter((student: any) => {
+              const possibleIds = [
+                String(student.student_id || ''),
+                String(student.id || ''),
+              ];
               return (
-                String(student.student_id || student.id || '') === String(retakeStudentId) ||
-                String(student.id || '') === String(retakeStudentId)
+                possibleIds.some((id) => retakeStudentIdSet.has(id))
               );
             })
           : studentList;
@@ -396,60 +485,94 @@ const handleTypeChange = (value: string) => {
         setStudents(filteredStudents);
       })
       .catch(() => setStudents([]));
-  }, [batchId, retakeStudentId]);
+  }, [batchId, retakeStudentId, retakeStudentIds]);
 
   const loadAssessmentHistory = async () => {
-    if (!isRetakeMode || !retakeStudentId || !courseId || !batchId || !semesterNumber) {
+    if (!isRetakeMode || !primaryRetakeStudentId || !courseId || !batchId || !semesterNumber) {
       setAssessmentHistory([]);
       return;
     }
 
     try {
       setHistoryLoading(true);
-      const params: any = {};
+      const studentNameById = students.reduce<Record<string, string>>((acc, student: any) => {
+        const studentId = String(student.student_id || student.id || '');
+        if (studentId) acc[studentId] = student.name;
+        return acc;
+      }, {});
 
-      if (retakeId) {
-        params.retake_id = retakeId;
-      } else {
-        const preferredHistoryBatchId = historyBatchId || batchId;
-        const preferredHistorySemesterNumber = String(historySemesterId || semesterNumber || '');
-        params.course = courseId;
-        params.batch = preferredHistoryBatchId;
-        params.semester = preferredHistorySemesterNumber;
+      const retakeEntries = Object.entries(retakeIdByStudentId || {}).map(([studentId, studentRetakeId]) => ({
+        studentId: String(studentId),
+        retakeId: String(studentRetakeId),
+      }));
+      const retakeScopes = retakeEntries.length > 0
+        ? retakeEntries
+        : retakeId
+          ? [{ studentId: String(primaryRetakeStudentId), retakeId: String(retakeId) }]
+          : [];
+
+      let assessmentSources: Array<{ assessment: any; studentId: string }> = [];
+
+      if (retakeScopes.length > 0) {
+        const retakeHistoryResponses = await Promise.all(
+          retakeScopes.map(async (scope) => {
+            const response = await api.get('assessments/history/', {
+              params: { retake_id: scope.retakeId },
+            });
+            const rows = Array.isArray(response.data) ? response.data : [];
+            return rows.map((assessment: any) => ({ assessment, studentId: scope.studentId }));
+          })
+        );
+        assessmentSources = retakeHistoryResponses.flat();
       }
 
-      const historyResponse = await api.get('assessments/history/', { params });
-      let assessmentRows = Array.isArray(historyResponse.data) ? historyResponse.data : [];
-
-      if (assessmentRows.length === 0) {
+      if (assessmentSources.length === 0) {
+        const preferredHistoryBatchId = historyBatchId || batchId;
+        const preferredHistorySemesterNumber = String(historySemesterId || semesterNumber || '');
         const fallbackHistoryResponse = await api.get('assessments/history/', {
           params: {
             course: courseId,
-            batch: batchId,
-            semester: semesterNumber,
+            batch: preferredHistoryBatchId,
+            semester: preferredHistorySemesterNumber,
           },
         });
-        assessmentRows = Array.isArray(fallbackHistoryResponse.data) ? fallbackHistoryResponse.data : [];
+        const fallbackRows = Array.isArray(fallbackHistoryResponse.data) ? fallbackHistoryResponse.data : [];
+        const historyStudentIds = selectedStudentIds.length > 0 ? selectedStudentIds : [String(primaryRetakeStudentId)];
+        assessmentSources = fallbackRows.flatMap((assessment: any) =>
+          historyStudentIds.map((studentId) => ({ assessment, studentId }))
+        );
       }
 
       const detailedHistory = await Promise.all(
-        assessmentRows.map(async (assessment: any) => {
+        assessmentSources.map(async ({ assessment, studentId }) => {
           try {
             const marksResponse = await api.get(`assessments/history/${assessment.id}/`);
+            const assessmentDetail = marksResponse.data?.assessment || {};
             const studentRows = Array.isArray(marksResponse.data?.students) ? marksResponse.data.students : [];
-            const matchedStudent = studentRows.find((row: any) => String(row.student_id || row.id || '') === String(retakeStudentId));
+            const matchedStudent = studentRows.find((row: any) => String(row.student_id || row.id || '') === String(studentId));
 
             if (!matchedStudent) return null;
 
+            const studentQuestions = Array.isArray(matchedStudent.questions) ? matchedStudent.questions : [];
+            const matchedStudentId = String(matchedStudent.student_id || matchedStudent.id || studentId);
+
             return {
-              id: String(assessment.id),
+              id: `${assessment.id}-${matchedStudentId}`,
+              studentId: matchedStudentId,
+              studentName: matchedStudent.name || studentNameById[matchedStudentId] || 'Student',
               title: assessment.title,
-              type: assessment.type,
-              date: assessment.date,
+              type: assessment.type || assessmentDetail.type || '',
+              date: assessment.date || assessment.assessment_date || assessmentDetail.date,
               total_marks: Number(assessment.total_marks || 0),
               obtained: Number(matchedStudent.total || matchedStudent.obtained_marks || 0),
-              questions_count: Array.isArray(matchedStudent.questions) ? matchedStudent.questions.length : 0,
-              is_finalized: Boolean(assessment.is_finalized),
+              questions_count: studentQuestions.length,
+              is_finalized: Boolean(assessment.is_finalized ?? assessmentDetail.is_finalized),
+              questions: studentQuestions.map((question: any, index: number) => ({
+                question: question.question || `Q${index + 1}`,
+                clo: question.clo || question.clo_code || 'No CLO',
+                marks_obtained: Number(question.marks_obtained || question.obtained_marks || 0),
+                total: Number(question.total || question.max_marks || question.marks || 0),
+              })),
             } as AssessmentHistoryItem;
           } catch (error) {
             console.error('Failed to load assessment history detail', error);
@@ -469,7 +592,7 @@ const handleTypeChange = (value: string) => {
 
   useEffect(() => {
     loadAssessmentHistory();
-  }, [isRetakeMode, retakeStudentId, courseId, batchId, semesterNumber, historyBatchId, historySemesterId, retakeId]);
+  }, [isRetakeMode, primaryRetakeStudentId, courseId, batchId, semesterNumber, historyBatchId, historySemesterId, retakeId, retakeScopeKey, selectedStudentScopeKey, students]);
 
   const handleCLOChange = (value: string, index: number) => {
     const selected = clos.find(c => c.id === value);
@@ -582,7 +705,7 @@ const handleTypeChange = (value: string) => {
             marks: Number(q.marks)
           }));
 
-      const res = await api.post("assessments/create/", {
+      const createAssessmentPayload = {
         course: courseId,
         batch: batchId,
         semester: semesterId,
@@ -592,39 +715,69 @@ const handleTypeChange = (value: string) => {
         total_marks: Number(totalMarks),
         date,
         questions: cleanQuestions,
-        retake_id: retakeId
-      });
+      };
 
-      const assessmentId = res.data.assessment_id;
-      const backendQuestions = res.data.questions;
+      const buildMarksPayload = (studentRows: Student[], backendQuestions: any[]) => {
+        const payload: any[] = [];
 
-      const payload: any[] = [];
-
-      students.forEach(s => {
-        const sId = s.student_id || (s as any).id;
-        if (type === "sessional") {
-          const key = `${sId}-0`;
-          payload.push({
-            student_id: sId,
-            question_id: backendQuestions[0].id,
-            marks: Number(marks[key] || 0)
-          });
-        } else {
-          questions.forEach((q, index) => {
-            const key = `${sId}-${index}`;
+        studentRows.forEach(s => {
+          const sId = s.student_id || (s as any).id;
+          if (type === "sessional") {
+            const key = `${sId}-0`;
             payload.push({
               student_id: sId,
-              question_id: backendQuestions[index].id,
+              question_id: backendQuestions[0].id,
               marks: Number(marks[key] || 0)
             });
-          });
-        }
-      });
+          } else {
+            questions.forEach((q, index) => {
+              const key = `${sId}-${index}`;
+              payload.push({
+                student_id: sId,
+                question_id: backendQuestions[index].id,
+                marks: Number(marks[key] || 0)
+              });
+            });
+          }
+        });
 
-      const response = await api.post(
-        `assessments/${assessmentId}/enter-marks/`,
-        payload
-      );
+        return payload;
+      };
+
+      let response: any = null;
+      let lastAssessmentId: string | null = null;
+
+      if (isRetakeMode) {
+        for (const student of students) {
+          const sId = String(student.student_id || (student as any).id || '');
+          const studentRetakeId = retakeIdByStudentId?.[sId] || retakeId;
+
+          if (!studentRetakeId) {
+            toast.error(`Retake record missing for ${student.name}`);
+            setSaving(false);
+            return;
+          }
+
+          const createResponse = await api.post("assessments/create/", {
+            ...createAssessmentPayload,
+            retake_id: studentRetakeId
+          });
+          lastAssessmentId = String(createResponse.data.assessment_id);
+
+          response = await api.post(
+            `assessments/${createResponse.data.assessment_id}/enter-marks/`,
+            buildMarksPayload([student], createResponse.data.questions)
+          );
+        }
+      } else {
+        const res = await api.post("assessments/create/", createAssessmentPayload);
+        lastAssessmentId = String(res.data.assessment_id);
+
+        response = await api.post(
+          `assessments/${res.data.assessment_id}/enter-marks/`,
+          buildMarksPayload(students, res.data.questions)
+        );
+      }
 
       if (isRetakeMode) {
         await loadAssessmentHistory();
@@ -633,8 +786,8 @@ const handleTypeChange = (value: string) => {
       await loadAssessmentCounts();
       await loadWorkflow();
 
-      if (response.data.trigger_cqi) {
-        const cqiCheck = await api.get(`assessments/cqi/check/${assessmentId}/`);
+      if (response?.data?.trigger_cqi && lastAssessmentId) {
+        const cqiCheck = await api.get(`assessments/cqi/check/${lastAssessmentId}/`);
         setWeakClos(cqiCheck.data.weak_clos || []);
         setShowCQI(true);
       } else {
@@ -672,7 +825,9 @@ const handleTypeChange = (value: string) => {
           <>
             {isRetakeMode && (
               <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
-                Retake mode is active. This assessment is limited to the assigned retake student.
+                {isGroupedRetakeMode
+                  ? `Grouped retake mode is active${retakeGroupLabel ? ` for ${retakeGroupLabel}` : ''}. Marks entered here will be saved to each student's own retake record.`
+                  : 'Retake mode is active. This assessment is limited to the assigned retake student.'}
               </div>
             )}
 
@@ -686,45 +841,60 @@ const handleTypeChange = (value: string) => {
                     <div className="py-4 text-sm font-medium text-gray-500">Loading assessment history...</div>
                   ) : assessmentHistory.length === 0 ? (
                     <div className="py-4 text-sm font-medium text-gray-500">
-                      No assessments found for this student yet.
+                      {isGroupedRetakeMode
+                        ? 'No assessments found for this retake group yet.'
+                        : 'No assessments found for this student yet.'}
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-left">
                         <thead>
                           <tr className="border-b border-gray-100 text-xs font-black uppercase tracking-widest text-gray-400">
+                            {isGroupedRetakeMode && <th className="pb-3 pr-4">Student</th>}
                             <th className="pb-3 pr-4">Assessment</th>
                             <th className="pb-3 pr-4">Type</th>
                             <th className="pb-3 pr-4">Date</th>
+                            <th className="pb-3 pr-4">CLO Marks</th>
                             <th className="pb-3 pr-4">Status</th>
                             <th className="pb-3 pr-4">Marks</th>
-                            <th className="pb-3 pr-4">Action</th>
                           </tr>
                         </thead>
                         <tbody>
                           {assessmentHistory.map((item) => (
                             <tr key={item.id} className="border-b border-gray-50 last:border-b-0">
+                              {isGroupedRetakeMode && (
+                                <td className="py-3 pr-4 text-sm font-semibold text-gray-900">
+                                  {item.studentName || 'Student'}
+                                </td>
+                              )}
                               <td className="py-3 pr-4 font-semibold text-gray-900">{item.title}</td>
-                              <td className="py-3 pr-4 text-sm text-gray-600 capitalize">{item.type}</td>
-                              <td className="py-3 pr-4 text-sm text-gray-600">{item.date}</td>
+                              <td className="py-3 pr-4 text-sm text-gray-600">{formatAssessmentType(item.type)}</td>
+                              <td className="py-3 pr-4 text-sm text-gray-600">{formatAssessmentDate(item.date)}</td>
+                              <td className="py-3 pr-4 text-sm text-gray-700">
+                                {item.questions.length > 0 ? (
+                                  <div className="flex max-w-md flex-wrap gap-2">
+                                    {item.questions.map((question, questionIndex) => (
+                                      <span
+                                        key={`${item.id}-${question.question}-${questionIndex}`}
+                                        className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-700"
+                                      >
+                                        {question.question}: {question.clo} ({question.marks_obtained}/{question.total})
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">No CLO marks</span>
+                                )}
+                              </td>
                               <td className="py-3 pr-4 text-sm">
                                 <span className={`rounded-full px-2 py-1 text-xs font-bold ${
                                   item.is_finalized ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                 }`}>
-                                  {item.is_finalized ? 'Finalized' : 'In Progress'}
+                                  {item.is_finalized ? 'Finalized' : 'Marks Editable'}
                                 </span>
                               </td>
                               <td className="py-3 pr-4 text-sm font-semibold text-gray-700">
                                 {item.obtained}/{item.total_marks}
-                              </td>
-                              <td className="py-3 pr-4 text-sm">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveEditAssessmentId(item.id)}
-                                  className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-semibold"
-                                >
-                                  Edit Marks
-                                </button>
                               </td>
                             </tr>
                           ))}

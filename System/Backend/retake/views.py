@@ -297,9 +297,8 @@ def _get_student_pass_fail_for_course(student, course_id, batch_id):
 
 
 class FailedStudentsLookupView(APIView):
-    """Given batch_id + course_id, return all students in that batch who FAILED
-    this subject. Excludes students with an active ongoing retake (< 3 attempts).
-    Reuses CLOService pass/fail logic (>= 50% threshold = PASS).
+    """Given batch_id + course_id, return students in that batch with pass/fail
+    and retake eligibility metadata for this subject.
     """
     permission_classes = [IsSACOnly]
 
@@ -375,7 +374,7 @@ class FailedStudentsLookupView(APIView):
             if retake.is_active and retake.status == "ongoing":
                 existing_retakes[key]["has_active_ongoing"] = True
 
-        failed_students = []
+        student_options = []
         for student in batch_students:
             sid = str(student.student_id)
             retake_info = existing_retakes.get(sid, {})
@@ -410,18 +409,27 @@ class FailedStudentsLookupView(APIView):
                     grade = fr.grade
 
             if is_pass is None:
-                continue
+                eligibility_status = "no_result"
+                eligibility_reason = "Result is not finalized or no result row was found; retake can still be assigned if needed."
+                is_retake_eligible = True
+            elif is_pass:
+                eligibility_status = "passed"
+                eligibility_reason = "Student has passed this subject; retake can be assigned for improvement."
+                is_retake_eligible = True
+            elif has_active_ongoing and max_attempt < 3:
+                eligibility_status = "active_retake"
+                eligibility_reason = "Student already has an active retake for this subject."
+                is_retake_eligible = False
+            elif max_attempt >= 3:
+                eligibility_status = "max_attempts"
+                eligibility_reason = "Student has already reached the maximum 3 retake attempts."
+                is_retake_eligible = False
+            else:
+                eligibility_status = "failed"
+                eligibility_reason = "Pass criteria not met; retake can be assigned."
+                is_retake_eligible = True
 
-            if is_pass:
-                continue
-
-            if has_active_ongoing and max_attempt < 3:
-                continue
-
-            if max_attempt >= 3:
-                continue
-
-            failed_students.append({
+            student_options.append({
                 "student_id": sid,
                 "name": student.name,
                 "registration_number": student.registration_number,
@@ -429,9 +437,13 @@ class FailedStudentsLookupView(APIView):
                 "last_grade": grade,
                 "current_retake_attempts": max_attempt,
                 "has_active_retake": has_active_ongoing,
+                "is_pass": is_pass,
+                "is_retake_eligible": is_retake_eligible,
+                "eligibility_status": eligibility_status,
+                "eligibility_reason": eligibility_reason,
             })
 
-        serializer = FailedStudentSerializer(failed_students, many=True)
+        serializer = FailedStudentSerializer(student_options, many=True)
         return Response(serializer.data)
 
 

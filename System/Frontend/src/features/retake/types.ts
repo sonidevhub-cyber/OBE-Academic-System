@@ -38,6 +38,19 @@ export interface CourseRetake {
   updated_at: string;
 }
 
+export interface RetakeAssessmentGroup {
+  groupKey: string;
+  courseId: string;
+  courseName: string;
+  batchId: string;
+  batchName: string;
+  currentSemester?: number;
+  curriculumVersionId?: string;
+  attemptNumber: RetakeAttemptNumber;
+  status: RetakeStatus;
+  retakes: CourseRetake[];
+}
+
 export interface CreateRetakePayload {
   student: string;
   failed_course: string;
@@ -138,6 +151,10 @@ export interface FailedStudentOption {
   last_grade?: string | null;
   current_retake_attempts: number;
   has_active_retake: boolean;
+  is_pass?: boolean | null;
+  is_retake_eligible?: boolean;
+  eligibility_status?: 'failed' | 'passed' | 'no_result' | 'active_retake' | 'max_attempts' | string;
+  eligibility_reason?: string;
 }
 
 export interface PreviousInstructorInfo {

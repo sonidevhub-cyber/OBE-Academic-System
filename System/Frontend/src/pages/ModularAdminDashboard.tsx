@@ -14,8 +14,6 @@ import AlumniTab from '../views/pages/AlumniTab';
 import PendingTransfers from '../views/pages/PendingTransfers';
 import ManagePromotion from '../views/pages/ManagePromotion';
 import Users from './sac/Users';
-import CurriculumVersionListPage from '../views/modules/curriculum/CurriculumVersionListPage';
-import CurriculumVersionDetailPage from '../views/modules/curriculum/CurriculumVersionDetailPage';
 import RetakeManagementPanel from '../features/retake/RetakeManagementPanel';
 // Import Existing Page Components
 import StudentManagement from '../views/pages/StudentManagement';
@@ -31,13 +29,12 @@ import QuickActions from '../components/widgets/dashboard/QuickActions';
 import ActivityFeed from '../components/widgets/dashboard/ActivityFeed';
 import CalendarWidget from '../components/widgets/dashboard/CalendarWidget';
 
-type TabId = 'dashboard' | 'students' | 'instructors' | 'program-setup' | 'curriculum' | 'courses' | 'events' | 'hod' | 'profile' | 'pending-transfers' | 'freeze' | 'promotion-management' | 'users' | 'retake-management' | 'alumni';
+type TabId = 'dashboard' | 'students' | 'instructors' | 'program-setup'  | 'courses' | 'events' | 'hod' | 'profile' | 'pending-transfers' | 'freeze' | 'promotion-management' | 'users' | 'retake-management' | 'alumni';
 type AdminTab = { id: TabId; label: string; icon: string; permission?: string; sacOnly?: boolean; badgeCount?: number };
 
 const ModularAdminDashboard = () => {
   const { currentUser, logout, hasPermission, isSAC } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [promotionParams, setPromotionParams] = useState<{programId: string, batchId: string} | null>(null);
   const [adminData, setAdminData] = useState({
     stats: {
@@ -62,7 +59,6 @@ const ModularAdminDashboard = () => {
     { id: 'users', label: 'Faculty', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', sacOnly: true },
     { id: 'alumni', label: 'Alumni', icon: 'M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z', sacOnly: true },
     { id: 'program-setup', label: 'Program Setup', icon: 'M4 6h16M4 12h16M4 18h16', sacOnly: true },
-    { id: 'curriculum', label: 'Curriculum', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253', sacOnly: true },
     { id: 'freeze', label: 'Freeze', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', sacOnly: true, badgeCount: pendingTransfersCount },
     { id: 'retake-management', label: 'Retakes', icon: 'M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z', sacOnly: true },
   ] as AdminTab[]).filter((tab) => (!tab.permission || isSAC || hasPermission(tab.permission)) && (!tab.sacOnly || isSAC)), [hasPermission, isSAC, pendingTransfersCount]);
@@ -266,25 +262,6 @@ const ModularAdminDashboard = () => {
           setPromotionParams({ programId, batchId });
           setActiveTab('promotion-management');
         }} />;
-
-      case 'curriculum':
-        if (selectedVersionId) {
-          return (
-            <CurriculumVersionDetailPage 
-              key={`version-${selectedVersionId}`}
-              id={selectedVersionId} 
-              onClose={() => setSelectedVersionId(null)} 
-              onVersionCreated={(id: number) => setSelectedVersionId(String(id))}
-            />
-          );
-        }
-        return (
-          <CurriculumVersionListPage 
-            onViewVersion={(id) => setSelectedVersionId(id)}
-            onCreateNew={() => setSelectedVersionId('new')}
-          />
-        );
-
       case 'promotion-management':
         return promotionParams ? (
           <ManagePromotion 
