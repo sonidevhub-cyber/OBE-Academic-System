@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PEO Report</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 14mm 18mm 14mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1f2937;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .page {
+      width: 100%;
+    }
+
+    .brand {
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      color: #0f172a;
+    }
+
+    .brand .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 6px;
+      color: #475569;
+    }
+
+    .card {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+    }
+
+    .card h2 {
+      font-size: 13px;
+      margin: 0 0 8px;
+      color: #0f172a;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 16px;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .chart-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 10px;
+      background: #ffffff;
+      page-break-inside: avoid;
+    }
+
+    .chart-panel h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: #0f172a;
+    }
+
+    .chart-image {
+      width: 100%;
+      max-height: 210px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .pie-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pie-legend {
+      display: grid;
+      gap: 6px;
+      margin-top: 2px;
+      font-size: 10px;
+      color: #334155;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 10px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 10px;
+    }
+
+    .pill.good { background: #dcfce7; color: #166534; }
+    .pill.bad { background: #fee2e2; color: #991b1b; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+    }
+
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 6px 7px;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8fafc;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      text-align: left;
+    }
+
+    .section-title {
+      margin: 0 0 6px;
+      font-size: 12px;
+      color: #0f172a;
+    }
+
+    .muted {
+      color: #64748b;
+    }
+
+    .chart {
+      width: 100%;
+      margin: 8px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="brand">
+      <h1>PEO Attainment Report</h1>
+      <div class="meta">
+        <div>
+          <div><strong>Department:</strong> {{ report.header.department }}</div>
+          <div><strong>Program:</strong> {{ report.header.program }}</div>
+        </div>
+        <div>
+          <div><strong>Cycle Year:</strong> {{ report.header.evaluationCycleYear }}</div>
+          <div><strong>Survey Responses:</strong> {{ report.header.totalSurveyResponses }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matrix first -->
+    <div class="card">
+      <h2>PEO Attainment Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>PEO</th>
+            <th>Description</th>
+            <th>Direct %</th>
+            <th>Indirect %</th>
+            <th>Combined %</th>
+            <th>Target %</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in report.matrix %}
+          <tr>
+            <td>PEO {{ forloop.counter }}</td>
+            <td>{{ row.description }}</td>
+            <td>{% if row.directPercentage is not None %}{{ row.directPercentage }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.indirectPercentage is not None %}{{ row.indirectPercentage }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.combinedAttainmentPercentage is not None %}{{ row.combinedAttainmentPercentage }}{% else %}N/A{% endif %}</td>
+            <td>{{ row.targetPercentage }}</td>
+            <td>{% if row.status == 'Achieved' %}Achieved{% else %}Not Achieved{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Then charts -->
+    <div class="card">
+      <h2>PEO Attainment Visuals</h2>
+      <div class="grid" style="margin-bottom: 10px;">
+        <div><strong>Target Threshold:</strong> {{ report.summary.targetThreshold }}%</div>
+        <div>
+          <strong>Overall Program Status:</strong>
+          {% if report.summary.overallStatus == 'achieved' %}
+            <span class="pill good">All PEOs achieved</span>
+          {% else %}
+            <span class="pill bad">Not All PEOs achieved</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-panel">
+          <h3>PEO Attainment vs Target</h3>
+          {% if chart_image %}
+            <img alt="PEO attainment chart" class="chart-image" src="data:image/png;base64,{{ chart_image }}" />
+          {% endif %}
+        </div>
+        <div class="chart-panel">
+          <h3>PEO Status Split</h3>
+          <div class="pie-wrap">
+            {{ pie_chart_svg|safe }}
+            <div class="pie-legend">
+              <div class="legend-row">
+                <span class="legend-swatch" style="background:#2563eb;"></span>
+                <span>Achieved PEOs</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-swatch" style="background:#f59e0b;"></span>
+                <span>CQI Required PEOs</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Then employment stats -->
+    <div class="card">
+      <h2>Employment Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in report.employmentStats.employmentDistribution %}
+          <tr>
+            <td>{{ item.label }}</td>
+            <td>{{ item.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Top Employers</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Organization</th>
+            <th>Alumni Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for employer in report.employmentStats.topEmployers %}
+          <tr>
+            <td>{{ employer.name }}</td>
+            <td>{{ employer.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
