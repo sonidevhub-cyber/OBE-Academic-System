@@ -83,6 +83,18 @@ from .report_views import (
     CourseCLOReportView,
     AlumniDashboardView
 )
+from .vision_mission_views import (
+    DepartmentVisionView,
+    DepartmentMissionView,
+    ExtractKeywordsView,
+    VisionKeywordListView,
+    MissionKeywordListView,
+    VisionMissionMappingView,
+    ProgramPEOKeywordMappingView,
+    BatchVisionMissionAnalyticsView,
+    VisionMissionCQIUpsertView,
+    VisionMissionCQICloseView,
+)
 
 __all__ = [
     'PEOListCreateView',
@@ -160,5 +172,16 @@ __all__ = [
     'SurveyQuestionListCreateView',
     'SurveyQuestionDetailView',
     'SurveyQuestionLockView',
+    # Vision & Mission views
+    'DepartmentVisionView',
+    'DepartmentMissionView',
+    'ExtractKeywordsView',
+    'VisionKeywordListView',
+    'MissionKeywordListView',
+    'VisionMissionMappingView',
+    'ProgramPEOKeywordMappingView',
+    'BatchVisionMissionAnalyticsView',
+    'VisionMissionCQIUpsertView',
+    'VisionMissionCQICloseView',
 ]
 

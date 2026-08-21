@@ -775,7 +775,8 @@ def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str = 'CUMULATIVE'
     if cqi_level != 'CUMULATIVE':
         return None
 
-    attainment = calculate_ga_attainment_cumulative_cohort(batch, ga)
+    ga_result = calculate_weighted_ga_score(ga, batch, force_recalculate=True)
+    attainment = ga_result['final_score']
 
     if attainment is None:
         return None
@@ -1532,20 +1533,26 @@ def calculate_exit_survey_ga_score(ga, batch):
     return exit_score
 
 
-def calculate_peo_report(peo, batch=None):
+def calculate_peo_report(peo, batch=None, peo_snapshot=None):
     """
     Calculate PEO report:
         - Direct (80%): Weighted sum of GA reports using GA-PEO mappings
         - Indirect (20%): Alumni survey responses for this PEO
         - If no indirect data, redistribute weight to 100% direct
     """
-    # Get GA-PEO mappings
-    mappings = GAPEOMapping.objects.filter(
-        peo=peo,
-        is_active=True
-    ).select_related('ga')
-    
-    if not mappings.exists():
+    snapshot_mappings = peo_snapshot.get('ga_mappings', []) if peo_snapshot else None
+    if snapshot_mappings is None:
+        mappings = GAPEOMapping.objects.filter(
+            peo=peo,
+            is_active=True
+        ).select_related('ga')
+    else:
+        mappings = snapshot_mappings
+
+    if snapshot_mappings is None:
+        if not mappings.exists():
+            return None
+    elif not mappings:
         return None
     
     # Calculate Direct score: weighted average of GA reports
@@ -1554,8 +1561,16 @@ def calculate_peo_report(peo, batch=None):
     contributing_gas = []
     
     for mapping in mappings:
-        ga = mapping.ga
-        weight = mapping.weight
+        if peo_snapshot:
+            try:
+                ga = GA.objects.get(id=mapping['ga_id'], is_active=True)
+            except GA.DoesNotExist:
+                continue
+            weight = Decimal(str(mapping.get('weight') or '0'))
+        else:
+            ga = mapping.ga
+            weight = mapping.weight
+
         # Get GA's final score using calculate_weighted_ga_score
         ga_result = calculate_weighted_ga_score(ga, batch) if batch else None
         if ga_result and ga_result['final_score'] is not None:
@@ -1577,7 +1592,8 @@ def calculate_peo_report(peo, batch=None):
     indirect_score = None
     indirect_sources = []
     if batch:
-        indirect_data = get_flexible_peo_indirect_score(peo.id, batch.id)
+        peo_id = peo_snapshot.get('id') if peo_snapshot else peo.id
+        indirect_data = get_flexible_peo_indirect_score(peo_id, batch.id)
         if indirect_data['overall'] is not None:
             indirect_score = Decimal(str(indirect_data['overall']))
             indirect_sources = indirect_data['sources']
@@ -1619,9 +1635,10 @@ def calculate_peo_report(peo, batch=None):
             final_score = round(total_score, 2)
     
     return {
-        'peo_id': str(peo.id),
-        'peo_code': f'PEO-{peo.order_number}',
-        'peo_title': peo.title,
+        'peo_id': str(peo_snapshot.get('id') if peo_snapshot else peo.id),
+        'peo_code': peo_snapshot.get('code') if peo_snapshot else f'PEO-{peo.order_number}',
+        'peo_title': peo_snapshot.get('title') if peo_snapshot else peo.title,
+        'peo_description': peo_snapshot.get('description') if peo_snapshot else peo.description,
         'final_score': float(final_score) if final_score is not None else None,
         'direct_score': float(direct_score) if direct_score is not None else None,
         'indirect_score': float(indirect_score) if indirect_score is not None else None,
@@ -1634,10 +1651,18 @@ def calculate_peo_report(peo, batch=None):
 
 def calculate_all_peo_reports(batch):
     """
-    Calculate PEO reports for all active PEOs in the batch's program.
+    Calculate PEO reports for the PEO framework locked to this batch.
     """
-    peos = PEO.objects.filter(program=batch.program, is_active=True)
+    snapshot_peos = (batch.peo_snapshot or {}).get('peos') or []
     report_rows = []
+    if snapshot_peos:
+        for peo_snapshot in snapshot_peos:
+            peo_result = calculate_peo_report(None, batch, peo_snapshot=peo_snapshot)
+            if peo_result:
+                report_rows.append(peo_result)
+        return report_rows
+
+    peos = PEO.objects.filter(program=batch.program, is_active=True)
     for peo in peos:
         peo_result = calculate_peo_report(peo, batch)
         if peo_result:

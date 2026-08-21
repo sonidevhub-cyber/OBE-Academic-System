@@ -167,7 +167,7 @@ export interface GACQIRecord {
   root_cause: string | null;
   remedial_plan: string | null;
   hod_comment: string | null;
-  status: 'NOT_TRIGGERED' | 'PENDING_HOD_INPUT' | 'SAVED' | 'EXPORTED' | 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED';
+  status: 'NOT_TRIGGERED' | 'PENDING_HOD_INPUT' | 'SAVED' | 'EXPORTED' | 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED' | 'APPROVED' | 'OPEN' | 'CLOSED_IMPLEMENTED';
   submitted_by: any | null;
   approved_by: any | null;
   is_audit_visible: boolean;
@@ -183,6 +183,13 @@ export interface GACQIRecord {
   saved_by_hod_name?: string | null;
   saved_at: string | null;
   is_active: boolean;
+  implemented_in_batch?: string | null;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
+  resulting_attainment?: number | null;
+  closed_by?: any | null;
+  closed_by_name?: string | null;
+  closed_at?: string | null;
 }
 
 export interface GACQIResubmissionHistory {
@@ -1188,6 +1195,504 @@ class OBEService {
   async saveCLOPIMappings(courseId: string, versionId: number, mappings: any[]): Promise<any> {
     return;
   }
+
+  // ========== VISION & MISSION ==========
+
+  async getDepartmentVision(departmentId: string): Promise<VisionResponse> {
+    const response = await api.get(`/obe/departments/${departmentId}/vision/`);
+    return response.data;
+  }
+
+  async saveDepartmentVision(departmentId: string, statement: string): Promise<VisionResponse> {
+    const response = await api.patch(`/obe/departments/${departmentId}/vision/`, { statement });
+    return response.data;
+  }
+
+  async getDepartmentMission(departmentId: string): Promise<MissionResponse> {
+    const response = await api.get(`/obe/departments/${departmentId}/mission/`);
+    return response.data;
+  }
+
+  async saveDepartmentMission(departmentId: string, statement: string): Promise<MissionResponse> {
+    const response = await api.patch(`/obe/departments/${departmentId}/mission/`, { statement });
+    return response.data;
+  }
+
+  async extractKeywords(sourceType: 'vision' | 'mission', text: string): Promise<{ candidates: string[] }> {
+    const response = await api.post('/obe/extract-keywords/', { source_type: sourceType, text });
+    return response.data;
+  }
+
+  async saveVisionKeywords(visionId: string, keywords: string[]): Promise<VisionKeyword[]> {
+    const response = await api.post(`/obe/visions/${visionId}/keywords/`, { keywords });
+    return response.data;
+  }
+
+  async removeVisionKeyword(visionId: string, keywordId: string): Promise<any> {
+    const response = await api.delete(`/obe/visions/${visionId}/keywords/`, { data: { keyword_id: keywordId } });
+    return response.data;
+  }
+
+  async saveMissionKeywords(missionId: string, keywords: string[]): Promise<MissionKeyword[]> {
+    const response = await api.post(`/obe/missions/${missionId}/keywords/`, { keywords });
+    return response.data;
+  }
+
+  async removeMissionKeyword(missionId: string, keywordId: string): Promise<any> {
+    const response = await api.delete(`/obe/missions/${missionId}/keywords/`, { data: { keyword_id: keywordId } });
+    return response.data;
+  }
+
+  async getVisionMissionMappings(departmentId: string): Promise<VisionMissionMappingResponse> {
+    const response = await api.get(`/obe/departments/${departmentId}/vision-mission-mappings/`);
+    return response.data;
+  }
+
+  async saveVisionMissionMappings(
+    departmentId: string,
+    mappings: Array<{ mission_keyword_id: string; vision_keyword_id: string }>
+  ): Promise<VisionMissionMapping[]> {
+    const response = await api.post(`/obe/departments/${departmentId}/vision-mission-mappings/`, { mappings });
+    return response.data;
+  }
+
+  async getPOKeywordMappings(programId: string): Promise<POKeywordMappingResponse> {
+    const response = await api.get(`/obe/programs/${programId}/po-keyword-mappings/`);
+    return response.data;
+  }
+
+  async savePOKeywordMappings(
+    programId: string,
+    mappings: Array<{ peo_id: string; mission_keyword_id?: string | null; vision_keyword_id?: string | null }>
+  ): Promise<POKeywordMapping[]> {
+    const response = await api.post(`/obe/programs/${programId}/po-keyword-mappings/`, { mappings });
+    return response.data;
+  }
+
+  async getVisionMissionAnalytics(batchId: string): Promise<VisionMissionAnalyticsResponse> {
+    const response = await api.get(`/obe/batches/${batchId}/vision-mission-analytics/`);
+    return response.data;
+  }
+
+  async saveVisionMissionCQI(
+    batchId: string,
+    data: {
+      keyword_type: 'VISION' | 'MISSION';
+      keyword_id: string;
+      hod_action_plan: string;
+      attainment_value?: number | null;
+      target_kpi?: number | null;
+      cqi_action_required?: boolean;
+    }
+  ): Promise<VisionMissionCQIRecord> {
+    const response = await api.post(`/obe/batches/${batchId}/vision-mission-cqi/`, data);
+    return response.data;
+  }
+
+  async closeVisionMissionCQI(
+    cqiId: string,
+    data: { implemented_in_batch: string; action_taken_description: string }
+  ): Promise<VisionMissionCQIRecord> {
+    const response = await api.post(`/obe/vision-mission-cqi/${cqiId}/close/`, data);
+    return response.data;
+  }
+
+  async closeGACQI(
+    cqiId: string,
+    data: { implemented_in_batch: string; action_taken_description: string }
+  ): Promise<GACQIRecord> {
+    const response = await api.post(`/obe/ga-cqi/${cqiId}/close/`, data);
+    return response.data;
+  }
+
+  async getCQIClosingSummary(): Promise<CQIClosingSummaryResponse> {
+    const response = await api.get('/obe/cqi/closing-summary/');
+    const summary = response.data || {};
+
+    const normalizeUser = (user: any) => {
+      if (!user || typeof user !== 'object') {
+        return { id: user ?? null, name: null };
+      }
+      return { id: user.id ?? null, name: user.name ?? user.full_name ?? null };
+    };
+
+    const normalizeBatch = (batch: any) => {
+      if (!batch || typeof batch !== 'object') {
+        return { id: batch ?? null, name: null };
+      }
+      return { id: batch.id ?? null, name: batch.name ?? null };
+    };
+
+    const normalizeGaClosure = (item: any): GACQIClosingSummaryItem => {
+      const flagged = item?.flagged || {};
+      const closedBatch = normalizeBatch(item?.closed_in_batch);
+      const closedBy = normalizeUser(item?.closed_by);
+      const kpi = flagged.kpi_threshold_at_trigger ?? flagged.kpi_threshold ?? null;
+      const result = item?.resulting_attainment ?? null;
+      return {
+        ...item,
+        flagged: {
+          ...flagged,
+          ga_code: flagged.ga_code ?? 'GA',
+          ga_title: flagged.ga_title ?? null,
+          batch_name: flagged.batch_name ?? flagged.triggered_batch_name ?? null,
+          attainment_value: flagged.attainment_value ?? flagged.triggered_attainment ?? null,
+          kpi_threshold: kpi,
+        },
+        closed_in_batch: closedBatch.id,
+        closed_in_batch_name: item?.closed_in_batch_name ?? closedBatch.name,
+        closed_by: closedBy.id,
+        closed_by_name: item?.closed_by_name ?? closedBy.name,
+        resulting_attainment_met_target:
+          item?.resulting_attainment_met_target ??
+          (result !== null && kpi !== null ? Number(result) >= Number(kpi) : null),
+      };
+    };
+
+    const normalizePeoClosure = (item: any): PEOCQIClosingSummaryItem => {
+      const flagged = item?.flagged || {};
+      const closedBatch = normalizeBatch(item?.closed_in_batch);
+      const closedBy = normalizeUser(item?.closed_by);
+      const kpi = flagged.kpi_threshold_at_trigger ?? flagged.kpi_threshold ?? null;
+      const result = item?.resulting_attainment ?? null;
+      return {
+        ...item,
+        flagged: {
+          ...flagged,
+          peo_code: flagged.peo_code ?? 'PO',
+          peo_title: flagged.peo_title ?? null,
+          batch_name: flagged.batch_name ?? flagged.triggered_batch_name ?? null,
+          attainment_value: flagged.attainment_value ?? flagged.triggered_attainment ?? null,
+          kpi_threshold: kpi,
+        },
+        closed_in_batch: closedBatch.id,
+        closed_in_batch_name: item?.closed_in_batch_name ?? closedBatch.name,
+        closed_by: closedBy.id,
+        closed_by_name: item?.closed_by_name ?? closedBy.name,
+        resulting_attainment_met_target:
+          item?.resulting_attainment_met_target ??
+          (result !== null && kpi !== null ? Number(result) >= Number(kpi) : null),
+      };
+    };
+
+    const normalizeVmCqiClosure = (item: any): VisionMissionCQIClosingSummaryItem => {
+      const flagged = item?.flagged || {};
+      const closedBatch = normalizeBatch(item?.closed_in_batch);
+      const closedBy = normalizeUser(item?.closed_by);
+      const kpi = flagged.kpi_threshold_at_trigger ?? flagged.kpi_threshold ?? null;
+      const result = item?.resulting_attainment ?? null;
+      return {
+        ...item,
+        flagged: {
+          ...flagged,
+          keyword: flagged.keyword ?? null,
+          batch_name: flagged.batch_name ?? flagged.triggered_batch_name ?? null,
+          attainment_value: flagged.attainment_value ?? flagged.triggered_attainment ?? null,
+          kpi_threshold: kpi,
+        },
+        closed_in_batch: closedBatch.id,
+        closed_in_batch_name: item?.closed_in_batch_name ?? closedBatch.name,
+        closed_by: closedBy.id,
+        closed_by_name: item?.closed_by_name ?? closedBy.name,
+        resulting_attainment_met_target:
+          item?.resulting_attainment_met_target ??
+          (result !== null && kpi !== null ? Number(result) >= Number(kpi) : null),
+      };
+    };
+
+    const normalizeVmReview = (item: any): VisionMissionReviewSummaryItem => {
+      const flagged = item?.flagged || {};
+      const department = flagged.department || {};
+      const reviewedBy = normalizeUser(item?.reviewed_by);
+      return {
+        ...item,
+        flagged: {
+          ...flagged,
+          department_name: flagged.department_name ?? department.name ?? null,
+        },
+        reviewed_by: reviewedBy.id,
+        reviewed_by_name: item?.reviewed_by_name ?? reviewedBy.name,
+      };
+    };
+
+    return {
+      ga_cqi_closures: (summary.ga_cqi_closures || []).map(normalizeGaClosure),
+      peo_cqi_closures: (summary.peo_cqi_closures || []).map(normalizePeoClosure),
+      vision_mission_cqi_closures: (summary.vision_mission_cqi_closures || []).map(normalizeVmCqiClosure),
+      vision_mission_reviews: (summary.vision_mission_reviews || []).map(normalizeVmReview),
+    };
+  }
+
+  async getVisionMissionCQIReviews(): Promise<VisionMissionCQIReviewRecord[]> {
+    const response = await api.get('/obe/vision-mission-cqi-review/');
+    return response.data;
+  }
+
+  async createVisionMissionCQIReview(
+    data: CreateVisionMissionCQIReviewRequest
+  ): Promise<VisionMissionCQIReviewRecord> {
+    const response = await api.post('/obe/vision-mission-cqi-review/', data);
+    return response.data;
+  }
+}
+
+// ========== VISION & MISSION INTERFACES ==========
+
+export interface VisionKeyword {
+  id: string;
+  vision: string;
+  text: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface MissionKeyword {
+  id: string;
+  mission: string;
+  text: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface VisionResponse {
+  id: string | null;
+  statement: string;
+  is_active?: boolean;
+  department?: string;
+  department_code?: string;
+  department_name?: string;
+  keywords?: VisionKeyword[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MissionResponse {
+  id: string | null;
+  statement: string;
+  is_active?: boolean;
+  department?: string;
+  department_code?: string;
+  department_name?: string;
+  keywords?: MissionKeyword[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface VisionMissionMapping {
+  id: string;
+  mission_keyword: string;
+  mission_keyword_text: string;
+  vision_keyword: string;
+  vision_keyword_text: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface VisionMissionMappingResponse {
+  vision_keywords: VisionKeyword[];
+  mission_keywords: MissionKeyword[];
+  mappings: VisionMissionMapping[];
+}
+
+export interface POKeywordMapping {
+  id: string;
+  peo: string;
+  peo_order_number: number;
+  peo_title: string | null;
+  mission_keyword: string | null;
+  mission_keyword_text: string | null;
+  vision_keyword: string | null;
+  vision_keyword_text: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface POKeywordMappingResponse {
+  peos: Array<{
+    id: string;
+    order_number: number;
+    title: string | null;
+    description: string;
+  }>;
+  vision_keywords: VisionKeyword[];
+  mission_keywords: MissionKeyword[];
+  mappings: POKeywordMapping[];
+}
+
+export interface VisionMissionAnalyticsRow {
+  keyword_type: 'VISION' | 'MISSION';
+  keyword_id: string;
+  keyword: string;
+  target_kpi: number;
+  attainment_score: number | null;
+  status: 'Achieved' | 'Not Achieved' | 'Not Assessed';
+  cqi_action_required: boolean;
+  hod_action_plan: string;
+  cqi_record_id: string | null;
+  cqi_status?: 'OPEN' | 'CLOSED_IMPLEMENTED' | string | null;
+  is_locked?: boolean;
+  implemented_in_batch?: string | null;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
+  resulting_attainment?: number | null;
+  closed_at?: string | null;
+  mapped_count: number;
+  mapped_items: string[];
+}
+
+export interface VisionMissionCQIRecord {
+  id: string;
+  keyword_type: 'VISION' | 'MISSION';
+  keyword_id: string;
+  hod_action_plan: string;
+  attainment_value: number | null;
+  target_kpi: number | null;
+  cqi_action_required: boolean;
+  implemented_in_batch?: string | null;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
+  resulting_attainment?: number | null;
+  closed_by?: string | null;
+  closed_by_name?: string | null;
+  closed_at?: string | null;
+  status?: 'OPEN' | 'CLOSED_IMPLEMENTED' | string;
+  is_locked?: boolean;
+  created?: boolean;
+}
+
+export interface VisionMissionAnalyticsResponse {
+  batch_id: string;
+  program_id: string;
+  department_id: string;
+  vision: {
+    id: string | null;
+    statement: string;
+    keywords: VisionKeyword[];
+  };
+  mission: {
+    id: string | null;
+    statement: string;
+    keywords: MissionKeyword[];
+  };
+  vision_rows: VisionMissionAnalyticsRow[];
+  mission_rows: VisionMissionAnalyticsRow[];
+  is_hod: boolean;
+}
+
+// ========== VISION/MISSION CQI REVIEW (Closing Loop) ==========
+
+export interface VisionMissionCQIReviewRecord {
+  id: string;
+  statement_type: 'VISION' | 'MISSION';
+  trigger_type: 'SCHEDULED' | 'MANUAL';
+  review_date: string;
+  reviewed_by: any | null;
+  reviewed_by_name?: string | null;
+  department?: string | null;
+  department_name?: string | null;
+  previous_statement_snapshot: string;
+  decision: 'RETAINED' | 'REVISED';
+  justification: string;
+  new_statement: string | null;
+  status: 'REVIEWED';
+  created_at: string;
+}
+
+export interface CreateVisionMissionCQIReviewRequest {
+  department: string;
+  statement_type: 'VISION' | 'MISSION';
+  trigger_type: 'SCHEDULED' | 'MANUAL';
+  decision: 'RETAINED' | 'REVISED';
+  justification: string;
+  new_statement?: string | null;
+}
+
+// ========== CQI CLOSING SUMMARY ==========
+
+export interface GACQIClosingSummaryItem {
+  id: string;
+  flagged: {
+    ga_code: string;
+    ga_title?: string | null;
+    batch_name: string;
+    attainment_value: number | null;
+    kpi_threshold: number | null;
+  };
+  closed_in_batch: string | null;
+  closed_in_batch_name?: string | null;
+  action_taken: string | null;
+  resulting_attainment: number | null;
+  resulting_attainment_met_target?: boolean | null;
+  closed_by: string | null;
+  closed_by_name?: string | null;
+  closed_date: string | null;
+  status: string;
+}
+
+export interface PEOCQIClosingSummaryItem {
+  id: string;
+  flagged: {
+    peo_code: string;
+    peo_title?: string | null;
+    batch_name: string;
+    attainment_value: number | null;
+    kpi_threshold: number | null;
+  };
+  closed_in_batch: string | null;
+  closed_in_batch_name?: string | null;
+  action_taken: string | null;
+  resulting_attainment: number | null;
+  resulting_attainment_met_target?: boolean | null;
+  closed_by: string | null;
+  closed_by_name?: string | null;
+  closed_date: string | null;
+  status: string;
+}
+
+export interface VisionMissionReviewSummaryItem {
+  id: string;
+  flagged: {
+    statement_type: 'VISION' | 'MISSION';
+    trigger_type: 'SCHEDULED' | 'MANUAL';
+    department_name?: string | null;
+    previous_statement_snapshot: string;
+  };
+  action_taken: {
+    decision: 'RETAINED' | 'REVISED';
+    justification: string;
+    new_statement: string | null;
+  };
+  resulting_outcome: 'RETAINED' | 'REVISED';
+  reviewed_by: string | null;
+  reviewed_by_name?: string | null;
+  review_date: string | null;
+}
+
+export interface VisionMissionCQIClosingSummaryItem {
+  id: string;
+  flagged: {
+    statement_type: 'VISION' | 'MISSION';
+    keyword?: string | null;
+    batch_name: string;
+    attainment_value: number | null;
+    kpi_threshold: number | null;
+  };
+  closed_in_batch: string | null;
+  closed_in_batch_name?: string | null;
+  action_taken: string | null;
+  resulting_attainment: number | null;
+  resulting_attainment_met_target?: boolean | null;
+  closed_by: string | null;
+  closed_by_name?: string | null;
+  closed_date: string | null;
+  status: string;
+}
+
+export interface CQIClosingSummaryResponse {
+  ga_cqi_closures: GACQIClosingSummaryItem[];
+  peo_cqi_closures: PEOCQIClosingSummaryItem[];
+  vision_mission_cqi_closures: VisionMissionCQIClosingSummaryItem[];
+  vision_mission_reviews: VisionMissionReviewSummaryItem[];
 }
 
 export default new OBEService();

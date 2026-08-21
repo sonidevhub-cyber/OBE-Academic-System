@@ -63,8 +63,15 @@ class Batch(models.Model):
         choices=GRADUATION_STATUS_CHOICES,
         default="not_graduating",
     )
+    peo_snapshot = models.JSONField(default=dict, blank=True)
+    vision_mission_snapshot = models.JSONField(default=dict, blank=True)
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        if is_new and self.program_id:
+            from obe.framework_snapshots import populate_batch_framework_snapshot
+            populate_batch_framework_snapshot(self)
+
         if not self.custom_id:
             session_prefix = 'F' if self.session_type == 'fall' else 'S'
             base_custom_id = f"BAT-{self.program.code.upper()}-{self.start_year}-{session_prefix}"

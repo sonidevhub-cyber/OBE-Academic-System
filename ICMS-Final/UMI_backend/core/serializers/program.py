@@ -7,6 +7,9 @@ from core.models.program import Program
 class ProgramListSerializer(serializers.ModelSerializer):
     semesters = serializers.SerializerMethodField()
     course_count = serializers.SerializerMethodField()
+    department = serializers.PrimaryKeyRelatedField(read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True, allow_null=True)
+    department_code = serializers.CharField(source='department.code', read_only=True, allow_null=True)
 
     class Meta:
         model = Program
@@ -15,6 +18,9 @@ class ProgramListSerializer(serializers.ModelSerializer):
             'custom_id',
             'name',
             'code',
+            'department',
+            'department_name',
+            'department_code',
             'description',
             'total_semesters',
             'created_at',
@@ -37,6 +43,9 @@ class ProgramListSerializer(serializers.ModelSerializer):
 
 class ProgramDetailSerializer(serializers.ModelSerializer):
     semesters = serializers.SerializerMethodField()
+    department = serializers.PrimaryKeyRelatedField(read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True, allow_null=True)
+    department_code = serializers.CharField(source='department.code', read_only=True, allow_null=True)
 
     class Meta:
         model = Program
@@ -44,6 +53,9 @@ class ProgramDetailSerializer(serializers.ModelSerializer):
             'id',
             'name',
             'code',
+            'department',
+            'department_name',
+            'department_code',
             'description',
             'total_semesters',
             'created_at',

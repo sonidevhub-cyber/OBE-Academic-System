@@ -1,5 +1,5 @@
 import { api } from './api';
-import { PEO, GA, Batch } from './obeService';
+import { PEO, GA } from './obeService';
 
 // --- Interfaces ---
 
@@ -62,13 +62,20 @@ export interface PEOCQIRecord {
   kpi_threshold_at_trigger: number | null;
   root_cause: string | null;
   remedial_plan: string | null;
-  status: 'DRAFT' | 'APPROVED';
+  status: 'DRAFT' | 'APPROVED' | 'OPEN' | 'CLOSED_IMPLEMENTED';
   submitted_by: any | null;
   is_locked: boolean;
   created_at: string;
   updated_at: string;
   history?: PEOCQISubmissionHistory[];
   contributing_gas?: PEOReportContributingGA[];
+  implemented_in_batch?: string | null;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
+  resulting_attainment?: number | null;
+  closed_by?: any | null;
+  closed_by_name?: string | null;
+  closed_at?: string | null;
 }
 
 // --- Service Class ---
@@ -120,6 +127,14 @@ class PEOService {
 
   async getPEOCQIHistory(cqiId: string): Promise<PEOCQISubmissionHistory[]> {
     const response = await api.get(`/obe/peo-cqi/${cqiId}/history/`);
+    return response.data;
+  }
+
+  async closePEOCQI(
+    cqiId: string,
+    data: { implemented_in_batch: string; action_taken_description: string }
+  ): Promise<PEOCQIRecord> {
+    const response = await api.post(`/obe/peo-cqi/${cqiId}/close/`, data);
     return response.data;
   }
 }

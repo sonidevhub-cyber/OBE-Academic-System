@@ -32,6 +32,9 @@ import MainPage from './pages/MainPage';
 import CUIPortalPage from './pages/Rolebaselogin';
 import AccessDenied from './pages/AccessDenied';
 import HODPEOCQI from './views/pages/HODPEOCQI';
+import HODCQI from './views/pages/HODCQI';
+import HODVisionMissionCQI from './views/pages/HODVisionMissionCQI';
+import HODCQIClosingAdvisory from './views/pages/HODCQIClosingAdvisory';
 
 // Import new exit survey components
 import CoordinatorExitSurveySetup from './views/modules/coordinator/CoordinatorExitSurveySetup';
@@ -142,6 +145,10 @@ const AppRoutes: React.FC = () => {
         <Route path="/coordinator/students/:studentId/obe-report" element={<StudentOBEReport />} />
         <Route path="/sac/batches/:batchId/exit-survey-status" element={<SACExitSurveyDashboard />} />
         <Route path="/hod/peo-cqi" element={<HODPEOCQI />} />
+        <Route path="/hod/clo-cqi" element={<HODCQI mode="clo" />} />
+        <Route path="/hod/ga-cqi" element={<HODCQI mode="ga" />} />
+        <Route path="/hod/vision-mission-cqi" element={<HODVisionMissionCQI />} />
+        <Route path="/hod/cqi-closing-advisory" element={<HODCQIClosingAdvisory />} />
       </Route>
 
       {/* Fallback route */}

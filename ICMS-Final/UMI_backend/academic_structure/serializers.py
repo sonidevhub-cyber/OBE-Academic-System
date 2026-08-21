@@ -40,6 +40,7 @@ class BatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Batch
         fields = '__all__'
+        read_only_fields = ['peo_snapshot', 'vision_mission_snapshot']
 
 class CourseSerializer(serializers.ModelSerializer):
     program_name = serializers.CharField(source='program.name', read_only=True)

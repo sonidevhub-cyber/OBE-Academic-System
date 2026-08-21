@@ -5,8 +5,8 @@ from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 
 from core.models.batch import Batch
-from core.permissions import IsSAC, IsSACOrCoordinator
-from core.serializers.batch import BatchCreateSerializer, BatchListSerializer
+from core.permissions import IsHOD, IsSAC, IsSACOrCoordinator
+from core.serializers.batch import BatchCreateSerializer, BatchFrameworkSnapshotSerializer, BatchListSerializer
 from core.serializers.user import UserListSerializer
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
@@ -197,4 +197,17 @@ class BatchSemesterSelectorView(APIView):
             },
             'semesters': data,
         })
+
+
+class BatchFrameworkSnapshotView(generics.RetrieveAPIView):
+    permission_classes = [IsHOD]
+    serializer_class = BatchFrameworkSnapshotSerializer
+    lookup_url_kwarg = 'pk'
+
+    def get_queryset(self):
+        queryset = Batch.objects.filter(is_active=True).select_related('program')
+        program_id = self.kwargs.get('program_id')
+        if program_id:
+            queryset = queryset.filter(program_id=program_id)
+        return queryset
 

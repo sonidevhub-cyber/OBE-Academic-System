@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Users, Target, FileText, Search, BookOpen, TrendingUp, LoaderCircle, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Users, Target, FileText, Search, BookOpen, TrendingUp, LoaderCircle, RefreshCw } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import html2canvas from 'html2canvas';
 import { pdf } from '@react-pdf/renderer';
+import { toast } from 'react-hot-toast';
 import OBEReportPDF from './OBEReportPDF';
 import logo2 from '../../../assets/logo2.png';
 import academicStructureService, { Program } from '../../../api/academicStructureService';
@@ -28,6 +29,8 @@ import obeService, {
   CourseSession,
   GACQIRecord,
   GAReportItem,
+  VisionMissionAnalyticsResponse,
+  VisionMissionAnalyticsRow,
 } from '../../../api/obeService';
 import peoService, { PEOCQIRecord, PEOReportItem } from '../../../api/peoService';
 
@@ -100,6 +103,7 @@ interface DashboardState {
   cloCqiRows: DashboardCQIRow[];
   gaCqiRows: DashboardCQIRow[];
   peoCqiRows: DashboardCQIRow[];
+  visionMissionAnalytics: VisionMissionAnalyticsResponse | null;
 }
 
 const OBEReportDashboard: React.FC = () => {
@@ -115,6 +119,18 @@ const OBEReportDashboard: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
+  const [cqiDrafts, setCqiDrafts] = useState<Record<string, string>>({});
+  const [savingCqiKey, setSavingCqiKey] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    visionMission: true,
+    courseClo: true,
+    ga: true,
+    po: true,
+    cloCqi: false,
+    gaCqi: false,
+    poCqi: false,
+  });
+  const [expandedLists, setExpandedLists] = useState<Record<string, boolean>>({});
 
   const gaChartRef = useRef<HTMLDivElement>(null);
   const peoChartRef = useRef<HTMLDivElement>(null);
@@ -169,7 +185,7 @@ const OBEReportDashboard: React.FC = () => {
   })) || [];
 
   const peoChartData = dashboard?.peoRows.map((peo) => ({
-    name: peo.id,
+    name: peo.id.replace(/^PEO-/, 'PO-'),
     Attainment: peo.finalAttainment,
     Target: peo.targetKpi,
   })) || [];
@@ -183,13 +199,22 @@ const OBEReportDashboard: React.FC = () => {
     setRefreshing(Boolean(dashboard));
     try {
       const currentBatch = batches.find((batch) => batch.id === batchId) || selectedBatch;
-      const [gaReport, peoReport, sessionRes, studentRes, programPeos, peoCqiRecords] = await Promise.all([
+      const [
+        gaReport,
+        peoReport,
+        sessionRes,
+        studentRes,
+        programPeos,
+        peoCqiRecords,
+        visionMissionAnalytics,
+      ] = await Promise.all([
         obeService.getBatchGAReport(batchId, { mode: 'cumulative', scope: 'cohort' }),
         peoService.getPEOReports(batchId),
         obeService.getCourseSessions(batchId),
         obeService.getBatchStudents(batchId),
         currentBatch?.program?.id ? obeService.getProgramPEOs(currentBatch.program.id) : Promise.resolve([]),
         peoService.getPEOCQIRecords(batchId),
+        obeService.getVisionMissionAnalytics(batchId),
       ]);
 
       const sessions = sessionRes.sessions || [];
@@ -332,7 +357,8 @@ const OBEReportDashboard: React.FC = () => {
 
       const peoThresholdMap = new Map<string, number>();
       (programPeos || []).forEach((peo: any) => {
-        peoThresholdMap.set(`PEO-${peo.order_number}`, Number(peo.kpi_threshold ?? 70));
+          peoThresholdMap.set(`PO-${peo.order_number}`, Number(peo.kpi_threshold ?? 70));
+          peoThresholdMap.set(`PEO-${peo.order_number}`, Number(peo.kpi_threshold ?? 70));
       });
 
       const peoCqiById = new Map<string, PEOCQIRecord>();
@@ -376,7 +402,7 @@ const OBEReportDashboard: React.FC = () => {
 
           return {
             type: 'PEO',
-            item: `${item.peo_code || item.peo_id} - ${item.peo_title}`,
+            item: `${(item.peo_code || item.peo_id).replace(/^PEO-/, 'PO-')} - ${item.peo_title}`,
             detail: `Final ${Number(item.final_score ?? 0).toFixed(1)}% / Target ${targetKpi.toFixed(1)}%`,
             reason: cqiRecord?.root_cause || `Below target at ${Number(item.final_score ?? 0).toFixed(1)}%`,
             remedy: cqiRecord?.remedial_plan || 'Pending CQI action plan',
@@ -402,7 +428,14 @@ const OBEReportDashboard: React.FC = () => {
         cloCqiRows,
         gaCqiRows,
         peoCqiRows,
+        visionMissionAnalytics,
       });
+
+      const nextDrafts: Record<string, string> = {};
+      [...(visionMissionAnalytics?.vision_rows || []), ...(visionMissionAnalytics?.mission_rows || [])].forEach((row) => {
+        nextDrafts[`${row.keyword_type}-${row.keyword_id}`] = row.hod_action_plan || '';
+      });
+      setCqiDrafts(nextDrafts);
     } catch (err) {
       console.error('Failed to load batch report data:', err);
       setError('Failed to load live report data for the selected batch.');
@@ -481,8 +514,79 @@ const OBEReportDashboard: React.FC = () => {
     }
   }, [availableSemesters, selectedSemester]);
 
+  const getVisionMissionCqiKey = (row: VisionMissionAnalyticsRow) => `${row.keyword_type}-${row.keyword_id}`;
+
+  const handleVisionMissionCqiChange = (row: VisionMissionAnalyticsRow, value: string) => {
+    setCqiDrafts((current) => ({
+      ...current,
+      [getVisionMissionCqiKey(row)]: value,
+    }));
+  };
+
+  const handleSaveVisionMissionCqi = async (row: VisionMissionAnalyticsRow) => {
+    if (!dashboard?.batch) {
+      return;
+    }
+
+    const key = getVisionMissionCqiKey(row);
+    setSavingCqiKey(key);
+    try {
+      const saved = await obeService.saveVisionMissionCQI(dashboard.batch.id, {
+        keyword_type: row.keyword_type,
+        keyword_id: row.keyword_id,
+        hod_action_plan: cqiDrafts[key] || '',
+        attainment_value: row.attainment_score,
+        target_kpi: row.target_kpi,
+        cqi_action_required: row.cqi_action_required,
+      });
+
+      setDashboard((current) => {
+        if (!current?.visionMissionAnalytics) return current;
+        const updateRow = (item: VisionMissionAnalyticsRow): VisionMissionAnalyticsRow =>
+          item.keyword_type === row.keyword_type && item.keyword_id === row.keyword_id
+            ? {
+                ...item,
+                hod_action_plan: saved.hod_action_plan,
+                cqi_record_id: saved.id,
+              }
+            : item;
+
+        return {
+          ...current,
+          visionMissionAnalytics: {
+            ...current.visionMissionAnalytics,
+            vision_rows: current.visionMissionAnalytics.vision_rows.map(updateRow),
+            mission_rows: current.visionMissionAnalytics.mission_rows.map(updateRow),
+          },
+        };
+      });
+
+      toast.success('CQI action plan saved');
+    } catch (err) {
+      console.error('Failed to save Vision/Mission CQI:', err);
+      toast.error('Failed to save CQI action plan');
+    } finally {
+      setSavingCqiKey(null);
+    }
+  };
+
   const handleExportPDF = async () => {
     if (!dashboard) {
+      return;
+    }
+
+    const requiredVisionMissionRows = [
+      ...(dashboard.visionMissionAnalytics?.vision_rows || []),
+      ...(dashboard.visionMissionAnalytics?.mission_rows || []),
+    ].filter((row) => row.cqi_action_required);
+
+    const missingActionPlan = requiredVisionMissionRows.some((row) => {
+      const key = getVisionMissionCqiKey(row);
+      return !(cqiDrafts[key] || '').trim();
+    });
+
+    if (missingActionPlan) {
+      toast.error('Please input the required CQI Action Plan notes before exporting the final report.');
       return;
     }
 
@@ -535,6 +639,7 @@ const OBEReportDashboard: React.FC = () => {
           cloCqiRows={dashboard.cloCqiRows}
           gaCqiRows={dashboard.gaCqiRows}
           peoCqiRows={dashboard.peoCqiRows}
+          visionMissionAnalytics={dashboard.visionMissionAnalytics}
         />
       );
 
@@ -558,24 +663,82 @@ const OBEReportDashboard: React.FC = () => {
       ? Math.round((achievedCount / dashboard.gaRows.length) * 100)
       : 0;
 
-  // CHANGED: returns null (renders nothing) when there are no CQI rows —
-  // no heading, no card, no "no entries found" message
+  const toggleSection = (sectionKey: string) => {
+    setExpandedSections((current) => ({
+      ...current,
+      [sectionKey]: !current[sectionKey],
+    }));
+  };
+
+  const toggleList = (listKey: string) => {
+    setExpandedLists((current) => ({
+      ...current,
+      [listKey]: !current[listKey],
+    }));
+  };
+
+  const renderSectionHeader = (
+    sectionKey: string,
+    icon: React.ReactNode,
+    title: string,
+    meta?: string
+  ) => (
+    <button
+      type="button"
+      onClick={() => toggleSection(sectionKey)}
+      className="mb-6 flex w-full items-center justify-between gap-4 text-left"
+    >
+      <span className="flex items-center gap-3">
+        {icon}
+        <span>
+          <span className="block text-2xl font-black text-gray-900">{title}</span>
+          {meta && <span className="mt-1 block text-xs font-bold uppercase tracking-wider text-gray-400">{meta}</span>}
+        </span>
+      </span>
+      <span className="rounded-xl border border-gray-200 p-2 text-gray-600">
+        {expandedSections[sectionKey] ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+      </span>
+    </button>
+  );
+
   const renderCqiSummarySection = (
     title: string,
     rows: DashboardCQIRow[],
-    accentClassName: string
+    accentClassName: string,
+    sectionKey: string
   ) => {
     if (!rows || rows.length === 0) {
       return null;
     }
 
+    const expanded = Boolean(expandedSections[sectionKey]);
+    const visibleRows = expanded ? rows : rows.slice(0, 3);
+
     return (
       <div className="mt-6 rounded-2xl border border-gray-100 bg-gray-50/70 p-5">
         <div className="flex items-center justify-between gap-3 mb-4">
-          <h3 className="text-lg font-black text-gray-900">{title}</h3>
-          <span className={`px-3 py-1 rounded-full text-xs font-black uppercase ${accentClassName}`}>
-            {rows.length} item{rows.length === 1 ? '' : 's'}
-          </span>
+          <button
+            type="button"
+            onClick={() => toggleSection(sectionKey)}
+            className="flex items-center gap-2 text-left text-lg font-black text-gray-900"
+          >
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            {title}
+          </button>
+          <div className="flex items-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-xs font-black uppercase ${accentClassName}`}>
+              {rows.length} item{rows.length === 1 ? '' : 's'}
+            </span>
+            {rows.length > 3 && (
+              <button
+                type="button"
+                onClick={() => toggleSection(sectionKey)}
+                className="text-xs font-black uppercase tracking-wider text-gray-500 hover:text-gray-900"
+              >
+                {expanded ? 'Show less' : 'See more'}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
@@ -589,7 +752,7 @@ const OBEReportDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
+              {visibleRows.map((row, index) => (
                 <tr key={`${row.type}-${row.item}-${index}`} className="border-b border-gray-100 align-top">
                   <td className="p-4 font-semibold text-gray-900">{row.item}</td>
                   <td className="p-4 text-gray-700">{row.detail}</td>
@@ -600,6 +763,175 @@ const OBEReportDashboard: React.FC = () => {
             </tbody>
           </table>
         </div>
+      </div>
+    );
+  };
+
+  const renderVisionMissionRows = (title: string, rows: VisionMissionAnalyticsRow[], listKey: string) => {
+    const expanded = Boolean(expandedLists[listKey]);
+    const visibleRows = expanded ? rows : rows.slice(0, 4);
+
+    return (
+    <div>
+      <h3 className="mb-3 text-lg font-black text-gray-900">{title}</h3>
+      <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+              <th className="p-4 font-black text-xs uppercase tracking-wider">Keyword</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Target KPI %</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Attainment Score %</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Evaluation Status</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider">HOD Corrective Measures / CQI Action Plan</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="p-5 text-center font-semibold text-gray-400">
+                  No approved keywords are available.
+                </td>
+              </tr>
+            ) : (
+              visibleRows.map((row) => {
+                const key = getVisionMissionCqiKey(row);
+                const draftValue = cqiDrafts[key] ?? row.hod_action_plan ?? '';
+                const isEditable = Boolean(dashboard?.visionMissionAnalytics?.is_hod && row.cqi_action_required);
+
+                return (
+                  <tr key={key} className="border-b border-gray-100 align-top">
+                    <td className="p-4">
+                      <p className="font-black text-gray-900">{row.keyword}</p>
+                      <p className="mt-1 text-xs font-semibold text-gray-400">
+                        {row.mapped_count} mapped item{row.mapped_count === 1 ? '' : 's'}
+                      </p>
+                    </td>
+                    <td className="p-4 text-center font-semibold text-gray-700">{row.target_kpi.toFixed(1)}</td>
+                    <td className="p-4 text-center font-black text-gray-900">
+                      {row.attainment_score === null ? 'N/A' : row.attainment_score.toFixed(1)}
+                    </td>
+                    <td className="p-4 text-center">
+                      <span
+                        className={`inline-flex px-4 py-1 rounded-full text-xs font-black uppercase ${
+                          row.status === 'Achieved'
+                            ? 'bg-green-100 text-green-700'
+                            : row.status === 'Not Achieved'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="p-4 min-w-[280px]">
+                      {row.cqi_action_required ? (
+                        isEditable ? (
+                          <div className="space-y-2">
+                            <textarea
+                              value={draftValue}
+                              onChange={(event) => handleVisionMissionCqiChange(row, event.target.value)}
+                              onBlur={() => {
+                                if ((draftValue || '').trim() !== (row.hod_action_plan || '').trim()) {
+                                  void handleSaveVisionMissionCqi(row);
+                                }
+                              }}
+                              className="min-h-[92px] w-full rounded-xl border border-red-100 bg-red-50/40 p-3 text-sm font-semibold text-gray-700 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleSaveVisionMissionCqi(row)}
+                              disabled={savingCqiKey === key}
+                              className="rounded-xl bg-red-600 px-4 py-2 text-xs font-black uppercase tracking-wider text-white shadow-sm transition-colors hover:bg-red-700 disabled:opacity-60"
+                            >
+                              {savingCqiKey === key ? 'Saving...' : 'Save CQI Entry'}
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-sm font-semibold text-gray-700">
+                            {draftValue || 'Pending HOD action plan'}
+                          </p>
+                        )
+                      ) : (
+                        <p className="text-sm font-semibold text-gray-400">No CQI action required</p>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 4 && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => toggleList(listKey)}
+            className="flex items-center gap-2 rounded-xl border border-gray-200 px-4 py-2 text-xs font-black uppercase tracking-wider text-gray-600 hover:border-gray-300 hover:text-gray-900"
+          >
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {expanded ? 'Show less' : `See ${rows.length - visibleRows.length} more`}
+          </button>
+        </div>
+      )}
+    </div>
+    );
+  };
+
+  const renderVisionMissionExecutiveOverview = () => {
+    const analytics = dashboard?.visionMissionAnalytics;
+    if (!analytics) {
+      return null;
+    }
+
+    return (
+      <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+        {renderSectionHeader(
+          'visionMission',
+          <FileText className="w-8 h-8 text-slate-700" />,
+          'Vision and Mission Executive Summary',
+          `${analytics.vision_rows.length + analytics.mission_rows.length} keyword metric${analytics.vision_rows.length + analytics.mission_rows.length === 1 ? '' : 's'}`
+        )}
+
+        {expandedSections.visionMission && (
+          <>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+          <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+            <p className="mb-2 text-xs font-black uppercase tracking-wider text-gray-400">Program Vision</p>
+            <p className="text-sm font-semibold leading-6 text-gray-700">
+              {analytics.vision.statement || 'No active Vision statement configured.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {analytics.vision.keywords.map((keyword) => (
+                <span key={keyword.id} className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700">
+                  {keyword.text}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
+            <p className="mb-2 text-xs font-black uppercase tracking-wider text-gray-400">Program Mission</p>
+            <p className="text-sm font-semibold leading-6 text-gray-700">
+              {analytics.mission.statement || 'No active Mission statement configured.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {analytics.mission.keywords.map((keyword) => (
+                <span key={keyword.id} className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700">
+                  {keyword.text}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {renderVisionMissionRows('Vision Keyword Attainment', analytics.vision_rows, 'visionRows')}
+          {renderVisionMissionRows('Mission Keyword Attainment', analytics.mission_rows, 'missionRows')}
+        </div>
+          </>
+        )}
       </div>
     );
   };
@@ -752,13 +1084,19 @@ const OBEReportDashboard: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <BookOpen className="w-8 h-8 text-purple-600" />
-            <h2 className="text-2xl font-black text-gray-900">Course wise CLO Attainment</h2>
-          </div>
+      {renderVisionMissionExecutiveOverview()}
 
+      <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+        {renderSectionHeader(
+          'courseClo',
+          <BookOpen className="w-8 h-8 text-purple-600" />,
+          'Course wise CLO Attainment',
+          `${filteredCLOGroups.reduce((count, group) => count + group.courses.length, 0)} course report${filteredCLOGroups.reduce((count, group) => count + group.courses.length, 0) === 1 ? '' : 's'}`
+        )}
+
+        {expandedSections.courseClo && (
+          <>
+        <div className="flex items-center justify-end mb-6">
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -863,16 +1201,23 @@ const OBEReportDashboard: React.FC = () => {
         {renderCqiSummarySection(
           'CLO CQI Summary',
           filteredCloCqiRows,
-          'bg-purple-100 text-purple-700'
+          'bg-purple-100 text-purple-700',
+          'cloCqi'
+        )}
+          </>
         )}
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
-        <div className="flex items-center gap-3 mb-6">
-          <Target className="w-8 h-8 text-green-600" />
-          <h2 className="text-2xl font-black text-gray-900">GA Attainment</h2>
-        </div>
+        {renderSectionHeader(
+          'ga',
+          <Target className="w-8 h-8 text-green-600" />,
+          'GA Attainment',
+          `${dashboard?.gaRows.length || 0} GA metric${(dashboard?.gaRows.length || 0) === 1 ? '' : 's'}`
+        )}
 
+        {expandedSections.ga && (
+          <>
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-green-50 border border-green-100 rounded-xl p-4">
             <p className="text-xs font-bold text-green-700 uppercase tracking-wider">Total GAs</p>
@@ -984,16 +1329,23 @@ const OBEReportDashboard: React.FC = () => {
         {renderCqiSummarySection(
           'GA CQI Details',
           dashboard?.gaCqiRows || [],
-          'bg-green-100 text-green-700'
+          'bg-green-100 text-green-700',
+          'gaCqi'
+        )}
+          </>
         )}
       </div>
 
       <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
-        <div className="flex items-center gap-3 mb-6">
-          <Target className="w-8 h-8 text-indigo-600" />
-          <h2 className="text-2xl font-black text-gray-900">PEO Attainment</h2>
-        </div>
+        {renderSectionHeader(
+          'po',
+          <Target className="w-8 h-8 text-indigo-600" />,
+          'PO Attainment',
+          `${dashboard?.peoRows.length || 0} PO metric${(dashboard?.peoRows.length || 0) === 1 ? '' : 's'}`
+        )}
 
+        {expandedSections.po && (
+          <>
         <div
           ref={peoChartRef}
           className="mb-8 p-6 bg-gradient-to-br from-gray-50 to-indigo-50 rounded-2xl border border-indigo-100"
@@ -1015,8 +1367,8 @@ const OBEReportDashboard: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white">
-                <th className="p-4 font-black text-xs uppercase tracking-wider">PEO ID</th>
-                <th className="p-4 font-black text-xs uppercase tracking-wider">PEO Statement</th>
+                <th className="p-4 font-black text-xs uppercase tracking-wider">PO ID</th>
+                <th className="p-4 font-black text-xs uppercase tracking-wider">PO Statement</th>
                 <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Target KPI (%)</th>
                 <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Direct Score (%)</th>
                 <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Indirect Score (%)</th>
@@ -1029,7 +1381,7 @@ const OBEReportDashboard: React.FC = () => {
             <tbody>
               {dashboard?.peoRows.map((peo) => (
                 <tr key={peo.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="p-4 font-semibold text-gray-900">{peo.id}</td>
+                  <td className="p-4 font-semibold text-gray-900">{peo.id.replace(/^PEO-/, 'PO-')}</td>
                   <td className="p-4 text-gray-700 max-w-xs truncate">{peo.statement}</td>
                   <td className="p-4 text-center font-semibold text-gray-700">{peo.targetKpi.toFixed(1)}</td>
                   <td className="p-4 text-center font-semibold text-gray-700">{peo.directScore.toFixed(1)}</td>
@@ -1053,9 +1405,12 @@ const OBEReportDashboard: React.FC = () => {
         </div>
 
         {renderCqiSummarySection(
-          'PEO CQI Summary',
+          'PO CQI Summary',
           dashboard?.peoCqiRows || [],
-          'bg-indigo-100 text-indigo-700'
+          'bg-indigo-100 text-indigo-700',
+          'poCqi'
+        )}
+          </>
         )}
       </div>
 

@@ -189,3 +189,22 @@ class BatchListSerializer(serializers.ModelSerializer):
             return 0
         responses = self.get_alumni_feedback_response_count(obj)
         return round((responses / total) * 100, 2)
+
+
+class BatchFrameworkSnapshotSerializer(serializers.ModelSerializer):
+    program_id = serializers.CharField(source='program.id', read_only=True)
+    program_name = serializers.CharField(source='program.name', read_only=True)
+
+    class Meta:
+        model = Batch
+        fields = [
+            'id',
+            'custom_id',
+            'name',
+            'program_id',
+            'program_name',
+            'created_at',
+            'peo_snapshot',
+            'vision_mission_snapshot',
+        ]
+        read_only_fields = fields

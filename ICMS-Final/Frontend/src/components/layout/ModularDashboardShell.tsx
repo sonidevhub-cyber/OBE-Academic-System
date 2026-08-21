@@ -124,7 +124,7 @@ const ModularDashboardShell: React.FC<ModularDashboardShellProps> = ({
               {tabGroups.map((group) => {
                 const GroupIcon = group.icon;
                 const isOpen = expandedGroups[group.id] ?? false;
-                const groupActive = group.children.some((child) => child.id === activeTab);
+                const groupActive = activeTab === group.id || group.children.some((child) => child.id === activeTab);
 
                 return (
                   <div key={group.id} className="space-y-1">

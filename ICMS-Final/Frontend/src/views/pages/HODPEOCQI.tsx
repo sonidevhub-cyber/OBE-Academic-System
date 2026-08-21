@@ -2,11 +2,26 @@ import React, { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'react-toastify';
-import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Download, History, LoaderCircle, Save } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  History,
+  LoaderCircle,
+  Save,
+  Lock,
+  CheckCheck,
+} from 'lucide-react';
 
 import authService from '../../api/authService';
 import obeService, { Batch } from '../../api/obeService';
-import peoService, { PEOCQIRecord, PEOCQISubmissionHistory, PEOReportItem } from '../../api/peoService';
+import peoService, {
+  PEOCQIRecord,
+  PEOCQISubmissionHistory,
+  PEOReportItem,
+} from '../../api/peoService';
 
 const HODPEOCQI: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -15,24 +30,42 @@ const HODPEOCQI: React.FC = () => {
   const [peoCqiRecords, setPeoCqiRecords] = useState<PEOCQIRecord[]>([]);
   const [expandedPeos, setExpandedPeos] = useState<string[]>([]);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
-  const [localCqiData, setLocalCqiData] = useState<Record<string, { root_cause: string; remedial_plan: string }>>({});
+  const [localCqiData, setLocalCqiData] = useState<
+    Record<string, { root_cause: string; remedial_plan: string }>
+  >({});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
 
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [closingCqiId, setClosingCqiId] = useState<string | null>(null);
+  const [closeForm, setCloseForm] = useState({
+    implemented_in_batch: '',
+    action_taken_description: '',
+  });
+  const [closeSubmitting, setCloseSubmitting] = useState(false);
+
   const currentAuth = authService.getCurrentUser();
-  const isHOD = currentAuth?.role === 'hod' || currentAuth?.user?.secondary_role === 'hod';
+  const isHOD =
+    currentAuth?.role === 'hod' || currentAuth?.user?.secondary_role === 'hod';
 
   const alumniBatches = useMemo(
     () =>
       batches
-        .filter((batch) => batch.is_alumni_feedback_eligible || batch.status === 'graduated')
-        .sort((a, b) => String(b.name || '').localeCompare(String(a.name || ''))),
+        .filter(
+          (batch) =>
+            batch.is_alumni_feedback_eligible || batch.status === 'graduated'
+        )
+        .sort((a, b) =>
+          String(b.name || '').localeCompare(String(a.name || ''))
+        ),
     [batches]
   );
 
-  const activeBatch = alumniBatches.find((batch) => batch.id === selectedBatchId) || alumniBatches[0];
+  const activeBatch =
+    alumniBatches.find((batch) => batch.id === selectedBatchId) ||
+    alumniBatches[0];
 
   const fetchBatches = async () => {
     try {
@@ -83,7 +116,9 @@ const HODPEOCQI: React.FC = () => {
       return;
     }
 
-    const stillAvailable = alumniBatches.some((batch) => batch.id === selectedBatchId);
+    const stillAvailable = alumniBatches.some(
+      (batch) => batch.id === selectedBatchId
+    );
     if (!stillAvailable) {
       setSelectedBatchId(alumniBatches[0].id);
     }
@@ -105,14 +140,27 @@ const HODPEOCQI: React.FC = () => {
   };
 
   const getStatusBadge = (status: string) => {
-    if (status === 'APPROVED') return 'bg-emerald-100 text-emerald-700';
+    if (status === 'CLOSED_IMPLEMENTED')
+      return 'bg-emerald-100 text-emerald-700';
+    if (status === 'APPROVED' || status === 'OPEN')
+      return 'bg-amber-100 text-amber-700';
     if (status === 'DRAFT') return 'bg-yellow-100 text-yellow-700';
     return 'bg-gray-100 text-gray-700';
   };
 
   const getStatusIcon = (status: string) => {
+    if (status === 'CLOSED_IMPLEMENTED')
+      return <CheckCheck className="h-4 w-4" />;
     if (status === 'APPROVED') return <CheckCircle className="h-4 w-4" />;
     return <AlertCircle className="h-4 w-4" />;
+  };
+
+  const canCloseCqi = (record: PEOCQIRecord) => {
+    return (
+      isHOD &&
+      record.status !== 'CLOSED_IMPLEMENTED' &&
+      (record.status === 'APPROVED' || record.status === 'OPEN')
+    );
   };
 
   const handleCreateCqi = async (peoReport: PEOReportItem) => {
@@ -125,7 +173,9 @@ const HODPEOCQI: React.FC = () => {
         remedial_plan: '',
       });
       setPeoCqiRecords((prev) => [newCqi, ...prev]);
-      setExpandedPeos((prev) => (prev.includes(peoReport.peo_id) ? prev : [...prev, peoReport.peo_id]));
+      setExpandedPeos((prev) =>
+        prev.includes(peoReport.peo_id) ? prev : [...prev, peoReport.peo_id]
+      );
       toast.success('PEO CQI record created');
       await fetchData(selectedBatchId);
     } catch (error) {
@@ -136,7 +186,11 @@ const HODPEOCQI: React.FC = () => {
     }
   };
 
-  const handleUpdateCqi = (cqiId: string, field: 'root_cause' | 'remedial_plan', value: string) => {
+  const handleUpdateCqi = (
+    cqiId: string,
+    field: 'root_cause' | 'remedial_plan',
+    value: string
+  ) => {
     setLocalCqiData((prev) => ({
       ...prev,
       [cqiId]: {
@@ -150,7 +204,10 @@ const HODPEOCQI: React.FC = () => {
   const handleSaveCqi = async (cqiId: string) => {
     try {
       setSavingId(cqiId);
-      const data = localCqiData[cqiId] || { root_cause: '', remedial_plan: '' };
+      const data = localCqiData[cqiId] || {
+        root_cause: '',
+        remedial_plan: '',
+      };
       await peoService.updatePEOCQIRecord(cqiId, {
         root_cause: data.root_cause,
         remedial_plan: data.remedial_plan,
@@ -179,8 +236,48 @@ const HODPEOCQI: React.FC = () => {
     }
   };
 
+  const openCloseModal = (cqiId: string) => {
+    setClosingCqiId(cqiId);
+    setCloseForm({ implemented_in_batch: '', action_taken_description: '' });
+    setCloseModalOpen(true);
+  };
+
+  const handleCloseCqi = async () => {
+    if (!closingCqiId) return;
+    if (!closeForm.implemented_in_batch) {
+      toast.error('Please select the batch where actions were implemented');
+      return;
+    }
+    if (!closeForm.action_taken_description.trim()) {
+      toast.error('Please describe the action taken (mandatory)');
+      return;
+    }
+    setCloseSubmitting(true);
+    try {
+      await peoService.closePEOCQI(closingCqiId, {
+        implemented_in_batch: closeForm.implemented_in_batch,
+        action_taken_description: closeForm.action_taken_description.trim(),
+      });
+      toast.success('PO CQI closed successfully — attainment auto-pulled');
+      setCloseModalOpen(false);
+      setClosingCqiId(null);
+      fetchData(selectedBatchId);
+    } catch (error: any) {
+      console.error(error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        'Failed to close CQI';
+      toast.error(msg);
+    } finally {
+      setCloseSubmitting(false);
+    }
+  };
+
   const getCqiRecordForPeo = (peoId: string) =>
-    peoCqiRecords.find((record) => record.peo === peoId || record.peo_id === peoId);
+    peoCqiRecords.find(
+      (record) => record.peo === peoId || record.peo_id === peoId
+    );
 
   const handleDownloadPdf = async () => {
     if (!activeBatch) {
@@ -194,7 +291,7 @@ const HODPEOCQI: React.FC = () => {
       const pageWidth = pdf.internal.pageSize.getWidth();
       const marginX = 12;
       const generatedAt = new Date().toLocaleString();
-      const title = 'PEO CQI Advisory Export';
+      const title = 'PO CQI Advisory Export';
 
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(16);
@@ -204,36 +301,57 @@ const HODPEOCQI: React.FC = () => {
       pdf.setFontSize(10);
       pdf.text(`Batch: ${activeBatch.name || 'N/A'}`, marginX, 22);
       pdf.text(`Generated on: ${generatedAt}`, marginX, 28);
-      pdf.text(`Total PEOs: ${peoReports.length}`, marginX, 34);
+      pdf.text(`Total POs: ${peoReports.length}`, marginX, 34);
 
       pdf.setFont('helvetica', 'bold');
-      pdf.text(`CQI Records: ${peoCqiRecords.length}`, pageWidth - marginX, 22, { align: 'right' });
+      pdf.text(`CQI Records: ${peoCqiRecords.length}`, pageWidth - marginX, 22, {
+        align: 'right',
+      });
       pdf.text(
-        `Approved CQIs: ${peoCqiRecords.filter((record) => record.status === 'APPROVED').length}`,
+        `Approved CQIs: ${
+          peoCqiRecords.filter(
+            (record) =>
+              record.status === 'APPROVED' || record.status === 'CLOSED_IMPLEMENTED'
+          ).length
+        }`,
         pageWidth - marginX,
         28,
         { align: 'right' }
       );
-      pdf.text(`Pending CQIs: ${peoCqiRecords.filter((record) => record.status !== 'APPROVED').length}`, pageWidth - marginX, 34, {
-        align: 'right',
-      });
+      pdf.text(
+        `Pending CQIs: ${
+          peoCqiRecords.filter(
+            (record) =>
+              record.status !== 'APPROVED' && record.status !== 'CLOSED_IMPLEMENTED'
+          ).length
+        }`,
+        pageWidth - marginX,
+        34,
+        {
+          align: 'right',
+        }
+      );
 
       autoTable(pdf, {
         startY: 40,
-        head: [[
-          'PEO Code',
-          'PEO Title',
-          'Final Score',
-          'CQI Status',
-          'Approved On',
-          'Root Cause',
-          'Corrective Action Plan',
-        ]],
+        head: [
+          [
+            'PO Code',
+            'PO Title',
+            'Final Score',
+            'CQI Status',
+            'Approved On',
+            'Root Cause',
+            'Corrective Action Plan',
+          ],
+        ],
         body: peoReports.length
           ? peoReports.map((peoReport) => {
               const existingCqi = getCqiRecordForPeo(peoReport.peo_id);
-              const needsCqi = peoReport.final_score !== null && peoReport.final_score < 60;
-              const approvedOn = existingCqi?.updated_at || existingCqi?.created_at || '-';
+              const needsCqi =
+                peoReport.final_score !== null && peoReport.final_score < 60;
+              const approvedOn =
+                existingCqi?.updated_at || existingCqi?.created_at || '-';
               const draft = localCqiData[existingCqi?.id || ''] || {
                 root_cause: existingCqi?.root_cause || '',
                 remedial_plan: existingCqi?.remedial_plan || '',
@@ -242,9 +360,13 @@ const HODPEOCQI: React.FC = () => {
               return [
                 peoReport.peo_code,
                 peoReport.peo_title,
-                peoReport.final_score === null ? 'N/A' : `${peoReport.final_score.toFixed(1)}%`,
+                peoReport.final_score === null
+                  ? 'N/A'
+                  : `${peoReport.final_score.toFixed(1)}%`,
                 existingCqi?.status || (needsCqi ? 'Needs CQI' : 'Achieved'),
-                approvedOn === '-' ? '-' : new Date(approvedOn).toLocaleDateString(),
+                approvedOn === '-'
+                  ? '-'
+                  : new Date(approvedOn).toLocaleDateString(),
                 needsCqi
                   ? draft.root_cause || 'Pending HOD submission'
                   : draft.root_cause || 'Not required',
@@ -253,7 +375,7 @@ const HODPEOCQI: React.FC = () => {
                   : draft.remedial_plan || 'Not required',
               ];
             })
-          : [['-', 'No PEO records available', '-', '-', '-', '-', '-']],
+          : [['-', 'No PO records available', '-', '-', '-', '-', '-']],
         theme: 'grid',
         styles: {
           fontSize: 6.5,
@@ -281,11 +403,11 @@ const HODPEOCQI: React.FC = () => {
         margin: { left: marginX, right: marginX, bottom: 12 },
       });
 
-      pdf.save(`peo-cqi-advisory-${activeBatch.name || 'batch'}.pdf`);
-      toast.success('PEO CQI PDF downloaded');
+      pdf.save(`po-cqi-advisory-${activeBatch.name || 'batch'}.pdf`);
+      toast.success('PO CQI PDF downloaded');
     } catch (error) {
-      console.error('Failed to generate PEO CQI PDF:', error);
-      toast.error('Failed to generate PEO CQI PDF');
+      console.error('Failed to generate PO CQI PDF:', error);
+      toast.error('Failed to generate PO CQI PDF');
     } finally {
       setPdfLoading(false);
     }
@@ -296,10 +418,15 @@ const HODPEOCQI: React.FC = () => {
       <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.3em] text-gray-400">PEO CQI Advisory Export</p>
-            <h2 className="mt-2 text-2xl font-black text-gray-900">PEO CQI review and action plan</h2>
+            <p className="text-xs font-black uppercase tracking-[0.3em] text-gray-400">
+              PO CQI Advisory Export
+            </p>
+            <h2 className="mt-2 text-2xl font-black text-gray-900">
+              PO CQI review, action plan, and closing loop
+            </h2>
             <p className="mt-2 text-sm text-gray-500">
-              Select an alumni batch to review PEO attainment and manage CQI in the same GA-style layout.
+              Select an alumni batch to review PO attainment, manage CQI, and close
+              the loop with auto-pulled resulting attainment.
             </p>
           </div>
 
@@ -325,14 +452,20 @@ const HODPEOCQI: React.FC = () => {
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-2xl font-black text-gray-900">CQI Advisory Export</h2>
+          <h2 className="text-2xl font-black text-gray-900">
+            CQI Advisory Export
+          </h2>
           <button
             type="button"
             onClick={handleDownloadPdf}
             disabled={!activeBatch || loading || pdfLoading}
             className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {pdfLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {pdfLoading ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
             Download PDF
           </button>
         </div>
@@ -341,10 +474,17 @@ const HODPEOCQI: React.FC = () => {
             Batch: {activeBatch?.name || 'Select alumni batch'}
           </div>
           <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
-            Total PEOs: {peoReports.length}
+            Total POs: {peoReports.length}
           </div>
           <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
             CQI Records: {peoCqiRecords.length}
+          </div>
+          <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            Closed:{' '}
+            {
+              peoCqiRecords.filter((r) => r.status === 'CLOSED_IMPLEMENTED')
+                .length
+            }
           </div>
         </div>
       </div>
@@ -359,8 +499,10 @@ const HODPEOCQI: React.FC = () => {
       {!loading && selectedBatchId && peoReports.length === 0 && (
         <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
           <div className="text-5xl mb-4">🎉</div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">No PEO records for this batch</h3>
-          <p className="text-gray-600">All PEOs met their targets.</p>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            No PO records for this batch
+          </h3>
+          <p className="text-gray-600">All POs met their targets.</p>
         </div>
       )}
 
@@ -371,10 +513,10 @@ const HODPEOCQI: React.FC = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
-                    PEO Code
+                    PO Code
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
-                    PEO Title
+                    PO Title
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
                     Direct Score
@@ -389,7 +531,7 @@ const HODPEOCQI: React.FC = () => {
                     CQI Status
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
-                    Approved On
+                    Resulting At.
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
                     Actions
@@ -401,7 +543,8 @@ const HODPEOCQI: React.FC = () => {
                   const existingCqi = getCqiRecordForPeo(peoReport.peo_id);
                   const isExpanded = expandedPeos.includes(peoReport.peo_id);
                   const kpi = 60;
-                  const needsCqi = peoReport.final_score !== null && peoReport.final_score < kpi;
+                  const needsCqi =
+                    peoReport.final_score !== null && peoReport.final_score < kpi;
                   const draft = localCqiData[existingCqi?.id || ''] || {
                     root_cause: existingCqi?.root_cause || '',
                     remedial_plan: existingCqi?.remedial_plan || '',
@@ -410,16 +553,32 @@ const HODPEOCQI: React.FC = () => {
                   return (
                     <React.Fragment key={peoReport.peo_id}>
                       <tr className="hover:bg-gray-50">
-                        <td className="px-4 py-4 text-sm font-semibold text-gray-900">{peoReport.peo_code}</td>
-                        <td className="px-4 py-4 text-sm text-gray-700">{peoReport.peo_title}</td>
-                        <td className="px-4 py-4 text-sm text-gray-700">{peoReport.direct_score?.toFixed(1) ?? '—'}%</td>
-                        <td className="px-4 py-4 text-sm text-gray-700">{peoReport.indirect_score?.toFixed(1) ?? '—'}%</td>
-                        <td className="px-4 py-4 text-sm font-bold text-gray-900">{peoReport.final_score?.toFixed(1) ?? '0.0'}%</td>
+                        <td className="px-4 py-4 text-sm font-semibold text-gray-900">
+                          {peoReport.peo_code}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-700">
+                          {peoReport.peo_title}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-700">
+                          {peoReport.direct_score?.toFixed(1) ?? '—'}%
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-700">
+                          {peoReport.indirect_score?.toFixed(1) ?? '—'}%
+                        </td>
+                        <td className="px-4 py-4 text-sm font-bold text-gray-900">
+                          {peoReport.final_score?.toFixed(1) ?? '0.0'}%
+                        </td>
                         <td className="px-4 py-4">
                           {existingCqi ? (
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadge(existingCqi.status)}`}>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadge(
+                                existingCqi.status
+                              )}`}
+                            >
                               {getStatusIcon(existingCqi.status)}
-                              {existingCqi.status}
+                              {existingCqi.status === 'CLOSED_IMPLEMENTED'
+                                ? 'Closed'
+                                : existingCqi.status}
                             </span>
                           ) : needsCqi ? (
                             <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-red-700">
@@ -432,11 +591,30 @@ const HODPEOCQI: React.FC = () => {
                           )}
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-700">
-                          {existingCqi?.updated_at
-                            ? new Date(existingCqi.updated_at).toLocaleDateString()
-                            : existingCqi?.created_at
-                              ? new Date(existingCqi.created_at).toLocaleDateString()
-                              : '-'}
+                          {existingCqi?.resulting_attainment !== null &&
+                          existingCqi?.resulting_attainment !== undefined ? (
+                            <div>
+                              <span className="font-bold">
+                                {Number(
+                                  existingCqi.resulting_attainment
+                                ).toFixed(1)}
+                                %
+                              </span>
+                              {existingCqi.implemented_in_batch_name && (
+                                <div className="text-xs text-gray-500">
+                                  Batch: {existingCqi.implemented_in_batch_name}
+                                </div>
+                              )}
+                            </div>
+                          ) : existingCqi?.status === 'CLOSED_IMPLEMENTED' ? (
+                            '—'
+                          ) : existingCqi ? (
+                            <span className="text-gray-400 text-xs italic">
+                              Pending close
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
@@ -445,7 +623,11 @@ const HODPEOCQI: React.FC = () => {
                               onClick={() => togglePeoExpansion(peoReport.peo_id)}
                               className="inline-flex items-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200"
                             >
-                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
                               {isExpanded ? 'Hide' : 'Open'}
                             </button>
                             {!existingCqi && needsCqi ? (
@@ -459,6 +641,22 @@ const HODPEOCQI: React.FC = () => {
                                 Create
                               </button>
                             ) : null}
+                            {existingCqi && canCloseCqi(existingCqi) && (
+                              <button
+                                type="button"
+                                onClick={() => openCloseModal(existingCqi.id)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow hover:bg-emerald-700"
+                              >
+                                <CheckCheck className="h-4 w-4" />
+                                Close
+                              </button>
+                            )}
+                            {existingCqi?.status === 'CLOSED_IMPLEMENTED' && (
+                              <span className="inline-flex items-center gap-1 rounded-xl bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500">
+                                <Lock className="h-3.5 w-3.5" />
+                                Locked
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -468,36 +666,125 @@ const HODPEOCQI: React.FC = () => {
                           <td colSpan={8} className="bg-gray-50/70 p-0">
                             <div className="grid gap-4 p-5 lg:grid-cols-2">
                               <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
-                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Root Cause</p>
+                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                  Root Cause
+                                </p>
                                 <textarea
                                   value={draft.root_cause}
-                                  onChange={(e) => handleUpdateCqi(existingCqi.id, 'root_cause', e.target.value)}
+                                  onChange={(e) =>
+                                    handleUpdateCqi(
+                                      existingCqi.id,
+                                      'root_cause',
+                                      e.target.value
+                                    )
+                                  }
                                   className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
                                   rows={4}
                                   placeholder="Describe the root cause..."
-                                  disabled={existingCqi.status === 'APPROVED' || existingCqi.is_locked}
+                                  disabled={
+                                    existingCqi.status === 'APPROVED' ||
+                                    existingCqi.status === 'CLOSED_IMPLEMENTED' ||
+                                    existingCqi.is_locked
+                                  }
                                 />
                               </div>
                               <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
-                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Remedial Plan</p>
+                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                  Remedial Plan
+                                </p>
                                 <textarea
                                   value={draft.remedial_plan}
-                                  onChange={(e) => handleUpdateCqi(existingCqi.id, 'remedial_plan', e.target.value)}
+                                  onChange={(e) =>
+                                    handleUpdateCqi(
+                                      existingCqi.id,
+                                      'remedial_plan',
+                                      e.target.value
+                                    )
+                                  }
                                   className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
                                   rows={4}
                                   placeholder="Describe the remedial plan..."
-                                  disabled={existingCqi.status === 'APPROVED' || existingCqi.is_locked}
+                                  disabled={
+                                    existingCqi.status === 'APPROVED' ||
+                                    existingCqi.status === 'CLOSED_IMPLEMENTED' ||
+                                    existingCqi.is_locked
+                                  }
                                 />
                               </div>
+
+                              {existingCqi.status === 'CLOSED_IMPLEMENTED' && (
+                                <>
+                                  <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
+                                    <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                      Action Taken Description
+                                    </p>
+                                    <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                                      {existingCqi.action_taken_description || '—'}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
+                                    <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                      Closing Details
+                                    </p>
+                                    <div className="space-y-1 text-sm text-gray-700">
+                                      <div>
+                                        <span className="font-semibold">
+                                          Implemented in:
+                                        </span>{' '}
+                                        {existingCqi.implemented_in_batch_name ||
+                                          existingCqi.implemented_in_batch ||
+                                          '—'}
+                                      </div>
+                                      <div>
+                                        <span className="font-semibold">
+                                          Resulting attainment:
+                                        </span>{' '}
+                                        {existingCqi.resulting_attainment !== null &&
+                                        existingCqi.resulting_attainment !==
+                                          undefined
+                                          ? `${Number(
+                                              existingCqi.resulting_attainment
+                                            ).toFixed(1)}% (auto-calculated)`
+                                          : '—'}
+                                      </div>
+                                      <div>
+                                        <span className="font-semibold">
+                                          Closed by:
+                                        </span>{' '}
+                                        {existingCqi.closed_by_name ||
+                                          existingCqi.closed_by ||
+                                          '—'}
+                                      </div>
+                                      <div>
+                                        <span className="font-semibold">
+                                          Closed on:
+                                        </span>{' '}
+                                        {existingCqi.closed_at
+                                          ? new Date(
+                                              existingCqi.closed_at
+                                            ).toLocaleString()
+                                          : '—'}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
 
                               <div className="lg:col-span-2 rounded-xl bg-white p-4 shadow-sm border border-gray-100">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                   <div className="flex items-center gap-3">
-                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadge(existingCqi.status)}`}>
+                                    <span
+                                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${getStatusBadge(
+                                        existingCqi.status
+                                      )}`}
+                                    >
                                       {getStatusIcon(existingCqi.status)}
-                                      {existingCqi.status}
+                                      {existingCqi.status === 'CLOSED_IMPLEMENTED'
+                                        ? 'Closed'
+                                        : existingCqi.status}
                                     </span>
-                                    {existingCqi.history && existingCqi.history.length > 0 ? (
+                                    {existingCqi.history &&
+                                    existingCqi.history.length > 0 ? (
                                       <button
                                         type="button"
                                         onClick={() => toggleHistory(existingCqi.id)}
@@ -509,7 +796,10 @@ const HODPEOCQI: React.FC = () => {
                                     ) : null}
                                   </div>
 
-                                  {existingCqi.status !== 'APPROVED' && !existingCqi.is_locked && isHOD ? (
+                                  {existingCqi.status !== 'APPROVED' &&
+                                  existingCqi.status !== 'CLOSED_IMPLEMENTED' &&
+                                  !existingCqi.is_locked &&
+                                  isHOD ? (
                                     <div className="flex gap-3">
                                       <button
                                         type="button"
@@ -521,16 +811,24 @@ const HODPEOCQI: React.FC = () => {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => handleSubmitCqi(existingCqi.id)}
+                                        onClick={() =>
+                                          handleSubmitCqi(existingCqi.id)
+                                        }
                                         disabled={savingId === existingCqi.id}
                                         className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
                                       >
                                         Submit & Approve
                                       </button>
                                     </div>
+                                  ) : existingCqi.status === 'APPROVED' ? (
+                                    <div className="text-sm font-semibold text-amber-600">
+                                      Approved — use Close to complete the loop
+                                    </div>
                                   ) : (
                                     <div className="text-sm font-semibold text-gray-500">
-                                      {existingCqi.status === 'APPROVED' ? 'Locked - Approved' : 'Awaiting HOD action'}
+                                      {existingCqi.status === 'CLOSED_IMPLEMENTED'
+                                        ? 'Locked — Closed'
+                                        : 'Awaiting HOD action'}
                                     </div>
                                   )}
                                 </div>
@@ -541,26 +839,45 @@ const HODPEOCQI: React.FC = () => {
                                       Submission History
                                     </div>
                                     <div className="space-y-3">
-                                      {existingCqi.history?.map((historyItem: PEOCQISubmissionHistory) => (
-                                        <div key={historyItem.id} className="rounded-xl bg-white p-3">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-black uppercase tracking-wider text-gray-500">
-                                              {historyItem.status_at_time}
-                                            </span>
-                                            <span className="text-xs text-gray-500">
-                                              {new Date(historyItem.submitted_at).toLocaleString()}
-                                            </span>
+                                      {existingCqi.history?.map(
+                                        (historyItem: PEOCQISubmissionHistory) => (
+                                          <div
+                                            key={historyItem.id}
+                                            className="rounded-xl bg-white p-3"
+                                          >
+                                            <div className="flex items-center justify-between mb-2">
+                                              <span className="text-xs font-black uppercase tracking-wider text-gray-500">
+                                                {historyItem.status_at_time}
+                                              </span>
+                                              <span className="text-xs text-gray-500">
+                                                {new Date(
+                                                  historyItem.submitted_at
+                                                ).toLocaleString()}
+                                              </span>
+                                            </div>
+                                            <div className="text-sm text-gray-600 space-y-1">
+                                              {historyItem.root_cause_snapshot ? (
+                                                <div>
+                                                  <span className="font-semibold">
+                                                    Root Cause:
+                                                  </span>{' '}
+                                                  {historyItem.root_cause_snapshot}
+                                                </div>
+                                              ) : null}
+                                              {historyItem.remedial_plan_snapshot ? (
+                                                <div>
+                                                  <span className="font-semibold">
+                                                    Remedial Plan:
+                                                  </span>{' '}
+                                                  {
+                                                    historyItem.remedial_plan_snapshot
+                                                  }
+                                                </div>
+                                              ) : null}
+                                            </div>
                                           </div>
-                                          <div className="text-sm text-gray-600 space-y-1">
-                                            {historyItem.root_cause_snapshot ? (
-                                              <div><span className="font-semibold">Root Cause:</span> {historyItem.root_cause_snapshot}</div>
-                                            ) : null}
-                                            {historyItem.remedial_plan_snapshot ? (
-                                              <div><span className="font-semibold">Remedial Plan:</span> {historyItem.remedial_plan_snapshot}</div>
-                                            ) : null}
-                                          </div>
-                                        </div>
-                                      ))}
+                                        )
+                                      )}
                                     </div>
                                   </div>
                                 ) : null}
@@ -574,6 +891,106 @@ const HODPEOCQI: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {closeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white">
+                  <CheckCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-gray-900">
+                    Close PO CQI — Complete the Loop
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Mandatory documentation — applies whether target was met or not.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
+                  Implementation Batch <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-emerald-500 focus:ring-0"
+                  value={closeForm.implemented_in_batch}
+                  onChange={(e) =>
+                    setCloseForm((prev) => ({
+                      ...prev,
+                      implemented_in_batch: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">
+                    Select the batch where actions were implemented
+                  </option>
+                  {batches.map((batch) => (
+                    <option key={batch.id} value={batch.id}>
+                      {batch.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
+                  Action Taken Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition-all focus:border-emerald-500"
+                  rows={6}
+                  placeholder="Describe the corrective actions implemented — curriculum changes, industry linkages, alumni engagement improvements, teaching enhancements, etc."
+                  value={closeForm.action_taken_description}
+                  onChange={(e) =>
+                    setCloseForm((prev) => ({
+                      ...prev,
+                      action_taken_description: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-amber-700 mb-1">
+                  Resulting Attainment
+                </p>
+                <p className="text-sm text-amber-800">
+                  Automatically pulled from the{' '}
+                  <span className="font-bold">
+                    calculated cumulative PO attainment
+                  </span>{' '}
+                  for the implementation batch. Not editable.
+                </p>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setCloseModalOpen(false);
+                  setClosingCqiId(null);
+                }}
+                disabled={closeSubmitting}
+                className="rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-300 disabled:opacity-70"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseCqi}
+                disabled={closeSubmitting}
+                className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {closeSubmitting ? 'Closing...' : 'Confirm Close & Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}

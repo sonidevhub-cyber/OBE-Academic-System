@@ -20,6 +20,9 @@ from .models import (
     PEOCQIRecord,
     PEOCQISubmissionHistory,
     SurveyQuestion,
+    Vision, Mission, VisionKeyword, MissionKeyword,
+    VisionMissionMapping, PEOKeywordMapping,
+    VisionMissionCQIRecord,
 )
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
@@ -163,12 +166,14 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
     closed_by_name = serializers.CharField(
         source='closed_by.full_name', read_only=True, allow_null=True
     )
+    implemented_in_batch_name = serializers.CharField(
+        source='implemented_in_batch.name', read_only=True, allow_null=True
+    )
 
     def get_ga_code(self, obj):
         return f'GA-{obj.ga.order_number}'
         
     def get_contributing_courses(self, obj):
-        # Get all course sessions for the batch (ASSESSMENT_DONE only)
         cs_qs = CourseSession.objects.filter(
             batch=obj.batch,
             is_active=True,
@@ -177,7 +182,6 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
         
         courses = []
         for session in cs_qs:
-            # Get the CourseGAScore for this session and GA
             score = CourseGAScore.objects.filter(
                 course_session=session,
                 ga=obj.ga
@@ -190,8 +194,6 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
                     'enrolled_students': score.enrolled_students,
                     'semester': session.semester.number if session.semester else None,
                 })
-                
-        # Sort ascending by course_ga_score (so lowest scores come first)
         courses.sort(key=lambda x: x['course_ga_score'])
         return courses
 
@@ -206,12 +208,14 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
             'issue_statement', 'hod_action_plan', 'triggered_at', 
             'saved_by_hod', 'saved_by_hod_name', 'saved_at',
             'remedy_text', 'closed_by', 'closed_by_name', 'closed_at',
+            'implemented_in_batch', 'implemented_in_batch_name',
+            'action_taken_description', 'resulting_attainment',
             'is_active'
         ]
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'history', 'contributing_courses',
             'is_locked', 'triggered_at', 'saved_at', 'saved_by_hod',
-            'closed_by', 'closed_at'
+            'closed_by', 'closed_at', 'resulting_attainment', 'implemented_in_batch_name'
         ]
 
 
@@ -228,12 +232,17 @@ class PEOCQIRecordSerializer(serializers.ModelSerializer):
     peo_code = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.name', read_only=True)
     contributing_gas = serializers.SerializerMethodField()
+    closed_by_name = serializers.CharField(
+        source='closed_by.full_name', read_only=True, allow_null=True
+    )
+    implemented_in_batch_name = serializers.CharField(
+        source='implemented_in_batch.name', read_only=True, allow_null=True
+    )
 
     def get_peo_code(self, obj):
         return f'PEO-{obj.peo.order_number}'
         
     def get_contributing_gas(self, obj):
-        # Get GA-PEO mappings for this PEO
         mappings = GAPEOMapping.objects.filter(
             peo=obj.peo,
             is_active=True
@@ -241,7 +250,6 @@ class PEOCQIRecordSerializer(serializers.ModelSerializer):
         
         gas = []
         for mapping in mappings:
-            # Get GA score for this batch
             from .services import calculate_weighted_ga_score
             ga_result = calculate_weighted_ga_score(mapping.ga, obj.batch)
             if ga_result and ga_result['final_score']:
@@ -261,9 +269,16 @@ class PEOCQIRecordSerializer(serializers.ModelSerializer):
             'attainment_value', 'kpi_threshold_at_trigger',
             'root_cause', 'remedial_plan', 'status',
             'submitted_by', 'is_locked',
-            'created_at', 'updated_at', 'history', 'contributing_gas'
+            'created_at', 'updated_at', 'history', 'contributing_gas',
+            'implemented_in_batch', 'implemented_in_batch_name',
+            'action_taken_description', 'resulting_attainment',
+            'closed_by', 'closed_by_name', 'closed_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'history', 'contributing_gas', 'is_locked']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'history', 'contributing_gas',
+            'is_locked', 'resulting_attainment', 'closed_by', 'closed_at',
+            'implemented_in_batch_name'
+        ]
 
 
 class CourseSessionSerializer(
@@ -493,3 +508,120 @@ class EmployerSurveyResponseSerializer(serializers.ModelSerializer):
             'token_used_at', 'submitted_at', 'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'response_token', 'token_sent_at', 'token_used_at', 'submitted_at', 'created_at', 'updated_at']
+
+
+# ========== VISION & MISSION SERIALIZERS ==========
+
+class VisionSerializer(serializers.ModelSerializer):
+    department_code = serializers.CharField(source='department.code', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = Vision
+        fields = [
+            'id', 'department', 'department_code', 'department_name',
+            'statement', 'is_active', 'created_by', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'department_code', 'department_name', 'created_by', 'created_at', 'updated_at']
+
+
+class MissionSerializer(serializers.ModelSerializer):
+    department_code = serializers.CharField(source='department.code', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = Mission
+        fields = [
+            'id', 'department', 'department_code', 'department_name',
+            'statement', 'is_active', 'created_by', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'department_code', 'department_name', 'created_by', 'created_at', 'updated_at']
+
+
+class VisionKeywordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VisionKeyword
+        fields = ['id', 'vision', 'text', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class MissionKeywordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MissionKeyword
+        fields = ['id', 'mission', 'text', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class VisionMissionMappingSerializer(serializers.ModelSerializer):
+    mission_keyword_text = serializers.CharField(source='mission_keyword.text', read_only=True)
+    vision_keyword_text = serializers.CharField(source='vision_keyword.text', read_only=True)
+
+    class Meta:
+        model = VisionMissionMapping
+        fields = [
+            'id', 'mission_keyword', 'mission_keyword_text',
+            'vision_keyword', 'vision_keyword_text',
+            'is_active', 'created_at'
+        ]
+        read_only_fields = ['id', 'mission_keyword_text', 'vision_keyword_text', 'created_at']
+
+
+class PEOKeywordMappingSerializer(serializers.ModelSerializer):
+    mission_keyword_text = serializers.CharField(source='mission_keyword.text', read_only=True, allow_null=True)
+    vision_keyword_text = serializers.CharField(source='vision_keyword.text', read_only=True, allow_null=True)
+    peo_order_number = serializers.IntegerField(source='peo.order_number', read_only=True)
+    peo_title = serializers.CharField(source='peo.title', read_only=True, allow_null=True)
+
+    class Meta:
+        model = PEOKeywordMapping
+        fields = [
+            'id', 'peo', 'peo_order_number', 'peo_title',
+            'mission_keyword', 'mission_keyword_text',
+            'vision_keyword', 'vision_keyword_text',
+            'is_active', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'peo_order_number', 'peo_title',
+            'mission_keyword_text', 'vision_keyword_text', 'created_at'
+        ]
+
+
+class VisionMissionCQIRecordSerializer(serializers.ModelSerializer):
+    department_code = serializers.CharField(source='department.code', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    reviewed_by_name = serializers.CharField(
+        source='reviewed_by.full_name', read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = VisionMissionCQIRecord
+        fields = [
+            'id', 'department', 'department_code', 'department_name',
+            'statement_type', 'trigger_type', 'review_date',
+            'reviewed_by', 'reviewed_by_name',
+            'previous_statement_snapshot', 'decision', 'justification',
+            'new_statement', 'status', 'is_active',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'department_code', 'department_name',
+            'reviewed_by', 'reviewed_by_name', 'review_date',
+            'status', 'created_at', 'updated_at'
+        ]
+
+    def validate(self, attrs):
+        decision = attrs.get('decision')
+        new_statement = attrs.get('new_statement')
+        justification = attrs.get('justification')
+
+        if decision == 'REVISED' and not new_statement:
+            raise serializers.ValidationError({
+                'new_statement': 'new_statement is required when decision is "Revised".'
+            })
+        if decision == 'RETAINED':
+            attrs['new_statement'] = None
+        if not justification or not str(justification).strip():
+            raise serializers.ValidationError({
+                'justification': 'justification is mandatory.'
+            })
+        return attrs

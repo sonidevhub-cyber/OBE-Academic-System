@@ -8,7 +8,7 @@ from core.models import Batch
 from curriculum.models import CurriculumVersion
 from students.models import Student
 from assessments.models import Assessment, Question, StudentQuestionMark, CQI
-from ..models import CourseSession, CLO
+from ..models import CourseSession, CLO, GACQIRecord, PEOCQIRecord, VisionMissionCQI, VisionMissionCQIRecord
 from ..services import get_teacher_ga_context
 
 
@@ -400,4 +400,246 @@ class CourseCLOReportView(APIView):
             'assessment_effectiveness': assessment_effectiveness,
             'cqi_list': cqi_list
         })
+
+
+def _is_hod(user):
+    role = getattr(user, 'role', '') or ''
+    secondary_role = getattr(user, 'secondary_role', '') or ''
+    active_role = getattr(user, 'active_role', '') or ''
+    return 'hod' in {role.lower(), secondary_role.lower(), active_role.lower()}
+
+
+def _get_user_department_ids(user):
+    dept_ids = set()
+    profile = getattr(user, 'instructor_profile', None)
+    if profile and getattr(profile, 'department', None):
+        dept_ids.add(str(profile.department.id))
+    programs = getattr(user, 'programs', None)
+    if programs:
+        for program in programs.all():
+            if getattr(program, 'department', None):
+                dept_ids.add(str(program.department.id))
+    if _is_hod(user) and not dept_ids:
+        from core.models import Department
+        hod_profile = getattr(user, 'instructor_profile', None)
+        if hod_profile and getattr(hod_profile, 'department_id', None):
+            dept_ids.add(str(hod_profile.department_id))
+        else:
+            dept_ids.update(
+                str(dept_id)
+                for dept_id in Department.objects.filter(
+                    programs__coordinators=user,
+                    is_active=True,
+                ).values_list('id', flat=True)
+            )
+    return dept_ids
+
+
+class CQIClosingSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not _is_hod(request.user) and not getattr(request.user, 'is_superuser', False):
+            return Response(
+                {'error': 'Only HODs or superusers can view the CQI closing summary.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        dept_ids = _get_user_department_ids(request.user)
+        by_department = bool(request.query_params.get('by_department', False))
+
+        def _scope_for_dept(qs, dept_lookup):
+            if by_department and dept_ids and not request.user.is_superuser:
+                return qs.filter(**{f'{dept_lookup}__in': dept_ids})
+            return qs
+
+        ga_closures_qs = GACQIRecord.objects.filter(
+            status='CLOSED_IMPLEMENTED',
+            implemented_in_batch__isnull=False,
+        ).select_related(
+            'ga', 'batch', 'implemented_in_batch', 'closed_by',
+        ).order_by('-closed_at', '-updated_at')
+        ga_closures_qs = _scope_for_dept(
+            ga_closures_qs, 'batch__program__department_id'
+        )
+
+        ga_cqi_closures = []
+        for cqi in ga_closures_qs:
+            flagged_info = None
+            try:
+                flagged_info = {
+                    'ga_id': str(cqi.ga_id),
+                    'ga_code': f'GA-{cqi.ga.order_number}' if cqi.ga else None,
+                    'ga_title': cqi.ga.title if cqi.ga else None,
+                    'triggered_batch_id': str(cqi.batch_id),
+                    'triggered_batch_name': cqi.batch.name if cqi.batch else None,
+                    'triggered_attainment': float(cqi.attainment_value) if cqi.attainment_value is not None else None,
+                    'kpi_threshold_at_trigger': float(cqi.kpi_threshold_at_trigger) if cqi.kpi_threshold_at_trigger is not None else None,
+                    'department': {
+                        'id': str(cqi.batch.program.department_id),
+                        'code': cqi.batch.program.department.code,
+                        'name': cqi.batch.program.department.name,
+                    } if (cqi.batch and cqi.batch.program and cqi.batch.program.department) else None,
+                }
+            except Exception:
+                pass
+            ga_cqi_closures.append({
+                'id': str(cqi.id),
+                'flagged': flagged_info or {
+                    'ga_id': str(cqi.ga_id),
+                    'batch_id': str(cqi.batch_id),
+                },
+                'closed_in_batch': {
+                    'id': str(cqi.implemented_in_batch_id),
+                    'name': cqi.implemented_in_batch.name if cqi.implemented_in_batch else None,
+                } if cqi.implemented_in_batch_id else None,
+                'action_taken': cqi.action_taken_description,
+                'resulting_attainment': float(cqi.resulting_attainment) if cqi.resulting_attainment is not None else None,
+                'closed_by': {
+                    'id': str(cqi.closed_by_id),
+                    'name': cqi.closed_by.full_name if cqi.closed_by else None,
+                } if cqi.closed_by_id else None,
+                'closed_date': cqi.closed_at.isoformat() if cqi.closed_at else None,
+                'status': cqi.status,
+            })
+
+        peo_closures_qs = PEOCQIRecord.objects.filter(
+            status='CLOSED_IMPLEMENTED',
+            implemented_in_batch__isnull=False,
+        ).select_related(
+            'peo', 'batch', 'implemented_in_batch', 'closed_by',
+        ).order_by('-closed_at', '-updated_at')
+        peo_closures_qs = _scope_for_dept(
+            peo_closures_qs, 'batch__program__department_id'
+        )
+
+        peo_cqi_closures = []
+        for cqi in peo_closures_qs:
+            flagged_info = None
+            try:
+                flagged_info = {
+                    'peo_id': str(cqi.peo_id),
+                    'peo_code': f'PEO-{cqi.peo.order_number}' if cqi.peo else None,
+                    'peo_title': cqi.peo.title if cqi.peo else None,
+                    'triggered_batch_id': str(cqi.batch_id),
+                    'triggered_batch_name': cqi.batch.name if cqi.batch else None,
+                    'triggered_attainment': float(cqi.attainment_value) if cqi.attainment_value is not None else None,
+                    'kpi_threshold_at_trigger': float(cqi.kpi_threshold_at_trigger) if cqi.kpi_threshold_at_trigger is not None else None,
+                    'department': {
+                        'id': str(cqi.batch.program.department_id),
+                        'code': cqi.batch.program.department.code,
+                        'name': cqi.batch.program.department.name,
+                    } if (cqi.batch and cqi.batch.program and cqi.batch.program.department) else None,
+                }
+            except Exception:
+                pass
+            peo_cqi_closures.append({
+                'id': str(cqi.id),
+                'flagged': flagged_info or {
+                    'peo_id': str(cqi.peo_id),
+                    'batch_id': str(cqi.batch_id),
+                },
+                'closed_in_batch': {
+                    'id': str(cqi.implemented_in_batch_id),
+                    'name': cqi.implemented_in_batch.name if cqi.implemented_in_batch else None,
+                } if cqi.implemented_in_batch_id else None,
+                'action_taken': cqi.action_taken_description,
+                'resulting_attainment': float(cqi.resulting_attainment) if cqi.resulting_attainment is not None else None,
+                'closed_by': {
+                    'id': str(cqi.closed_by_id),
+                    'name': cqi.closed_by.full_name if cqi.closed_by else None,
+                } if cqi.closed_by_id else None,
+                'closed_date': cqi.closed_at.isoformat() if cqi.closed_at else None,
+                'status': cqi.status,
+            })
+
+        vm_cqi_closures_qs = VisionMissionCQI.objects.filter(
+            status='CLOSED_IMPLEMENTED',
+            implemented_in_batch__isnull=False,
+            is_active=True,
+        ).select_related(
+            'batch', 'batch__program', 'batch__program__department',
+            'implemented_in_batch', 'closed_by',
+            'mission_keyword', 'vision_keyword',
+        ).order_by('-closed_at', '-updated_at')
+        vm_cqi_closures_qs = _scope_for_dept(
+            vm_cqi_closures_qs, 'batch__program__department_id'
+        )
+
+        vision_mission_cqi_closures = []
+        for cqi in vm_cqi_closures_qs:
+            keyword = cqi.mission_keyword or cqi.vision_keyword
+            department = cqi.batch.program.department if cqi.batch and cqi.batch.program else None
+            vision_mission_cqi_closures.append({
+                'id': str(cqi.id),
+                'flagged': {
+                    'statement_type': cqi.keyword_type,
+                    'keyword': keyword.text if keyword else None,
+                    'triggered_batch_id': str(cqi.batch_id),
+                    'triggered_batch_name': cqi.batch.name if cqi.batch else None,
+                    'triggered_attainment': float(cqi.attainment_value) if cqi.attainment_value is not None else None,
+                    'kpi_threshold_at_trigger': float(cqi.kpi_threshold_at_trigger) if cqi.kpi_threshold_at_trigger is not None else None,
+                    'department': {
+                        'id': str(department.id),
+                        'code': department.code,
+                        'name': department.name,
+                    } if department else None,
+                },
+                'closed_in_batch': {
+                    'id': str(cqi.implemented_in_batch_id),
+                    'name': cqi.implemented_in_batch.name if cqi.implemented_in_batch else None,
+                } if cqi.implemented_in_batch_id else None,
+                'action_taken': cqi.action_taken_description,
+                'resulting_attainment': float(cqi.resulting_attainment) if cqi.resulting_attainment is not None else None,
+                'closed_by': {
+                    'id': str(cqi.closed_by_id),
+                    'name': cqi.closed_by.full_name if cqi.closed_by else None,
+                } if cqi.closed_by_id else None,
+                'closed_date': cqi.closed_at.isoformat() if cqi.closed_at else None,
+                'status': cqi.status,
+            })
+
+        vm_qs = VisionMissionCQIRecord.objects.filter(
+            status='REVIEWED',
+            is_active=True,
+        ).select_related(
+            'department', 'reviewed_by',
+        ).order_by('-review_date', '-created_at')
+        vm_qs = _scope_for_dept(vm_qs, 'department_id')
+
+        vision_mission_reviews = []
+        for vm in vm_qs:
+            vision_mission_reviews.append({
+                'id': str(vm.id),
+                'flagged': {
+                    'statement_type': vm.statement_type,
+                    'trigger_type': vm.trigger_type,
+                    'department': {
+                        'id': str(vm.department_id),
+                        'code': vm.department.code if vm.department else None,
+                        'name': vm.department.name if vm.department else None,
+                    },
+                    'previous_statement_snapshot': vm.previous_statement_snapshot,
+                },
+                'closed_in_batch': None,
+                'action_taken': {
+                    'decision': vm.decision,
+                    'justification': vm.justification,
+                    'new_statement': vm.new_statement,
+                },
+                'resulting_outcome': vm.decision,
+                'reviewed_by': {
+                    'id': str(vm.reviewed_by_id),
+                    'name': vm.reviewed_by.full_name if vm.reviewed_by else None,
+                } if vm.reviewed_by_id else None,
+                'review_date': vm.review_date.isoformat() if vm.review_date else None,
+                'status': vm.status,
+            })
+
+        return Response({
+            'ga_cqi_closures': ga_cqi_closures,
+            'peo_cqi_closures': peo_cqi_closures,
+            'vision_mission_cqi_closures': vision_mission_cqi_closures,
+            'vision_mission_reviews': vision_mission_reviews,
+        }, status=status.HTTP_200_OK)
 

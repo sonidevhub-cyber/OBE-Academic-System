@@ -16,16 +16,23 @@ import {
   Unlock,
   GraduationCap,
   Briefcase,
+  History,
   X,
 } from 'lucide-react';
 import obeService, {
   PEO,
   GA,
-  GAPEOMatrix,
   ExitSurveyQuestion,
   SurveyQuestion,
   SurveyQuestionType,
   SurveyType,
+  VisionResponse,
+  MissionResponse,
+  VisionKeyword,
+  MissionKeyword,
+  VisionMissionMappingResponse,
+  POKeywordMappingResponse,
+  VisionMissionCQIReviewRecord,
 } from '../../../api/obeService';
 import peoService, { GAPEOMatrixWithWeight } from '../../../api/peoService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
@@ -33,7 +40,12 @@ import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../..
 import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
 
-type SubTabId = 'vision' | 'peo' | 'ga' | 'ga-peo' | 'clo-pi';
+export type OBEMappingSubTabId = 'vision-mission' | 'peo' | 'ga' | 'vision-mission-map' | 'po-keywords' | 'ga-peo' | 'clo-pi';
+
+interface OBEConfigurationModuleProps {
+  initialSubTab?: OBEMappingSubTabId;
+  hideSubTabs?: boolean;
+}
 
 interface SurveyQuestionDraft {
   _tempId?: string;
@@ -90,15 +102,13 @@ const splitEvenlyWithRounding = (ids: string[], total: number) => {
   return result;
 };
 
-const formatWeight = (weight: number | string | null | undefined): string => {
-  const num = coerceWeight(weight);
-  return Number.isInteger(num) ? String(num) : num.toFixed(2).replace(/\.?0+$/, '');
-};
-
-const CoordinatorOBEMappingModule: React.FC = () => {
+const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
+  initialSubTab,
+  hideSubTabs = false,
+}) => {
   const { currentUser } = useAuth();
   const isHOD = currentUser?.effective_role === 'hod' || currentUser?.role === 'hod';
-  const [activeSubTab, setActiveSubTab] = useState<SubTabId>(isHOD ? 'vision' : 'clo-pi');
+  const [activeSubTab, setActiveSubTab] = useState<OBEMappingSubTabId>(initialSubTab || (isHOD ? 'vision-mission' : 'clo-pi'));
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [versions, setVersions] = useState<CurriculumVersion[]>([]);
@@ -108,9 +118,34 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [clos, setClos] = useState<any[]>([]);
 
-  // Vision State
+  // Vision & Mission State
   const [vision, setVision] = useState('');
+  const [mission, setMission] = useState('');
+  const [departmentVision, setDepartmentVision] = useState<VisionResponse | null>(null);
+  const [departmentMission, setDepartmentMission] = useState<MissionResponse | null>(null);
+  const [visionKeywords, setVisionKeywords] = useState<VisionKeyword[]>([]);
+  const [missionKeywords, setMissionKeywords] = useState<MissionKeyword[]>([]);
+  const [visionCandidates, setVisionCandidates] = useState<string[]>([]);
+  const [missionCandidates, setMissionCandidates] = useState<string[]>([]);
+  const [selectedVisionKeywords, setSelectedVisionKeywords] = useState<Set<string>>(new Set());
+  const [selectedMissionKeywords, setSelectedMissionKeywords] = useState<Set<string>>(new Set());
+  const [manualKeywordInputs, setManualKeywordInputs] = useState<Record<'vision' | 'mission', string>>({
+    vision: '',
+    mission: '',
+  });
+  const [visionMissionData, setVisionMissionData] = useState<VisionMissionMappingResponse | null>(null);
+  const [poKeywordData, setPoKeywordData] = useState<POKeywordMappingResponse | null>(null);
   const [isSavingVision, setIsSavingVision] = useState(false);
+  const [showVisionMissionHistory, setShowVisionMissionHistory] = useState(false);
+  const [visionMissionReviews, setVisionMissionReviews] = useState<VisionMissionCQIReviewRecord[]>([]);
+  const [loadingVisionMissionHistory, setLoadingVisionMissionHistory] = useState(false);
+  const [revisionModal, setRevisionModal] = useState<{
+    type: 'vision' | 'mission';
+    previousStatement: string;
+    newStatement: string;
+  } | null>(null);
+  const [revisionJustification, setRevisionJustification] = useState('');
+  const [revisionTriggerType, setRevisionTriggerType] = useState<'MANUAL' | 'SCHEDULED'>('MANUAL');
 
   // PEO/GA/CLO States
   const [peos, setPeos] = useState<PEO[]>([]);
@@ -178,20 +213,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     return totals;
   }, [gaPeoMatrix]);
 
-  const gaPeoTotals = useMemo(() => {
-    const totals: Record<string, number> = {};
-    gaPeoMatrix?.peos.forEach(peo => {
-      totals[peo.id] = gaPeoMatrix.mappings
-        .filter(m => (m.peo === peo.id || m.peo_id === peo.id))
-        .reduce((sum, m) => sum + coerceWeight(m.weight), 0);
-    });
-    return totals;
-  }, [gaPeoMatrix]);
-
   const isGaPeoMatrixValid = useMemo(() => {
-    if (!gaPeoMatrix || gaPeoMatrix.peos.length === 0) return false;
-    return gaPeoMatrix.peos.every(peo => Math.abs((gaPeoTotals[peo.id] || 0) - 100) < 0.0001);
-  }, [gaPeoMatrix, gaPeoTotals]);
+    if (!gaPeoMatrix || gaPeoMatrix.gas.length === 0) return false;
+    return gaPeoMatrix.gas.every(ga => {
+      const selectedCount = gaPeoMatrix.mappings.filter(m => (m.ga === ga.id || m.ga_id === ga.id)).length;
+      if (selectedCount === 0) return true;
+      return Math.abs((gaRowTotals[ga.id] || 0) - 100) < 0.0001;
+    });
+  }, [gaPeoMatrix, gaRowTotals]);
 
   const getExitSurveyGaId = (question: ExitSurveyQuestion) =>
     typeof question.ga === 'string' ? question.ga : question.ga.id;
@@ -207,6 +236,15 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     [surveyQuestions]
   );
 
+  const selectedDepartmentId = useMemo(() => {
+    const program = selectedProgram as any;
+    return program?.department ? String(program.department) : '';
+  }, [selectedProgram]);
+
+  useEffect(() => {
+    if (initialSubTab) setActiveSubTab(initialSubTab);
+  }, [initialSubTab]);
+
   const getSurveyQuestionPeo = (question: SurveyQuestion) => {
     const peoId = getSurveyQuestionPeoId(question);
     return peoId ? peos.find(peo => peo.id === peoId) || null : null;
@@ -215,7 +253,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   const getSurveyQuestionScopeLabel = (question: SurveyQuestion) => {
     const peo = getSurveyQuestionPeo(question);
     if (!peo) return 'General';
-    return `PEO-${peo.order_number}`;
+    return `PO-${peo.order_number}`;
   };
 
   const renderSurveyQuestionList = (surveyType: SurveyType) => {
@@ -331,11 +369,23 @@ const CoordinatorOBEMappingModule: React.FC = () => {
 
   useEffect(() => {
     if (selectedProgram) {
-      setVision(selectedProgram.description || '');
       loadPeosAndGas(selectedProgram.id);
       loadVersions(selectedProgram.id);
     }
   }, [selectedProgram]);
+
+  useEffect(() => {
+    if (isHOD && selectedDepartmentId) {
+      loadVisionMissionData();
+    } else {
+      setVision('');
+      setMission('');
+      setDepartmentVision(null);
+      setDepartmentMission(null);
+      setVisionKeywords([]);
+      setMissionKeywords([]);
+    }
+  }, [isHOD, selectedDepartmentId]);
 
   useEffect(() => {
     const fetchVersionDetail = async () => {
@@ -403,7 +453,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       setExitSurveyQuestions(Array.isArray(questionsRes) ? questionsRes : (questionsRes as any).data || []);
       setSurveyQuestions(Array.isArray(flexQsRes) ? flexQsRes : (flexQsRes as any).data || []);
     } catch (error) {
-      console.error('Failed to load PEOs/GAs:', error);
+      console.error('Failed to load POs/GAs:', error);
       setPeos([]);
       setGas([]);
       setExitSurveyQuestions([]);
@@ -525,16 +575,270 @@ const CoordinatorOBEMappingModule: React.FC = () => {
     }
   };
 
+  const getApiMessage = (error: any, fallback: string) =>
+    error?.response?.data?.error || error?.response?.data?.message || fallback;
+
+  const loadVisionMissionData = async () => {
+    if (!selectedDepartmentId) return;
+    try {
+      const [visionRes, missionRes] = await Promise.all([
+        obeService.getDepartmentVision(selectedDepartmentId),
+        obeService.getDepartmentMission(selectedDepartmentId),
+      ]);
+      setDepartmentVision(visionRes);
+      setDepartmentMission(missionRes);
+      setVision(visionRes.statement || '');
+      setMission(missionRes.statement || '');
+      setVisionKeywords(visionRes.keywords || []);
+      setMissionKeywords(missionRes.keywords || []);
+      setSelectedVisionKeywords(new Set());
+      setSelectedMissionKeywords(new Set());
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'You are not authorized to manage Vision and Mission.'));
+    }
+  };
+
+  const loadVisionMissionHistory = async () => {
+    if (!selectedDepartmentId) {
+      toast.error('Program information is missing.');
+      return;
+    }
+    setLoadingVisionMissionHistory(true);
+    try {
+      const reviews = await obeService.getVisionMissionCQIReviews();
+      setVisionMissionReviews(
+        reviews.filter((review) => String(review.department || '') === selectedDepartmentId)
+      );
+      setShowVisionMissionHistory(true);
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to load Vision/Mission history'));
+    } finally {
+      setLoadingVisionMissionHistory(false);
+    }
+  };
+
+  const loadVisionMissionMappings = async () => {
+    if (!selectedDepartmentId) return;
+    try {
+      const data = await obeService.getVisionMissionMappings(selectedDepartmentId);
+      setVisionMissionData(data);
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to load Vision-Mission mappings'));
+    }
+  };
+
+  const loadPOKeywordMappings = async () => {
+    if (!selectedProgram?.id) return;
+    try {
+      const data = await obeService.getPOKeywordMappings(selectedProgram.id);
+      setPoKeywordData(data);
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to load PO keyword mappings'));
+    }
+  };
+
+  const openStatementRevision = (type: 'vision' | 'mission', previousStatement: string, newStatement: string) => {
+    setRevisionModal({ type, previousStatement, newStatement });
+    setRevisionJustification('');
+    setRevisionTriggerType('MANUAL');
+  };
+
   const handleSaveVision = async () => {
-    if (!selectedProgram) return;
+    if (!selectedDepartmentId) {
+      toast.error('Department information is missing for this program.');
+      return;
+    }
+    if (!vision.trim()) {
+      toast.error('Vision statement cannot be empty.');
+      return;
+    }
+    if (departmentVision?.id) {
+      const previous = departmentVision.statement || '';
+      if (previous.trim() === vision.trim()) {
+        toast.info('Vision statement has no changes to save.');
+        return;
+      }
+      openStatementRevision('vision', previous, vision.trim());
+      return;
+    }
     setIsSavingVision(true);
     try {
-      await obeService.updateProgramVision(selectedProgram.id, vision);
-      toast.success('Program vision updated');
-    } catch (error) {
-      toast.error('Failed to update vision');
+      const saved = await obeService.saveDepartmentVision(selectedDepartmentId, vision.trim());
+      setDepartmentVision(saved);
+      setVision(saved.statement || '');
+      setVisionKeywords(saved.keywords || []);
+      toast.success('Vision statement saved');
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to save Vision statement'));
     } finally {
       setIsSavingVision(false);
+    }
+  };
+
+  const handleSaveMission = async () => {
+    if (!selectedDepartmentId) {
+      toast.error('Department information is missing for this program.');
+      return;
+    }
+    if (!mission.trim()) {
+      toast.error('Mission statement cannot be empty.');
+      return;
+    }
+    if (departmentMission?.id) {
+      const previous = departmentMission.statement || '';
+      if (previous.trim() === mission.trim()) {
+        toast.info('Mission statement has no changes to save.');
+        return;
+      }
+      openStatementRevision('mission', previous, mission.trim());
+      return;
+    }
+    setIsSavingVision(true);
+    try {
+      const saved = await obeService.saveDepartmentMission(selectedDepartmentId, mission.trim());
+      setDepartmentMission(saved);
+      setMission(saved.statement || '');
+      setMissionKeywords(saved.keywords || []);
+      toast.success('Mission statement saved');
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to save Mission statement'));
+    } finally {
+      setIsSavingVision(false);
+    }
+  };
+
+  const handleConfirmStatementRevision = async () => {
+    if (!revisionModal || !selectedDepartmentId) return;
+    if (!revisionJustification.trim()) {
+      toast.error('Revision justification is required.');
+      return;
+    }
+
+    const statementType = revisionModal.type === 'vision' ? 'VISION' : 'MISSION';
+    setIsSavingVision(true);
+    try {
+      await obeService.createVisionMissionCQIReview({
+        department: selectedDepartmentId,
+        statement_type: statementType,
+        trigger_type: revisionTriggerType,
+        decision: 'REVISED',
+        justification: revisionJustification.trim(),
+        new_statement: revisionModal.newStatement.trim(),
+      });
+
+      if (revisionModal.type === 'vision') {
+        setVisionCandidates((await obeService.extractKeywords('vision', revisionModal.newStatement)).candidates || []);
+        setSelectedVisionKeywords(new Set());
+      } else {
+        setMissionCandidates((await obeService.extractKeywords('mission', revisionModal.newStatement)).candidates || []);
+        setSelectedMissionKeywords(new Set());
+      }
+
+      setRevisionModal(null);
+      setRevisionJustification('');
+      await loadVisionMissionData();
+      if (activeSubTab === 'vision-mission-map') await loadVisionMissionMappings();
+      if (activeSubTab === 'po-keywords') await loadPOKeywordMappings();
+      toast.success(`${statementType === 'VISION' ? 'Vision' : 'Mission'} revised. Review keywords and refresh mappings for the new statement.`);
+    } catch (error: any) {
+      toast.error(getApiMessage(error, `Failed to revise ${revisionModal.type} statement`));
+    } finally {
+      setIsSavingVision(false);
+    }
+  };
+
+  const handleExtractKeywords = async (sourceType: 'vision' | 'mission') => {
+    const text = sourceType === 'vision' ? vision : mission;
+    if (!text.trim()) {
+      toast.error(`${sourceType === 'vision' ? 'Vision' : 'Mission'} statement cannot be empty.`);
+      return;
+    }
+    try {
+      const res = await obeService.extractKeywords(sourceType, text);
+      if (sourceType === 'vision') setVisionCandidates(res.candidates || []);
+      else setMissionCandidates(res.candidates || []);
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to extract keywords'));
+    }
+  };
+
+  const handleSaveKeywords = async (sourceType: 'vision' | 'mission') => {
+    const isVision = sourceType === 'vision';
+    const sourceId = isVision ? departmentVision?.id : departmentMission?.id;
+    const selected = Array.from(isVision ? selectedVisionKeywords : selectedMissionKeywords);
+    if (!sourceId) {
+      toast.error(`Save the ${isVision ? 'Vision' : 'Mission'} statement before adding keywords.`);
+      return;
+    }
+    if (selected.length === 0) {
+      toast.error('Select at least one keyword.');
+      return;
+    }
+    try {
+      const saved = isVision
+        ? await obeService.saveVisionKeywords(sourceId, selected)
+        : await obeService.saveMissionKeywords(sourceId, selected);
+      if (isVision) {
+        setVisionKeywords(saved as VisionKeyword[]);
+        setSelectedVisionKeywords(new Set());
+      } else {
+        setMissionKeywords(saved as MissionKeyword[]);
+        setSelectedMissionKeywords(new Set());
+      }
+      await loadVisionMissionData();
+      toast.success('Keywords saved');
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to save keywords'));
+    }
+  };
+
+  const handleManualKeywordSubmit = async (sourceType: 'vision' | 'mission') => {
+    const isVision = sourceType === 'vision';
+    const sourceId = isVision ? departmentVision?.id : departmentMission?.id;
+    const text = manualKeywordInputs[sourceType].trim();
+
+    if (!sourceId) {
+      toast.error(`Save the ${isVision ? 'Vision' : 'Mission'} statement before adding keywords.`);
+      return;
+    }
+
+    if (!text) return;
+
+    const existingKeywords = isVision ? visionKeywords : missionKeywords;
+    if (existingKeywords.some(keyword => keyword.text.trim().toLowerCase() === text.toLowerCase())) {
+      toast.error('This keyword is already approved.');
+      return;
+    }
+
+    try {
+      const saved = isVision
+        ? await obeService.saveVisionKeywords(sourceId, [text])
+        : await obeService.saveMissionKeywords(sourceId, [text]);
+
+      if (isVision) {
+        setVisionKeywords(saved as VisionKeyword[]);
+      } else {
+        setMissionKeywords(saved as MissionKeyword[]);
+      }
+
+      setManualKeywordInputs(prev => ({ ...prev, [sourceType]: '' }));
+      await loadVisionMissionData();
+      toast.success('Keyword added');
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to add keyword'));
+    }
+  };
+
+  const handleRemoveKeyword = async (sourceType: 'vision' | 'mission', keywordId: string) => {
+    const sourceId = sourceType === 'vision' ? departmentVision?.id : departmentMission?.id;
+    if (!sourceId) return;
+    try {
+      if (sourceType === 'vision') await obeService.removeVisionKeyword(sourceId, keywordId);
+      else await obeService.removeMissionKeyword(sourceId, keywordId);
+      await loadVisionMissionData();
+      toast.success('Keyword removed');
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to remove keyword'));
     }
   };
 
@@ -672,11 +976,11 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         if (editingItem) {
           await obeService.updatePEO(editingItem.id, peoData);
           peoId = editingItem.id;
-          toast.success('PEO updated');
+          toast.success('PO updated');
         } else {
           created = await obeService.createPEO(selectedProgram.id, peoData);
           peoId = created.id;
-          toast.success('PEO created');
+          toast.success('PO created');
         }
         const alumniPrepared = alumniSurveyDrafts.map(d => ({
           ...d,
@@ -809,7 +1113,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
       if (error.response?.status === 404) {
         setGaPeoMatrix({ peos: [], gas: [], mappings: [] });
       } else {
-        toast.error('Failed to load GA-PEO matrix');
+        toast.error('Failed to load GA-PO matrix');
       }
     }
   };
@@ -833,7 +1137,105 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   useEffect(() => {
     if (activeSubTab === 'ga-peo' && selectedProgram) loadGaPeoMatrix();
     if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloGaMatrix();
-  }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion]);
+    if (activeSubTab === 'vision-mission-map' && selectedDepartmentId) loadVisionMissionMappings();
+    if (activeSubTab === 'po-keywords' && selectedProgram) loadPOKeywordMappings();
+  }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion, selectedDepartmentId]);
+
+  const toggleVisionMissionMapping = (missionKeywordId: string, visionKeywordId: string) => {
+    setVisionMissionData(prev => {
+      if (!prev) return prev;
+      const exists = prev.mappings.some(m =>
+        m.mission_keyword === missionKeywordId && m.vision_keyword === visionKeywordId
+      );
+      return {
+        ...prev,
+        mappings: exists
+          ? prev.mappings.filter(m => !(m.mission_keyword === missionKeywordId && m.vision_keyword === visionKeywordId))
+          : [
+              ...prev.mappings,
+              {
+                id: `${missionKeywordId}-${visionKeywordId}`,
+                mission_keyword: missionKeywordId,
+                mission_keyword_text: '',
+                vision_keyword: visionKeywordId,
+                vision_keyword_text: '',
+                is_active: true,
+                created_at: '',
+              },
+            ],
+      };
+    });
+  };
+
+  const handleSaveVisionMissionMappings = async () => {
+    if (!selectedDepartmentId || !visionMissionData) return;
+    try {
+      await obeService.saveVisionMissionMappings(
+        selectedDepartmentId,
+        visionMissionData.mappings.map(m => ({
+          mission_keyword_id: m.mission_keyword,
+          vision_keyword_id: m.vision_keyword,
+        }))
+      );
+      toast.success('Vision-Mission mappings saved');
+      loadVisionMissionMappings();
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to save Vision-Mission mappings'));
+    }
+  };
+
+  const togglePOKeywordMapping = (peoId: string, keywordId: string) => {
+    setPoKeywordData(prev => {
+      if (!prev) return prev;
+      const exists = prev.mappings.some(m =>
+        m.peo === peoId
+        && m.mission_keyword === keywordId
+      );
+      return {
+        ...prev,
+        mappings: exists
+          ? prev.mappings.filter(m => !(
+              m.peo === peoId
+              && m.mission_keyword === keywordId
+            ))
+          : [
+              ...prev.mappings,
+              {
+                id: `${peoId}-mission-${keywordId}`,
+                peo: peoId,
+                peo_order_number: prev.peos.find(p => p.id === peoId)?.order_number || 0,
+                peo_title: prev.peos.find(p => p.id === peoId)?.title || null,
+                mission_keyword: keywordId,
+                mission_keyword_text: null,
+                vision_keyword: null,
+                vision_keyword_text: null,
+                is_active: true,
+                created_at: '',
+              },
+            ],
+      };
+    });
+  };
+
+  const handleSavePOKeywordMappings = async () => {
+    if (!selectedProgram?.id || !poKeywordData) return;
+    try {
+      await obeService.savePOKeywordMappings(
+        selectedProgram.id,
+        poKeywordData.mappings
+          .filter(m => m.mission_keyword)
+          .map(m => ({
+            peo_id: m.peo,
+            mission_keyword_id: m.mission_keyword,
+            vision_keyword_id: null,
+          }))
+      );
+      toast.success('PO keyword mappings saved');
+      loadPOKeywordMappings();
+    } catch (error: any) {
+      toast.error(getApiMessage(error, 'Failed to save PO keyword mappings'));
+    }
+  };
 
   const handleMatrixChange = (rowId: string, colId: string, type: 'ga-peo' | 'clo-ga', weight?: number) => {
      const changeKey = `${rowId}-${colId}`;
@@ -846,17 +1248,11 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           const newMappings = [...gaPeoMatrix!.mappings];
           const existingIdx = newMappings.findIndex(m => (m.ga === rowId && m.peo === colId) || (m.ga_id === rowId && m.peo_id === colId));
           if (existingIdx >= 0) {
-            if (weight !== undefined) {
-              newMappings[existingIdx] = { ...newMappings[existingIdx], weight: coerceWeight(weight) };
-            } else {
-              newMappings.splice(existingIdx, 1);
-            }
+            newMappings.splice(existingIdx, 1);
           } else {
-            newMappings.push({ id: '', ga: rowId, peo: colId, ga_id: rowId, peo_id: colId, weight: coerceWeight(weight) });
+            newMappings.push({ id: '', ga: rowId, peo: colId, ga_id: rowId, peo_id: colId, weight: 0 });
           }
-          const rebalanceMappings = weight === undefined
-            ? normalizeGaRowWeights(gaPeoMatrix, rowId, newMappings)
-            : newMappings;
+          const rebalanceMappings = normalizeGaRowWeights(gaPeoMatrix, rowId, newMappings);
           setGaPeoMatrix({ ...gaPeoMatrix!, mappings: rebalanceMappings });
       } else {
         const newMappings = [...cloPiMatrix!.mappings];
@@ -870,10 +1266,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
    const handleSaveMatrix = async (type: 'ga-peo' | 'clo-ga') => {
       try {
         if (type === 'ga-peo') {
-           for (const peo of gaPeoMatrix!.peos) {
-             const total = gaPeoTotals[peo.id] || 0;
+           for (const ga of gaPeoMatrix!.gas) {
+             const selectedCount = gaPeoMatrix!.mappings.filter(m => (m.ga === ga.id || m.ga_id === ga.id)).length;
+             if (selectedCount === 0) continue;
+             const total = gaRowTotals[ga.id] || 0;
              if (Math.abs(total - 100) > 0.0001) {
-               toast.error(`Total weight for PEO ${peo.order_number} must be exactly 100%`);
+               toast.error(`Total weight for GA-${ga.order_number} must be exactly 100% (select at least 1 PO)`);
                return;
              }
            }
@@ -883,7 +1281,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
             weight: coerceWeight(m.weight)
           }));
           await peoService.saveGAPEOMappings(selectedProgram!.id, mappings);
-          toast.success('GA-PEO mappings saved');
+          toast.success('GA-PO mappings saved');
           loadGaPeoMatrix();
         } else {
           const mappings = cloPiMatrix!.mappings.map((m: any) => ({
@@ -1049,7 +1447,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           value={draft.question_text}
           disabled={draft.is_locked}
           onChange={(e) => updateDraftQuestion(setter, draft._tempId!, { question_text: e.target.value })}
-          placeholder={`Enter ${isAlumni ? 'alumni' : 'employer'} PEO question...`}
+          placeholder={`Enter ${isAlumni ? 'alumni' : 'employer'} PO question...`}
           className={`w-full h-20 bg-gray-50 border-none rounded-xl px-4 py-3 font-semibold text-sm text-gray-700 focus:ring-2 ${focusRing} transition-all resize-none ${
             draft.is_locked ? 'opacity-70 cursor-not-allowed' : ''
           }`}
@@ -1124,10 +1522,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
 
   const subTabs = [
     ...(isHOD ? [
-      { id: 'vision', label: 'Program Vision', icon: Target },
-      { id: 'peo', label: 'PEOs & Surveys', icon: Award },
-      { id: 'ga', label: 'GAs & Surveys', icon: Info },
-      { id: 'ga-peo', label: 'GA-PEO Mapping', icon: LayoutGrid },
+      { id: 'vision-mission', label: 'Vision & Mission', icon: Target },
+      { id: 'peo', label: 'PO Setup', icon: Award },
+      { id: 'ga', label: 'GA Setup', icon: Info },
+      { id: 'vision-mission-map', label: 'Vision-Mission Mapping', icon: LayoutGrid },
+      { id: 'po-keywords', label: 'PO Mission Mapping', icon: LayoutGrid },
+      { id: 'ga-peo', label: 'GA-PO Mapping', icon: LayoutGrid },
     ] : [
       { id: 'clo-pi', label: 'CLO-GA Mapping', icon: BookOpen },
     ]),
@@ -1176,26 +1576,27 @@ const CoordinatorOBEMappingModule: React.FC = () => {
         )}
       </div>
 
-      {/* Sub-Tabs Navigation */}
-      <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100 gap-1 overflow-x-auto">
-        {subTabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSubTab(tab.id as SubTabId)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all whitespace-nowrap ${
-                activeSubTab === tab.id 
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-indigo-600'
-              }`}
-            >
-              <Icon size={18} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      {!hideSubTabs && (
+        <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100 gap-1 overflow-x-auto">
+          {subTabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveSubTab(tab.id as OBEMappingSubTabId)}
+                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all whitespace-nowrap ${
+                  activeSubTab === tab.id
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-indigo-600'
+                }`}
+              >
+                <Icon size={18} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Tab Content */}
       <AnimatePresence mode="wait">
@@ -1206,28 +1607,191 @@ const CoordinatorOBEMappingModule: React.FC = () => {
           exit={{ opacity: 0, y: -10 }}
           className="bg-white rounded-3xl shadow-xl shadow-indigo-50/50 border border-indigo-50 overflow-hidden"
         >
-          {activeSubTab === 'vision' && (
-            <div className="p-8">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900">Program Vision & Mission</h3>
-                  <p className="text-gray-400 text-sm mt-1">Define the strategic direction of the {selectedProgram?.name} program.</p>
+          {activeSubTab === 'vision-mission' && (
+            <div className="p-8 space-y-8">
+              {!selectedDepartmentId && (
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-700">
+                  Program Vision/Mission cannot be loaded because this program has no linked academic unit.
                 </div>
-                <button 
-                  onClick={handleSaveVision}
-                  disabled={isSavingVision}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50"
+              )}
+
+              <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-indigo-600">
+                    Program-Level Vision & Mission
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-indigo-900">
+                    {selectedProgram?.name || 'Selected program'} uses this live statement set for snapshots, keyword mapping, and future batches.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadVisionMissionHistory}
+                  disabled={loadingVisionMissionHistory || !selectedDepartmentId}
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-indigo-700 shadow-sm border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"
                 >
-                  <Save size={18} />
-                  {isSavingVision ? 'Saving...' : 'Save Changes'}
+                  <History size={16} />
+                  {loadingVisionMissionHistory ? 'Loading...' : 'History'}
                 </button>
               </div>
-              <textarea
-                value={vision}
-                onChange={(e) => setVision(e.target.value)}
-                placeholder="Enter program vision and mission statements here..."
-                className="w-full h-64 p-6 bg-gray-50 border-none rounded-2xl text-gray-700 font-medium focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-              />
+
+              {([
+                {
+                  type: 'vision' as const,
+                  title: 'Vision Statement',
+                  value: vision,
+                  setValue: setVision,
+                  savedId: departmentVision?.id,
+                  keywords: visionKeywords,
+                  candidates: visionCandidates,
+                  selected: selectedVisionKeywords,
+                  setSelected: setSelectedVisionKeywords,
+                  manualInput: manualKeywordInputs.vision,
+                  saveStatement: handleSaveVision,
+                  color: 'indigo',
+                },
+                {
+                  type: 'mission' as const,
+                  title: 'Mission Statement',
+                  value: mission,
+                  setValue: setMission,
+                  savedId: departmentMission?.id,
+                  keywords: missionKeywords,
+                  candidates: missionCandidates,
+                  selected: selectedMissionKeywords,
+                  setSelected: setSelectedMissionKeywords,
+                  manualInput: manualKeywordInputs.mission,
+                  saveStatement: handleSaveMission,
+                  color: 'emerald',
+                },
+              ]).map(section => (
+                <div key={section.type} className="rounded-2xl border border-gray-100 bg-gray-50/70 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900">{section.title}</h3>
+                      <p className="text-gray-400 text-sm mt-1">
+                        HOD-approved statement and keywords for {selectedProgram?.name || 'this program'}.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={section.saveStatement}
+                        disabled={isSavingVision || !selectedDepartmentId}
+                        className={`flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-white transition-all disabled:opacity-50 ${
+                          section.type === 'vision' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
+                      >
+                        <Save size={18} />
+                        Save
+                      </button>
+                      <button
+                        onClick={() => handleExtractKeywords(section.type)}
+                        disabled={!section.value.trim()}
+                        className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold bg-white text-gray-700 border border-gray-200 hover:bg-gray-100 disabled:opacity-50"
+                      >
+                        <Target size={18} />
+                        Extract Keywords
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={section.value}
+                    onChange={(e) => section.setValue(e.target.value)}
+                    placeholder={`Enter program ${section.type} statement...`}
+                    className="w-full h-40 p-5 bg-white border border-gray-100 rounded-2xl text-gray-700 font-medium focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+                  />
+
+                  <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-sm font-black uppercase tracking-widest text-gray-500">Candidate Keywords</h4>
+                        <button
+                          onClick={() => handleSaveKeywords(section.type)}
+                          disabled={!section.savedId || section.selected.size === 0}
+                          className="text-xs font-black rounded-lg bg-gray-900 px-3 py-2 text-white disabled:opacity-40"
+                        >
+                          Save Selected
+                        </button>
+                      </div>
+                      <div className="min-h-[88px] rounded-2xl border border-dashed border-gray-200 bg-white p-3">
+                        {section.candidates.length === 0 ? (
+                          <p className="py-6 text-center text-xs font-semibold text-gray-400">Extract keywords to review candidates.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {section.candidates.map(candidate => {
+                              const active = section.selected.has(candidate);
+                              return (
+                                <button
+                                  key={candidate}
+                                  onClick={() => {
+                                    const next = new Set(section.selected);
+                                    if (next.has(candidate)) next.delete(candidate);
+                                    else next.add(candidate);
+                                    section.setSelected(next);
+                                  }}
+                                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all ${
+                                    active
+                                      ? section.type === 'vision'
+                                        ? 'bg-indigo-600 text-white'
+                                        : 'bg-emerald-600 text-white'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {candidate}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="mb-2 text-sm font-black uppercase tracking-widest text-gray-500">Approved Keywords</h4>
+                      <div className="min-h-[88px] rounded-2xl border border-gray-100 bg-white p-3">
+                        {section.keywords.length === 0 ? (
+                          <p className="py-6 text-center text-xs font-semibold text-gray-400">No approved keywords saved yet.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {section.keywords.map(keyword => (
+                              <span key={keyword.id} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700">
+                                {keyword.text}
+                                <button
+                                  onClick={() => handleRemoveKeyword(section.type, keyword.id)}
+                                  className="text-gray-400 hover:text-red-500"
+                                  title="Remove keyword"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <input
+                          type="text"
+                          value={section.manualInput}
+                          onChange={(e) =>
+                            setManualKeywordInputs(prev => ({
+                              ...prev,
+                              [section.type]: e.target.value,
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleManualKeywordSubmit(section.type);
+                            }
+                          }}
+                          disabled={!section.savedId}
+                          placeholder="Type keyword and press Enter"
+                          className="mt-3 w-full rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-700 outline-none transition-all placeholder:text-gray-400 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
@@ -1236,10 +1800,10 @@ const CoordinatorOBEMappingModule: React.FC = () => {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h3 className="text-xl font-black text-gray-900">
-                    {activeSubTab === 'peo' ? 'Program Educational Objectives (PEOs)' : 'Graduate Attributes (GAs)'}
+                    {activeSubTab === 'peo' ? 'Program Outcomes (POs)' : 'Graduate Attributes (GAs)'}
                   </h3>
                   <p className="text-gray-400 text-sm mt-1">
-                    Manage the {activeSubTab.toUpperCase()}s defined for this program.
+                    Manage the {activeSubTab === 'peo' ? 'POs' : 'GAs'} defined for this program.
                   </p>
                 </div>
                 {isHOD && (
@@ -1258,7 +1822,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                       className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-all"
                     >
                       <Plus size={18} />
-                      Add {activeSubTab.toUpperCase()}
+                      Add {activeSubTab === 'peo' ? 'PO' : activeSubTab.toUpperCase()}
                     </button>
                   </div>
                 )}
@@ -1314,7 +1878,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                     <div>
                       <h3 className="text-xl font-black text-gray-900">Survey Questions</h3>
                       <p className="text-gray-400 text-sm mt-1">
-                        Alumni and employer questions for this program, marked as General or mapped with a PEO.
+                        Alumni and employer questions for this program, marked as General or mapped with a PO.
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -1335,12 +1899,135 @@ const CoordinatorOBEMappingModule: React.FC = () => {
             </div>
           )}
 
+          {activeSubTab === 'vision-mission-map' && (
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h3 className="text-xl font-black text-gray-900">Mission to Vision Keyword Mapping</h3>
+                  <p className="text-gray-400 text-sm mt-1">Manually connect approved Mission keywords with relevant Vision keywords.</p>
+                </div>
+                {isHOD && (
+                  <button
+                    onClick={handleSaveVisionMissionMappings}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
+                  >
+                    <Save size={18} />
+                    Save Mappings
+                  </button>
+                )}
+              </div>
+
+              {visionMissionData && visionMissionData.mission_keywords.length > 0 && visionMissionData.vision_keywords.length > 0 ? (
+                <div className="overflow-x-auto rounded-3xl border border-gray-100">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="p-5 border-b border-gray-100 font-black text-gray-400 uppercase text-xs tracking-widest w-64">Mission Keyword</th>
+                        {visionMissionData.vision_keywords.map(keyword => (
+                          <th key={keyword.id} className="p-5 border-b border-gray-100 text-center text-xs font-black uppercase text-indigo-700 min-w-[150px]">
+                            {keyword.text}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visionMissionData.mission_keywords.map(missionKeyword => (
+                        <tr key={missionKeyword.id} className="hover:bg-indigo-50/30">
+                          <td className="p-5 border-b border-gray-50 font-bold text-gray-900">{missionKeyword.text}</td>
+                          {visionMissionData.vision_keywords.map(visionKeyword => {
+                            const active = visionMissionData.mappings.some(m =>
+                              m.mission_keyword === missionKeyword.id && m.vision_keyword === visionKeyword.id
+                            );
+                            return (
+                              <td key={visionKeyword.id} className={`p-5 border-b border-gray-50 text-center ${active ? 'bg-indigo-50/40' : ''}`}>
+                                <button
+                                  onClick={() => isHOD && toggleVisionMissionMapping(missionKeyword.id, visionKeyword.id)}
+                                  disabled={!isHOD}
+                                  className={`w-11 h-11 rounded-2xl flex items-center justify-center mx-auto transition-all ${
+                                    active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
+                                  } ${!isHOD ? 'cursor-not-allowed opacity-60' : ''}`}
+                                >
+                                  {active ? <Check size={18} /> : <Plus size={18} />}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-12 text-center text-gray-400 italic">Save Vision and Mission keywords before mapping.</div>
+              )}
+            </div>
+          )}
+
+          {activeSubTab === 'po-keywords' && (
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h3 className="text-xl font-black text-gray-900">PO Mission Mapping</h3>
+                  <p className="text-gray-400 text-sm mt-1">Map each PO to approved Mission keywords.</p>
+                </div>
+                {isHOD && (
+                  <button
+                    onClick={handleSavePOKeywordMappings}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
+                  >
+                    <Save size={18} />
+                    Save Mappings
+                  </button>
+                )}
+              </div>
+
+              {poKeywordData && poKeywordData.peos.length > 0 ? (
+                <div className="space-y-6">
+                  {poKeywordData.peos.map(po => (
+                    <div key={po.id} className="rounded-2xl border border-gray-100 bg-gray-50/60 p-5">
+                      <div className="mb-4">
+                        <h4 className="font-black text-gray-900">PO-{po.order_number}: {po.title}</h4>
+                        <p className="mt-1 text-sm text-gray-500">{po.description}</p>
+                      </div>
+                      <div>
+                        <div>
+                          <h5 className="mb-2 text-xs font-black uppercase tracking-widest text-emerald-600">Mission Keywords</h5>
+                          <div className="flex flex-wrap gap-2 rounded-2xl bg-white p-3 border border-gray-100">
+                            {poKeywordData.mission_keywords.length === 0 ? (
+                              <span className="text-xs font-semibold text-gray-400">No Mission keywords saved.</span>
+                            ) : poKeywordData.mission_keywords.map(keyword => {
+                              const active = poKeywordData.mappings.some(m => m.peo === po.id && m.mission_keyword === keyword.id);
+                              return (
+                                <button
+                                  key={keyword.id}
+                                  onClick={() => isHOD && togglePOKeywordMapping(po.id, keyword.id)}
+                                  disabled={!isHOD}
+                                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                                    active ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  } ${!isHOD ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                >
+                                  {keyword.text}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-12 text-center text-gray-400 italic">Create POs and approved keywords before mapping.</div>
+              )}
+            </div>
+          )}
+
           {activeSubTab === 'ga-peo' && (
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h3 className="text-xl font-black text-gray-900">GA to PEO Mapping Matrix</h3>
-                  <p className="text-gray-400 text-sm mt-1">Map Graduate Attributes to Program Educational Objectives.</p>
+                  <h3 className="text-xl font-black text-gray-900">GA to PO Mapping Matrix</h3>
+                  <p className="text-gray-400 text-sm mt-1">Map Graduate Attributes to Program Outcomes.</p>
                 </div>
                 {isHOD && (
                   <button 
@@ -1360,24 +2047,12 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="p-6 border-b border-gray-100 font-black text-gray-400 uppercase text-xs tracking-widest w-64">Graduate Attribute</th>
-                        {gaPeoMatrix.peos.map(peo => {
-                          const currentTotal = gaPeoMatrix.mappings
-                            .filter(m => (m.peo === peo.id || m.peo_id === peo.id))
-                            .reduce((sum, m) => sum + coerceWeight(m.weight), 0);
-                          return (
+                        {gaPeoMatrix.peos.map(peo => (
                             <th key={peo.id} className="p-6 border-b border-gray-100 text-center w-48">
-                              <div className="font-black text-indigo-600 text-sm">PEO-{peo.order_number}</div>
+                              <div className="font-black text-indigo-600 text-sm">PO-{peo.order_number}</div>
                               <div className="text-[10px] text-gray-400 mt-1 uppercase truncate max-w-[100px] mx-auto">{peo.title}</div>
-                              <div className={`text-[10px] font-bold mt-1 ${Math.abs(currentTotal - 100) < 0.0001 ? 'text-green-600' : 'text-red-600'}`}>
-                                Total: {formatWeight(currentTotal)}%
-                              </div>
                             </th>
-                          );
-                        })}
-                        <th className="p-6 border-b border-gray-100 text-center w-28">
-                          <div className="font-black text-indigo-600 text-sm">Total</div>
-                          <div className="text-[10px] text-gray-400 mt-1 uppercase">Row Sum</div>
-                        </th>
+                          ))}
                       </tr>
                     </thead>
                     <tbody>
@@ -1393,7 +2068,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             );
                             const active = !!mapping;
                             return (
-                              <td key={peo.id} className="p-6 border-b border-gray-50 text-center space-y-2">
+                              <td key={peo.id} className={`p-6 border-b border-gray-50 text-center ${active ? 'bg-indigo-50/40' : ''}`}>
                                 <button
                                   onClick={() => isHOD && handleMatrixChange(ga.id, peo.id, 'ga-peo')}
                                   disabled={!isHOD}
@@ -1403,33 +2078,11 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                                       : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
                                   } ${!isHOD ? 'cursor-not-allowed opacity-60' : ''}`}
                                 >
-                                  {active ? <Save size={20} /> : <Plus size={20} />}
+                                  {active ? <Check size={20} /> : <Plus size={20} />}
                                 </button>
-                                {active && (
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    step="0.01"
-                                    value={formatWeight(mapping.weight)}
-                                    onChange={(e) => isHOD && handleMatrixChange(
-                                      ga.id,
-                                      peo.id,
-                                      'ga-peo',
-                                      e.target.value === '' ? 0 : Number(e.target.value)
-                                    )}
-                                    disabled={!isHOD}
-                                    className="w-20 px-3 py-1.5 border border-gray-200 rounded-xl text-center font-bold text-sm focus:ring-2 focus:ring-indigo-500"
-                                  />
-                                )}
                               </td>
                             );
                           })}
-                          <td className="p-6 border-b border-gray-50 text-center">
-                            <div className={`text-[10px] font-bold mt-1 ${Math.abs((gaRowTotals[ga.id] || 0) - 100) < 0.0001 ? 'text-green-600' : 'text-red-600'}`}>
-                              {formatWeight(gaRowTotals[ga.id] || 0)}%
-                            </div>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1682,7 +2335,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                           </div>
                           <div>
                             <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Alumni Survey Questions</h4>
-                            <p className="text-[11px] text-gray-500 mt-0.5">PEO-specific questions for alumni respondents mapped to this Program Educational Objective.</p>
+                            <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions for alumni respondents mapped to this Program Outcome.</p>
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -1691,14 +2344,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             onClick={() => appendDraftQuestion(setAlumniSurveyDrafts, editingItem || null, false)}
                             className="flex items-center gap-1.5 px-3 py-2 bg-white text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-all"
                           >
-                            <Plus size={14} /> Add PEO Question
+                            <Plus size={14} /> Add PO Question
                           </button>
                         </div>
                       </div>
                       <div className="space-y-3">
                         {alumniSurveyDrafts.filter(d => !d._deleted).length === 0 && (
                           <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
-                            No Alumni questions. Click "Add PEO Question" to add one.
+                            No Alumni questions. Click "Add PO Question" to add one.
                           </p>
                         )}
                         {alumniSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
@@ -1747,7 +2400,7 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                           </div>
                           <div>
                             <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Employer Survey Questions</h4>
-                            <p className="text-[11px] text-gray-500 mt-0.5">PEO-specific questions asked to employers of graduates, mapped to this Program Educational Objective.</p>
+                            <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions asked to employers of graduates, mapped to this Program Outcome.</p>
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -1756,14 +2409,14 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                             onClick={() => appendDraftQuestion(setEmployerSurveyDrafts, editingItem || null, false)}
                             className="flex items-center gap-1.5 px-3 py-2 bg-white text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200 hover:bg-emerald-50 transition-all"
                           >
-                            <Plus size={14} /> Add PEO Question
+                            <Plus size={14} /> Add PO Question
                           </button>
                         </div>
                       </div>
                       <div className="space-y-3">
                         {employerSurveyDrafts.filter(d => !d._deleted).length === 0 && (
                           <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
-                            No Employer questions. Click "Add PEO Question" to add one.
+                            No Employer questions. Click "Add PO Question" to add one.
                           </p>
                         )}
                         {employerSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
@@ -1834,6 +2487,210 @@ const CoordinatorOBEMappingModule: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showVisionMissionHistory && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl border border-white overflow-hidden"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 bg-indigo-50 p-6">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-indigo-600">
+                  Vision / Mission History
+                </p>
+                <h3 className="mt-1 text-2xl font-black text-gray-900">
+                  {selectedProgram?.name || 'Program'} Review Register
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-gray-500">
+                  Statement revision decisions saved from OBE Configuration are retained here for audit.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVisionMissionHistory(false)}
+                className="rounded-xl p-2 text-gray-400 hover:bg-white hover:text-gray-700"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="max-h-[65vh] overflow-y-auto p-6">
+              {visionMissionReviews.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-12 text-center">
+                  <History className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                  <p className="font-bold text-gray-500">No Vision/Mission reviews recorded yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {visionMissionReviews.map((review) => (
+                    <div key={review.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-black uppercase tracking-wider text-gray-600">
+                            {review.statement_type}
+                          </span>
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider ${
+                              review.decision === 'REVISED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            {review.decision}
+                          </span>
+                          <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-indigo-700">
+                            {review.trigger_type}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-gray-400">
+                          {review.review_date ? new Date(review.review_date).toLocaleString() : '—'}
+                        </span>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl bg-white p-4">
+                          <p className="mb-2 text-xs font-black uppercase tracking-widest text-gray-400">
+                            Previous Snapshot
+                          </p>
+                          <p className="text-sm font-medium leading-relaxed text-gray-700 whitespace-pre-wrap">
+                            {review.previous_statement_snapshot || '—'}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-white p-4">
+                          <p className="mb-2 text-xs font-black uppercase tracking-widest text-gray-400">
+                            Justification
+                          </p>
+                          <p className="text-sm font-medium leading-relaxed text-gray-700 whitespace-pre-wrap">
+                            {review.justification || '—'}
+                          </p>
+                          {review.decision === 'REVISED' && (
+                            <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3">
+                              <p className="mb-1 text-[11px] font-black uppercase tracking-widest text-amber-700">
+                                New Live Statement
+                              </p>
+                              <p className="text-sm font-semibold text-amber-900 whitespace-pre-wrap">
+                                {review.new_statement || '—'}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {revisionModal && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl border border-white overflow-hidden"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 bg-amber-50 p-6">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-amber-700">
+                  Statement Revision Review
+                </p>
+                <h3 className="mt-1 text-2xl font-black text-gray-900">
+                  Revise {revisionModal.type === 'vision' ? 'Vision' : 'Mission'} Statement
+                </h3>
+                <p className="mt-1 text-sm font-semibold text-gray-500">
+                  This will create a new live statement version and reset its keyword/mapping work to the new text.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevisionModal(null)}
+                disabled={isSavingVision}
+                className="rounded-xl p-2 text-gray-400 hover:bg-white hover:text-gray-700 disabled:opacity-50"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto p-6 space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                  <p className="mb-2 text-xs font-black uppercase tracking-widest text-gray-400">
+                    Current Statement
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm font-medium leading-relaxed text-gray-700">
+                    {revisionModal.previousStatement || '-'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                  <p className="mb-2 text-xs font-black uppercase tracking-widest text-amber-700">
+                    Proposed Revision
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm font-semibold leading-relaxed text-amber-900">
+                    {revisionModal.newStatement || '-'}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-500">
+                  Review Trigger
+                </label>
+                <div className="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1">
+                  {(['MANUAL', 'SCHEDULED'] as const).map(trigger => (
+                    <button
+                      key={trigger}
+                      type="button"
+                      onClick={() => setRevisionTriggerType(trigger)}
+                      className={`rounded-lg px-4 py-2 text-xs font-black transition-all ${
+                        revisionTriggerType === trigger
+                          ? 'bg-gray-900 text-white shadow-sm'
+                          : 'text-gray-500 hover:bg-white'
+                      }`}
+                    >
+                      {trigger}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-500">
+                  Revision Justification
+                </label>
+                <textarea
+                  value={revisionJustification}
+                  onChange={(e) => setRevisionJustification(e.target.value)}
+                  placeholder="Document why this statement is being revised..."
+                  className="h-32 w-full resize-none rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm font-medium text-gray-700 outline-none transition-all placeholder:text-gray-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-3 border-t border-gray-100 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setRevisionModal(null)}
+                  disabled={isSavingVision}
+                  className="rounded-xl bg-gray-100 px-5 py-3 text-sm font-black text-gray-500 transition-all hover:bg-gray-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmStatementRevision}
+                  disabled={isSavingVision || !revisionJustification.trim()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-amber-100 transition-all hover:bg-amber-700 disabled:opacity-50"
+                >
+                  <Save size={18} />
+                  {isSavingVision ? 'Saving...' : 'Save Revision'}
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>
@@ -2081,4 +2938,4 @@ const CoordinatorOBEMappingModule: React.FC = () => {
   );
 };
 
-export default CoordinatorOBEMappingModule;
+export default OBEConfigurationModule;

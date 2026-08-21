@@ -1,5 +1,6 @@
 import uuid 
 from django.db import models 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Sum, Q
 from django.utils import timezone
@@ -352,14 +353,13 @@ class GAPEOMapping(models.Model):
         unique_together = ('ga', 'peo') 
 
     def clean(self):
-        # Check that sum of weights for this PEO (excluding self equals <=100%
         total = GAPEOMapping.objects.filter(
-            peo=self.peo,
+            ga=self.ga,
             is_active=True
         ).exclude(id=self.id).aggregate(Sum('weight'))['weight__sum'] or Decimal('0.00')
         
         if total + self.weight > Decimal('100.00'):
-            raise ValidationError(f"Total weight for PEO exceeds 100%")
+            raise ValidationError(f"Total weight for GA exceeds 100%")
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -625,7 +625,16 @@ class GACQIRecord(models.Model):
         blank=True
     )
     closed_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
-    is_active = models.BooleanField(default=True)  # Soft delete
+    implemented_in_batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.SET_NULL,
+        related_name='ga_cqi_closures',
+        null=True,
+        blank=True
+    )
+    action_taken_description = models.TextField(blank=True, null=True)
+    resulting_attainment = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -640,6 +649,8 @@ class GACQIRecord(models.Model):
 
 class PEOCQIRecord(models.Model):
     STATUS_CHOICES = [
+        ('OPEN', 'Open'),
+        ('CLOSED_IMPLEMENTED', 'Closed / Implemented'),
         ('DRAFT', 'Draft'),
         ('APPROVED', 'Approved'),
     ]
@@ -671,6 +682,23 @@ class PEOCQIRecord(models.Model):
         blank=True
     )
     is_locked = models.BooleanField(default=False)
+    implemented_in_batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.SET_NULL,
+        related_name='peo_cqi_closures',
+        null=True,
+        blank=True
+    )
+    action_taken_description = models.TextField(blank=True, null=True)
+    resulting_attainment = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    closed_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        related_name='closed_peo_cqis',
+        null=True,
+        blank=True
+    )
+    closed_at = models.DateTimeField(null=True, blank=True, auto_now_add=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1639,3 +1667,363 @@ def get_flexible_peo_indirect_score(peo_id, batch_id, survey_window=None):
         'sources': sources,
         'overall': overall
     }
+
+
+# ========== VISION & MISSION MANAGEMENT ==========
+
+class Vision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    department = models.ForeignKey(
+        'core.Department',
+        on_delete=models.CASCADE,
+        related_name='visions'
+    )
+    statement = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_visions'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if self.is_active:
+            Vision.objects.filter(
+                department=self.department,
+                is_active=True
+            ).exclude(id=self.id).update(is_active=False)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        snippet = self.statement[:60]
+        return f"Vision for {self.department.code}: {snippet}..."
+
+
+class Mission(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    department = models.ForeignKey(
+        'core.Department',
+        on_delete=models.CASCADE,
+        related_name='missions'
+    )
+    statement = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_missions'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if self.is_active:
+            Mission.objects.filter(
+                department=self.department,
+                is_active=True
+            ).exclude(id=self.id).update(is_active=False)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        snippet = self.statement[:60]
+        return f"Mission for {self.department.code}: {snippet}..."
+
+
+class VisionKeyword(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vision = models.ForeignKey(
+        Vision,
+        on_delete=models.CASCADE,
+        related_name='keywords'
+    )
+    text = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('vision', 'text')
+        ordering = ['text']
+
+    def __str__(self):
+        return f"Vision Keyword: {self.text}"
+
+
+class MissionKeyword(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mission = models.ForeignKey(
+        Mission,
+        on_delete=models.CASCADE,
+        related_name='keywords'
+    )
+    text = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('mission', 'text')
+        ordering = ['text']
+
+    def __str__(self):
+        return f"Mission Keyword: {self.text}"
+
+
+class VisionMissionMapping(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mission_keyword = models.ForeignKey(
+        MissionKeyword,
+        on_delete=models.CASCADE,
+        related_name='vision_mappings'
+    )
+    vision_keyword = models.ForeignKey(
+        VisionKeyword,
+        on_delete=models.CASCADE,
+        related_name='mission_mappings'
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('mission_keyword', 'vision_keyword')
+
+    def __str__(self):
+        return f"{self.mission_keyword.text} → {self.vision_keyword.text}"
+
+
+class PEOKeywordMapping(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    peo = models.ForeignKey(
+        PEO,
+        on_delete=models.CASCADE,
+        related_name='keyword_mappings'
+    )
+    mission_keyword = models.ForeignKey(
+        MissionKeyword,
+        on_delete=models.CASCADE,
+        related_name='peo_mappings',
+        null=True,
+        blank=True
+    )
+    vision_keyword = models.ForeignKey(
+        VisionKeyword,
+        on_delete=models.CASCADE,
+        related_name='peo_mappings',
+        null=True,
+        blank=True
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('peo', 'mission_keyword', 'vision_keyword')
+
+    def clean(self):
+        if not self.mission_keyword and not self.vision_keyword:
+            raise ValidationError("At least one of mission_keyword or vision_keyword must be set.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        peo_label = f"PO-{self.peo.order_number}"
+        keywords = []
+        if self.mission_keyword:
+            keywords.append(f"MK:{self.mission_keyword.text}")
+        if self.vision_keyword:
+            keywords.append(f"VK:{self.vision_keyword.text}")
+        return f"{peo_label} → {', '.join(keywords)}"
+
+
+class VisionMissionCQI(models.Model):
+    KEYWORD_TYPE_CHOICES = [
+        ('MISSION', 'Mission'),
+        ('VISION', 'Vision'),
+    ]
+    STATUS_CHOICES = [
+        ('OPEN', 'Open'),
+        ('CLOSED_IMPLEMENTED', 'Closed Implemented'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.CASCADE,
+        related_name='vision_mission_cqi_records'
+    )
+    mission_keyword = models.ForeignKey(
+        MissionKeyword,
+        on_delete=models.CASCADE,
+        related_name='cqi_records',
+        null=True,
+        blank=True
+    )
+    vision_keyword = models.ForeignKey(
+        VisionKeyword,
+        on_delete=models.CASCADE,
+        related_name='cqi_records',
+        null=True,
+        blank=True
+    )
+    keyword_type = models.CharField(max_length=10, choices=KEYWORD_TYPE_CHOICES)
+    attainment_value = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    hod_action_plan = models.TextField(blank=True, default='')
+    cqi_action_required = models.BooleanField(default=True)
+    implemented_in_batch = models.ForeignKey(
+        'core.Batch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='closed_vision_mission_cqi_records'
+    )
+    action_taken_description = models.TextField(null=True, blank=True)
+    resulting_attainment = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='closed_vision_mission_cqi_records'
+    )
+    closed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='OPEN')
+    is_locked = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_vision_mission_cqi_records'
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_vision_mission_cqi_records'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['batch', 'mission_keyword'],
+                condition=Q(mission_keyword__isnull=False),
+                name='uniq_vm_cqi_batch_mission_keyword',
+            ),
+            models.UniqueConstraint(
+                fields=['batch', 'vision_keyword'],
+                condition=Q(vision_keyword__isnull=False),
+                name='uniq_vm_cqi_batch_vision_keyword',
+            ),
+        ]
+        ordering = ['keyword_type', 'created_at']
+
+    def clean(self):
+        if self.keyword_type == 'MISSION' and not self.mission_keyword:
+            raise ValidationError("mission_keyword is required for Mission CQI.")
+        if self.keyword_type == 'VISION' and not self.vision_keyword:
+            raise ValidationError("vision_keyword is required for Vision CQI.")
+        if self.mission_keyword and self.vision_keyword:
+            raise ValidationError("Only one keyword type can be set for a CQI record.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        keyword = self.mission_keyword or self.vision_keyword
+        return f"{self.keyword_type} CQI - {keyword.text if keyword else 'Unknown'}"
+
+
+class VisionMissionCQIRecord(models.Model):
+    TRIGGER_TYPE_CHOICES = [
+        ('SCHEDULED', 'Scheduled (3-5yr Review)'),
+        ('MANUAL', 'Manual Review'),
+    ]
+    DECISION_CHOICES = [
+        ('RETAINED', 'Retained'),
+        ('REVISED', 'Revised'),
+    ]
+    STATUS_CHOICES = [
+        ('REVIEWED', 'Reviewed'),
+    ]
+    STATEMENT_TYPE_CHOICES = [
+        ('VISION', 'Vision'),
+        ('MISSION', 'Mission'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    department = models.ForeignKey(
+        'core.Department',
+        on_delete=models.CASCADE,
+        related_name='vision_mission_cqi_records'
+    )
+    statement_type = models.CharField(max_length=10, choices=STATEMENT_TYPE_CHOICES)
+    trigger_type = models.CharField(max_length=20, choices=TRIGGER_TYPE_CHOICES)
+    review_date = models.DateTimeField(default=timezone.now)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='reviewed_vm_cqi_records'
+    )
+    previous_statement_snapshot = models.TextField()
+    decision = models.CharField(max_length=20, choices=DECISION_CHOICES)
+    justification = models.TextField()
+    new_statement = models.TextField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='REVIEWED')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-review_date', '-created_at']
+
+    def clean(self):
+        if self.decision == 'REVISED' and not self.new_statement:
+            raise ValidationError("new_statement is required when decision is 'Revised'.")
+        if self.decision == 'RETAINED':
+            self.new_statement = None
+        if not self.justification or not self.justification.strip():
+            raise ValidationError("justification is mandatory.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        created = self._state.adding
+        super().save(*args, **kwargs)
+        if created and self.decision == 'REVISED' and self.new_statement:
+            self._create_new_live_version()
+
+    def _create_new_live_version(self):
+        new_statement_text = (self.new_statement or '').strip()
+        if not new_statement_text:
+            return
+        if self.statement_type == 'VISION':
+            Vision.objects.create(
+                department=self.department,
+                statement=new_statement_text,
+                created_by=self.reviewed_by,
+                is_active=True,
+            )
+        elif self.statement_type == 'MISSION':
+            Mission.objects.create(
+                department=self.department,
+                statement=new_statement_text,
+                created_by=self.reviewed_by,
+                is_active=True,
+            )
+
+    def __str__(self):
+        return f"{self.statement_type} {self.decision} Review - {self.department.code} ({self.review_date.date() if self.review_date else 'N/A'})"

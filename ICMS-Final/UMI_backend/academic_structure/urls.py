@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ProgramViewSet, BatchViewSet, BatchDetailView
+from core.views.batch import BatchFrameworkSnapshotView
 
 router = DefaultRouter()
 # Programs are now primarily handled by core.urls.program
@@ -15,6 +16,7 @@ urlpatterns = [
     
     # Direct paths for frontend expectations
     path('all/', BatchViewSet.as_view({'get': 'list'}), name='all-batches'),
+    path('<uuid:pk>/framework-snapshot/', BatchFrameworkSnapshotView.as_view(), name='batch-framework-snapshot'),
     path('<uuid:pk>/detail/', BatchDetailView.as_view(), name='batch-detail'),
 ]
 

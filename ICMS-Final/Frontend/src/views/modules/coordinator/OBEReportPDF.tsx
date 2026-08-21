@@ -13,17 +13,6 @@ interface CLOGroup {
   courses: CLOCourse[];
 }
 
-type CloRenderItem =
-  | {
-      kind: 'semester';
-      semester: number | string;
-    }
-  | {
-      kind: 'course';
-      semester: number | string;
-      course: CLOCourse;
-    };
-
 interface GARow {
   id: string;
   name: string;
@@ -52,6 +41,30 @@ interface CQITriggerRow {
   remedy: string;
 }
 
+interface VisionMissionPDFRow {
+  keyword_type: 'VISION' | 'MISSION';
+  keyword_id: string;
+  keyword: string;
+  target_kpi: number;
+  attainment_score: number | null;
+  status: string;
+  cqi_action_required: boolean;
+  hod_action_plan: string;
+}
+
+interface VisionMissionPDFData {
+  vision: {
+    statement: string;
+    keywords: Array<{ id: string; text: string }>;
+  };
+  mission: {
+    statement: string;
+    keywords: Array<{ id: string; text: string }>;
+  };
+  vision_rows: VisionMissionPDFRow[];
+  mission_rows: VisionMissionPDFRow[];
+}
+
 interface OBEReportPDFProps {
   logoUrl: string;
   programName: string;
@@ -64,6 +77,7 @@ interface OBEReportPDFProps {
   cloCqiRows: CQITriggerRow[];
   gaCqiRows: CQITriggerRow[];
   peoCqiRows: CQITriggerRow[];
+  visionMissionAnalytics?: VisionMissionPDFData | null;
 }
 
 const styles = StyleSheet.create({
@@ -134,6 +148,101 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9ca3af',
     marginTop: 30,
+  },
+  executivePage: {
+    padding: 32,
+    fontSize: 8,
+    fontFamily: 'Helvetica',
+    position: 'relative',
+  },
+  executiveHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderBottom: '0.5px solid #d1d5db',
+    paddingBottom: 8,
+  },
+  executiveLogo: {
+    width: 42,
+  },
+  executiveTitle: {
+    fontSize: 18,
+    fontWeight: 700,
+    color: '#111827',
+  },
+  executiveSubtitle: {
+    fontSize: 9,
+    color: '#4b5563',
+    marginTop: 2,
+  },
+  statementGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  statementBox: {
+    flex: 1,
+    borderWidth: 0.5,
+    borderColor: '#e5e7eb',
+    padding: 8,
+  },
+  statementLabel: {
+    fontSize: 8,
+    fontWeight: 700,
+    color: '#334155',
+    marginBottom: 4,
+  },
+  statementText: {
+    fontSize: 8,
+    color: '#374151',
+    lineHeight: 1.35,
+  },
+  keywordLine: {
+    fontSize: 7,
+    color: '#64748b',
+    marginTop: 5,
+  },
+  vmTable: {
+    width: '100%',
+    borderWidth: 0.5,
+    borderColor: '#e5e7eb',
+    marginBottom: 8,
+  },
+  vmHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+  },
+  vmRow: {
+    flexDirection: 'row',
+    borderTopWidth: 0.5,
+    borderTopColor: '#e5e7eb',
+  },
+  vmCell: {
+    padding: 4,
+    fontSize: 7,
+    color: '#374151',
+    flex: 1,
+  },
+  vmWideCell: {
+    padding: 4,
+    fontSize: 7,
+    color: '#374151',
+    flex: 1.7,
+  },
+  vmHeaderCell: {
+    padding: 4,
+    fontSize: 7,
+    fontWeight: 700,
+    color: '#0f172a',
+    flex: 1,
+  },
+  vmHeaderWideCell: {
+    padding: 4,
+    fontSize: 7,
+    fontWeight: 700,
+    color: '#0f172a',
+    flex: 1.7,
   },
   sectionTitle: {
     fontSize: 13,
@@ -240,106 +349,92 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
   cloCqiRows,
   gaCqiRows,
   peoCqiRows,
+  visionMissionAnalytics,
 }) => {
-  const cloItems: CloRenderItem[] = [];
-  cloGroups.forEach((group) => {
-    cloItems.push({ kind: 'semester', semester: group.semester });
-    group.courses.forEach((course) => {
-      cloItems.push({ kind: 'course', semester: group.semester, course });
-    });
-  });
+  const renderVisionMissionTable = (title: string, rows: VisionMissionPDFRow[]) => (
+    <View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.vmTable}>
+        <View style={styles.vmHeader}>
+          <Text style={styles.vmHeaderWideCell}>Keyword</Text>
+          <Text style={styles.vmHeaderCell}>Target KPI</Text>
+          <Text style={styles.vmHeaderCell}>Attainment</Text>
+          <Text style={styles.vmHeaderCell}>Status</Text>
+          <Text style={styles.vmHeaderWideCell}>HOD CQI Action Plan</Text>
+        </View>
+        {rows.length === 0 ? (
+          <View style={styles.vmRow}>
+            <Text style={styles.vmWideCell}>No approved keywords available</Text>
+            <Text style={styles.vmCell}>-</Text>
+            <Text style={styles.vmCell}>-</Text>
+            <Text style={styles.vmCell}>-</Text>
+            <Text style={styles.vmWideCell}>-</Text>
+          </View>
+        ) : (
+          rows.map((row) => (
+            <View key={`${row.keyword_type}-${row.keyword_id}`} style={styles.vmRow}>
+              <Text style={styles.vmWideCell}>{row.keyword}</Text>
+              <Text style={styles.vmCell}>{row.target_kpi.toFixed(1)}%</Text>
+              <Text style={styles.vmCell}>
+                {row.attainment_score === null ? 'N/A' : `${row.attainment_score.toFixed(1)}%`}
+              </Text>
+              <Text style={[styles.vmCell, row.status === 'Achieved' ? styles.tdAchieved : row.status === 'Not Achieved' ? styles.tdNotAchieved : {}]}>
+                {row.status}
+              </Text>
+              <Text style={styles.vmWideCell}>
+                {row.cqi_action_required ? row.hod_action_plan || 'Pending HOD action plan' : 'No CQI action required'}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
 
-  const estimateItemHeight = (item: CloRenderItem) => {
-    if (item.kind === 'semester') return 16;
-    const cloCount = item.course.clo_summary.length || 1;
-    return 28 + cloCount * 6;
-  };
-
-  const buildCloPages = () => {
-    const pages: CloRenderItem[][] = [];
-    let currentPage: CloRenderItem[] = [];
-    let currentHeight = 0;
-    const pageLimit = 640;
-    const headingHeight = estimateItemHeight({ kind: 'semester', semester: 0 });
-
-    const pushPage = () => {
-      if (currentPage.length > 0) {
-        pages.push(currentPage);
-      }
-      currentPage = [];
-      currentHeight = 0;
-    };
-
-    cloGroups.forEach((group) => {
-      let courseIndex = 0;
-
-      while (courseIndex < group.courses.length) {
-        const course = group.courses[courseIndex];
-        const courseItem: CloRenderItem = { kind: 'course', semester: group.semester, course };
-        const courseHeight = estimateItemHeight(courseItem);
-
-        if (currentPage.length === 0) {
-          const nextCourse = group.courses[courseIndex];
-          const nextCourseHeight = estimateItemHeight({
-            kind: 'course',
-            semester: group.semester,
-            course: nextCourse,
-          });
-          if (headingHeight + nextCourseHeight > pageLimit) {
-            // Fallback: the course is too large to pair with the heading.
-            currentPage.push({ kind: 'semester', semester: group.semester });
-            currentHeight += headingHeight;
-          } else {
-            currentPage.push({ kind: 'semester', semester: group.semester });
-            currentHeight += headingHeight;
-          }
-        } else if (
-          currentHeight + headingHeight + courseHeight > pageLimit &&
-          currentHeight > 0 &&
-          currentPage[currentPage.length - 1]?.kind !== 'semester'
-        ) {
-          pushPage();
-          continue;
-        } else if (
-          currentPage.length > 0 &&
-          currentPage[currentPage.length - 1]?.kind !== 'semester' &&
-          currentHeight + courseHeight > pageLimit
-        ) {
-          pushPage();
-          continue;
-        }
-
-        if (currentPage.length === 0 || currentPage[currentPage.length - 1]?.kind !== 'semester') {
-          currentPage.push({ kind: 'semester', semester: group.semester });
-          currentHeight += headingHeight;
-        }
-
-        if (currentHeight + courseHeight > pageLimit && currentPage.length > 1) {
-          pushPage();
-          continue;
-        }
-
-        currentPage.push(courseItem);
-        currentHeight += courseHeight;
-        courseIndex += 1;
-      }
-    });
-
-    pushPage();
-    return pages;
-  };
-
-  const cloPages = buildCloPages();
   return (
     <Document>
-      {/* ---- COVER PAGE ---- */}
-      <Page size="A4" style={styles.coverPage}>
+      {/* ---- EXECUTIVE SUMMARY ---- */}
+      <Page size="A4" style={styles.executivePage}>
         <Watermark logoUrl={logoUrl} />
-        <Image src={logoUrl} style={styles.coverLogo} />
-        <Text style={styles.coverTitle}>OBE Master Report</Text>
-        <Text style={styles.coverSubtitle}>{programName}</Text>
-        <Text style={styles.coverSubtitle}>Batch: {batchName}</Text>
-        <Text style={styles.coverMeta}>Generated on {new Date().toLocaleDateString()}</Text>
+        <View style={styles.executiveHeader}>
+          <View>
+            <Text style={styles.executiveTitle}>OBE Master Report</Text>
+            <Text style={styles.executiveSubtitle}>{programName}</Text>
+            <Text style={styles.executiveSubtitle}>Batch: {batchName}</Text>
+            <Text style={styles.executiveSubtitle}>Executive Summary | Generated on {new Date().toLocaleDateString()}</Text>
+          </View>
+          <Image src={logoUrl} style={styles.executiveLogo} />
+        </View>
+
+        {visionMissionAnalytics ? (
+          <>
+            <View style={styles.statementGrid}>
+              <View style={styles.statementBox}>
+                <Text style={styles.statementLabel}>Program Vision</Text>
+                <Text style={styles.statementText}>
+                  {visionMissionAnalytics.vision.statement || 'No active Vision statement configured.'}
+                </Text>
+                <Text style={styles.keywordLine}>
+                  Keywords: {visionMissionAnalytics.vision.keywords.map((keyword) => keyword.text).join(', ') || 'None'}
+                </Text>
+              </View>
+              <View style={styles.statementBox}>
+                <Text style={styles.statementLabel}>Program Mission</Text>
+                <Text style={styles.statementText}>
+                  {visionMissionAnalytics.mission.statement || 'No active Mission statement configured.'}
+                </Text>
+                <Text style={styles.keywordLine}>
+                  Keywords: {visionMissionAnalytics.mission.keywords.map((keyword) => keyword.text).join(', ') || 'None'}
+                </Text>
+              </View>
+            </View>
+
+            {renderVisionMissionTable('Vision Keyword Attainment', visionMissionAnalytics.vision_rows)}
+            {renderVisionMissionTable('Mission Keyword Attainment', visionMissionAnalytics.mission_rows)}
+          </>
+        ) : (
+          <Text style={styles.statementText}>Vision/Mission analytics were not available for this batch.</Text>
+        )}
       </Page>
 
       {/* ---- CLO SECTION ---- */}

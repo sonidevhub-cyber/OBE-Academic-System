@@ -31,11 +31,6 @@ const splitEvenlyWithRounding = (keys: string[], total: number) => {
   return result;
 };
 
-const formatWeight = (weight: number | string | null | undefined): string => {
-  const num = coerceWeight(weight);
-  return Number.isInteger(num) ? String(num) : num.toFixed(2).replace(/\.?0+$/, '');
-};
-
 const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
   const [matrix, setMatrix] = useState<MappingMatrix | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,14 +96,6 @@ const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
     });
   }, [matrix]);
 
-  const rowTotals = useMemo(() => {
-    const totals: Record<string, number> = {};
-    matrix?.matrix.forEach(row => {
-      totals[row.clo] = matrix.gas.reduce((sum, ga) => sum + coerceWeight(row.mappings[ga.code]?.value), 0);
-    });
-    return totals;
-  }, [matrix]);
-
   const updateRow = (cloCode: string, updater: (row: MappingMatrix['matrix'][number]) => MappingMatrix['matrix'][number]) => {
     setMatrix(prev => {
       if (!prev) return prev;
@@ -156,20 +143,6 @@ const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
 
       return rebalanceRow(row, nextActive);
     });
-  };
-
-  const handleWeightChange = (cloCode: string, gaCode: string, value: string) => {
-    const nextWeight = value === '' ? 0 : Number(value);
-    updateRow(cloCode, row => ({
-      ...row,
-      mappings: {
-        ...row.mappings,
-        [gaCode]: {
-          strength: null,
-          value: Number.isFinite(nextWeight) ? nextWeight : 0
-        }
-      }
-    }));
   };
 
   const saveChanges = async () => {
@@ -231,7 +204,6 @@ const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
                   {ga.code}
                 </th>
               ))}
-              <th className="border border-gray-300 p-2 bg-gray-100 text-xs">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -240,43 +212,25 @@ const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
                 <td className="border border-gray-300 p-2 font-medium">{row.clo}</td>
                 <td className="border border-gray-300 p-2 text-sm">{row.course}</td>
                 {matrix.gas.map(ga => {
-                  const key = `${row.clo}-${ga.code}`;
                   const currentMapping = row.mappings[ga.code];
                   const isActive = coerceWeight(currentMapping?.value) > 0;
-                  const displayValue = currentMapping?.value ?? 0;
-                  
+                   
                   return (
                     <td
                       key={ga.code}
                       className={`border border-gray-300 p-2 text-center align-top ${isActive ? 'bg-indigo-50' : 'bg-gray-50'}`}
                     >
-                      <div className="flex flex-col items-center gap-2">
+                      <div className="flex flex-col items-center">
                         <input
                           type="checkbox"
                           checked={isActive}
                           onChange={(e) => handleToggleCell(row.clo, ga.code, e.target.checked)}
                           className="h-4 w-4 accent-indigo-600"
                         />
-                        {isActive ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={formatWeight(displayValue)}
-                            onChange={(e) => handleWeightChange(row.clo, ga.code, e.target.value)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded-md text-center text-sm font-semibold"
-                          />
-                        ) : (
-                          <span className="text-xs text-gray-400">Inactive</span>
-                        )}
                       </div>
                     </td>
                   );
                 })}
-                <td className={`border border-gray-300 p-2 text-center font-bold ${Math.abs((rowTotals[row.clo] || 0) - 1) < 0.0001 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatWeight(rowTotals[row.clo] || 0)}
-                </td>
               </tr>
             ))}
           </tbody>
@@ -286,14 +240,14 @@ const CLOGAMappingMatrix: React.FC<Props> = ({ courseId, departmentId }) => {
       <div className="mt-4 flex gap-4 text-sm">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-indigo-50 border border-indigo-200 rounded"></div>
-          <span>Active weight</span>
+          <span>Mapped</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-gray-50 border border-gray-200 rounded"></div>
           <span>Inactive</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-semibold">Row total must be 1.00</span>
+          <span className="font-semibold">Selected GAs are weighted equally when saved</span>
         </div>
       </div>
     </div>

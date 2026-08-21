@@ -10,12 +10,15 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import CoordinatorOBEMappingModule from '../modules/coordinator/CoordinatorOBEMappingModule';
+import OBEConfigurationModule, { OBEMappingSubTabId } from '../modules/coordinator/OBEConfigurationModule';
 import PEOReport from '../../pages/PEOReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
 import CoordinatorCLOReportModule from '../modules/coordinator/CoordinatorCLOReportModule';
 import OBEReportDashboard from '../modules/coordinator/OBEReportDashboardView';
 import HODCQI from '../pages/HODCQI';
+import HODPEOCQI from '../pages/HODPEOCQI';
+import HODVisionMissionCQI from '../pages/HODVisionMissionCQI';
+import HODCQIClosingAdvisory from '../pages/HODCQIClosingAdvisory';
 import HODNotice from '../pages/HODNotice';
 import { fetchCurrentProfile } from '../../api/profileService';
 import { getEffectiveRole, getProfileImageUrl } from '../../utils/profileHelpers';
@@ -24,7 +27,6 @@ import HODFeedbackControl from '../pages/HODFeedbackControl';
 import EnableResultEditing from '../pages/EnableResultEditing';
 import HODExitSurveyControl from '../pages/HODExitSurveyControl';
 import HODAlumniFeedbackControl from '../pages/HODAlumniFeedbackControl';
-import HODCQIAdvisoryExport from '../pages/HODCQIAdvisoryExport';
 import ModularDashboardShell from '../../components/layout/ModularDashboardShell';
 import DashboardStatCard from '../../components/layout/DashboardStatCard';
 import { api } from '../../api/api';
@@ -39,12 +41,40 @@ import {
   Users,
   BookOpen,
   Settings,
+  Target,
+  Award,
+  Info,
+  LayoutGrid,
   FileSpreadsheet,
   GraduationCap,
   MessageSquare,
 } from 'lucide-react';
 
-type TabId = 'dashboard' | 'cqi' | 'ga-report' | 'clo-report' | 'obe-report' | 'notice' | 'feedback' | 'obe-management' | 'peo-report' | 'student-obe' | 'result-editing' | 'exit-survey' | 'alumni-feedback' | 'ga-cqi-advisory';
+type TabId =
+  | 'dashboard'
+  | 'cqi'
+  | 'ga-report'
+  | 'clo-report'
+  | 'obe-report'
+  | 'notice'
+  | 'feedback'
+  | 'obe-management'
+  | 'vision-mission'
+  | 'peo'
+  | 'ga'
+  | 'vision-mission-map'
+  | 'po-keywords'
+  | 'ga-peo'
+  | 'peo-report'
+  | 'student-obe'
+  | 'result-editing'
+  | 'clo-cqi'
+  | 'ga-cqi'
+  | 'exit-survey'
+  | 'alumni-feedback'
+  | 'peo-cqi'
+  | 'vision-mission-cqi'
+  | 'cqi-closing-advisory';
 
 interface GaSeriesItem {
   label: string;
@@ -113,6 +143,7 @@ const ModularHODDashboard: React.FC = () => {
   const [dashboardGaSeries, setDashboardGaSeries] = useState<GaSeriesItem[]>([]);
   const [recentBatches, setRecentBatches] = useState<RecentBatchItem[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    'obe-management': true,
     reports: true,
     cqi: true,
     engagement: true,
@@ -120,13 +151,26 @@ const ModularHODDashboard: React.FC = () => {
 
   const sidebarGroups = [
     {
+      id: 'obe-management',
+      label: 'OBE Configuration',
+      icon: Settings,
+      children: [
+        { id: 'vision-mission', label: 'Vision & Mission', icon: Target },
+        { id: 'peo', label: 'PO Setup', icon: Award },
+        { id: 'ga', label: 'GA Setup', icon: Info },
+        { id: 'vision-mission-map', label: 'Vision-Mission Mapping', icon: LayoutGrid },
+        { id: 'po-keywords', label: 'PO Mission Mapping', icon: LayoutGrid },
+        { id: 'ga-peo', label: 'GA-PO Mapping', icon: LayoutGrid },
+      ],
+    },
+    {
       id: 'reports',
       label: 'Reports',
       icon: FileBarChart,
       children: [
         { id: 'clo-report', label: 'CLO Reports', icon: BookOpen },
         { id: 'ga-report', label: 'GA Reports', icon: FileBarChart },
-        { id: 'peo-report', label: 'PEO Reports', icon: GraduationCap },
+        { id: 'peo-report', label: 'PO Reports', icon: GraduationCap },
         { id: 'obe-report', label: 'OBE Report', icon: FileSpreadsheet },
       ],
     },
@@ -135,8 +179,10 @@ const ModularHODDashboard: React.FC = () => {
       label: 'CQI',
       icon: ClipboardCheck,
       children: [
-        { id: 'cqi', label: 'CLO CQI Control', icon: ClipboardCheck },
-        { id: 'ga-cqi-advisory', label: 'CQI Advisory Export', icon: ClipboardCheck },
+        { id: 'clo-cqi', label: 'CLO CQI', icon: ClipboardCheck },
+        { id: 'ga-cqi', label: 'GA CQI', icon: FileBarChart },
+        { id: 'peo-cqi', label: 'PO CQI', icon: Target },
+        { id: 'vision-mission-cqi', label: 'Vision/Mission CQI', icon: Award },
       ],
     },
     {
@@ -153,7 +199,6 @@ const ModularHODDashboard: React.FC = () => {
 
   const mainItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'obe-management', label: 'PEO/GA Setup', icon: Settings },
     { id: 'notice', label: 'Notice Board', icon: Bell },
     { id: 'result-editing', label: 'Result lock', icon: Settings },
   ];
@@ -282,7 +327,10 @@ const ModularHODDashboard: React.FC = () => {
   const allTabLabels = useMemo(() => {
     const labels: Record<string, string> = {};
     mainItems.forEach((item) => { labels[item.id] = item.label; });
-    sidebarGroups.forEach((group) => group.children.forEach((child) => { labels[child.id] = child.label; }));
+    sidebarGroups.forEach((group) => {
+      labels[group.id] = group.id === 'cqi' ? 'CQI Closing Summary' : group.label;
+      group.children.forEach((child) => { labels[child.id] = child.label; });
+    });
     return labels;
   }, []);
 
@@ -292,6 +340,16 @@ const ModularHODDashboard: React.FC = () => {
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId as TabId);
+  };
+
+  const handleToggleGroup = (groupId: string) => {
+    if (groupId === 'cqi') {
+      setActiveTab('cqi');
+    }
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupId]: !prev[groupId],
+    }));
   };
 
   const renderDashboard = () => {
@@ -468,19 +526,36 @@ const ModularHODDashboard: React.FC = () => {
         return renderDashboard();
 
       case 'obe-management':
-        return <CoordinatorOBEMappingModule />;
+        return <OBEConfigurationModule initialSubTab="vision-mission" hideSubTabs />;
+
+      case 'vision-mission':
+      case 'peo':
+      case 'ga':
+      case 'vision-mission-map':
+      case 'po-keywords':
+      case 'ga-peo':
+        return <OBEConfigurationModule initialSubTab={activeTab as OBEMappingSubTabId} hideSubTabs />;
 
       case 'cqi':
-        return <HODCQI />;
+        return <HODCQIClosingAdvisory />;
+
+      case 'clo-cqi':
+        return <HODCQI mode="clo" />;
+
+      case 'ga-cqi':
+        return <HODCQI mode="ga" />;
+
+      case 'peo-cqi':
+        return <HODPEOCQI />;
+
+      case 'vision-mission-cqi':
+        return <HODVisionMissionCQI />;
 
       case 'clo-report':
         return <CoordinatorCLOReportModule />;
 
       case 'ga-report':
         return <CoordinatorGAReportModule />;
-
-      case 'ga-cqi-advisory':
-        return <HODCQIAdvisoryExport />;
 
       case 'peo-report':
         return <PEOReport />;
@@ -523,12 +598,7 @@ const ModularHODDashboard: React.FC = () => {
       tabs={mainItems}
       tabGroups={sidebarGroups}
       expandedGroups={expandedGroups}
-      onToggleGroup={(groupId) =>
-        setExpandedGroups((prev) => ({
-          ...prev,
-          [groupId]: !prev[groupId],
-        }))
-      }
+      onToggleGroup={handleToggleGroup}
       onTabChange={handleTabChange}
       onLogout={logout}
       profileData={headerProfile}

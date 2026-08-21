@@ -4,6 +4,9 @@ export interface Program {
   id: string;
   name: string;
   code: string;
+  department?: string | null;
+  department_name?: string | null;
+  department_code?: string | null;
   description?: string;
   total_semesters: number;
   created_at: string;

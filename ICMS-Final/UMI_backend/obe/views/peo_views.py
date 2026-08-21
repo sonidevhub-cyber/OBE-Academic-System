@@ -391,17 +391,17 @@ class GAPEOMatrixView(APIView):
             'mappings', []
         )
         
-        # Group mappings by PEO for equal weight distribution
-        peo_groups = {}
+        # Group mappings by GA for equal weight distribution (per GA row = 100%)
+        ga_groups = {}
         for m in mappings_data:
-            peo_id = m['peo_id']
-            if peo_id not in peo_groups:
-                peo_groups[peo_id] = []
-            peo_groups[peo_id].append(m)
+            ga_id = m['ga_id']
+            if ga_id not in ga_groups:
+                ga_groups[ga_id] = []
+            ga_groups[ga_id].append(m)
         
         created = []
-        for peo_id, peo_mappings in peo_groups.items():
-            n = len(peo_mappings)
+        for ga_id, ga_mappings in ga_groups.items():
+            n = len(ga_mappings)
             if n == 0:
                 continue
             
@@ -411,7 +411,7 @@ class GAPEOMatrixView(APIView):
             # Process each mapping: use provided weight if explicitly set (>0), else equal
             processed_weights = []
             total_weight = Decimal('0.00')
-            for m in peo_mappings:
+            for m in ga_mappings:
                 provided_weight = m.get('weight')
                 try:
                     provided_weight = Decimal(str(provided_weight)) if provided_weight is not None else Decimal('0.00')
@@ -432,23 +432,25 @@ class GAPEOMatrixView(APIView):
                 slot_weight = (remaining_total / Decimal(remaining_slots)).quantize(Decimal('0.01'))
                 # Distribute and adjust the last one for rounding
                 assigned = Decimal('0.00')
+                equal_idx = 0
+                last_equal_idx = sum(1 for w in processed_weights if w is None) - 1
                 for i in range(len(processed_weights)):
                     if processed_weights[i] is None:
-                        if i == len([j for j, w in enumerate(processed_weights) if w is None]) - 1 or remaining_slots == 1:
-                            # Last slot: use remainder
+                        if equal_idx == last_equal_idx or remaining_slots == 1:
                             processed_weights[i] = (remaining_total - assigned).quantize(Decimal('0.01'))
                         else:
                             processed_weights[i] = slot_weight
                             assigned += slot_weight
+                        equal_idx += 1
                         remaining_slots -= 1
             elif remaining_slots > 0:
-                # No remaining total: just set to 0 or equal
+                # No remaining total: just set to equal
                 for i in range(len(processed_weights)):
                     if processed_weights[i] is None:
                         processed_weights[i] = equal_weight
             
-            # Now create all mappings for this PEO
-            for m, final_weight in zip(peo_mappings, processed_weights):
+            # Now create all mappings for this GA
+            for m, final_weight in zip(ga_mappings, processed_weights):
                 # Clamp to 0-100 just in case
                 final_weight = max(Decimal('0.00'), min(Decimal('100.00'), final_weight))
                 mapping = GAPEOMapping.objects.create(
@@ -1625,4 +1627,66 @@ class SurveyQuestionLockView(APIView):
         obj.is_locked = True
         obj.save(update_fields=['is_locked', 'updated_at'])
         return Response(SurveyQuestionSerializer(obj).data)
+
+
+class PEOCQICloseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, cqi_id):
+        try:
+            cqi = PEOCQIRecord.objects.get(id=cqi_id)
+        except PEOCQIRecord.DoesNotExist:
+            return Response({'error': 'PEO-CQI not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        user_role = getattr(request.user, 'role', '')
+        user_secondary_role = getattr(request.user, 'secondary_role', '')
+        is_hod = user_role == 'hod' or user_secondary_role == 'hod'
+        if not is_hod:
+            return Response({'error': 'Only HODs can close PEO-CQI records'}, status=status.HTTP_403_FORBIDDEN)
+
+        if cqi.status == 'CLOSED_IMPLEMENTED':
+            return Response({'error': 'This PEO-CQI record is already closed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        implemented_in_batch_id = request.data.get('implemented_in_batch')
+        action_taken_description = request.data.get('action_taken_description', '')
+
+        if not implemented_in_batch_id:
+            return Response(
+                {'error': 'implemented_in_batch is mandatory'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not action_taken_description or not str(action_taken_description).strip():
+            return Response(
+                {'error': 'action_taken_description is mandatory'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            impl_batch = Batch.objects.get(id=implemented_in_batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Implementation batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        peo_result = calculate_peo_report(cqi.peo, impl_batch)
+        resulting_attainment = None
+        if peo_result and peo_result.get('final_score') is not None:
+            resulting_attainment = round(Decimal(str(peo_result['final_score'])), 2)
+
+        PEOCQISubmissionHistory.objects.create(
+            cqi_record=cqi,
+            root_cause_snapshot=cqi.root_cause,
+            remedial_plan_snapshot=cqi.remedial_plan,
+            status_at_time=cqi.status
+        )
+
+        cqi.implemented_in_batch = impl_batch
+        cqi.action_taken_description = action_taken_description.strip()
+        cqi.resulting_attainment = resulting_attainment
+        cqi.closed_by = request.user
+        cqi.closed_at = timezone.now()
+        cqi.status = 'CLOSED_IMPLEMENTED'
+        cqi.is_locked = True
+        cqi.save()
+
+        return Response(PEOCQIRecordSerializer(cqi).data, status=status.HTTP_200_OK)
 

@@ -71,16 +71,30 @@ from .views import (
     SurveyQuestionListCreateView,
     SurveyQuestionDetailView,
     SurveyQuestionLockView,
+    # Vision & Mission views
+    DepartmentVisionView,
+    DepartmentMissionView,
+    ExtractKeywordsView,
+    VisionKeywordListView,
+    MissionKeywordListView,
+    VisionMissionMappingView,
+    ProgramPEOKeywordMappingView,
+    BatchVisionMissionAnalyticsView,
+    VisionMissionCQIUpsertView,
+    VisionMissionCQICloseView,
 )
-from .views.ga_views import EnableResultEditingView
+from .views.ga_views import EnableResultEditingView, GACQICloseView
 from .views.peo_views import (
     PEOReportView,
     PEOCQIListView,
     PEOCQICreateView,
     PEOCQIDetailView,
     PEOCQISubmitView,
-    PEOCQIHistoryView
+    PEOCQIHistoryView,
+    PEOCQICloseView,
 )
+from .views.vision_mission_views import VisionMissionCQIRecordListCreateView
+from .views.report_views import CQIClosingSummaryView
 
 urlpatterns = [
     # PEO
@@ -187,6 +201,7 @@ urlpatterns = [
     path('ga-cqi/<uuid:cqi_id>/approve/', GACQIApproveView.as_view()),
     path('ga-cqi/<uuid:cqi_id>/reject/', GACQIRejectView.as_view()),
     path('ga-cqi/<uuid:cqi_id>/history/', GACQIHistoryView.as_view()),
+    path('ga-cqi/<uuid:cqi_id>/close/', GACQICloseView.as_view()),
     
     # 9. Unlock course assessment
     path('courses/<uuid:session_id>/unlock/', CourseUnlockView.as_view()),
@@ -278,6 +293,7 @@ urlpatterns = [
     path('peo-cqi/<uuid:cqi_id>/', PEOCQIDetailView.as_view()),
     path('peo-cqi/<uuid:cqi_id>/submit/', PEOCQISubmitView.as_view()),
     path('peo-cqi/<uuid:cqi_id>/history/', PEOCQIHistoryView.as_view()),
+    path('peo-cqi/<uuid:cqi_id>/close/', PEOCQICloseView.as_view()),
 
     # ========== FLEXIBLE SurveyQuestion ENDPOINTS (Alumni + Employer shared) ==========
     # Program scoped list (GET with ?survey_type=ALUMNI/EMPLOYER&peo_id=<uuid>&general=true)
@@ -288,4 +304,28 @@ urlpatterns = [
     path('survey-questions/<uuid:pk>/', SurveyQuestionDetailView.as_view()),
     # Lock action (HOD only)
     path('survey-questions/<uuid:pk>/lock/', SurveyQuestionLockView.as_view()),
+
+    # ========== VISION & MISSION ENDPOINTS ==========
+    # Department-scoped Vision (GET active, POST create, PATCH update with new version)
+    path('departments/<uuid:department_id>/vision/', DepartmentVisionView.as_view()),
+    # Department-scoped Mission
+    path('departments/<uuid:department_id>/mission/', DepartmentMissionView.as_view()),
+    # Keyword extraction helper (no persistence)
+    path('extract-keywords/', ExtractKeywordsView.as_view()),
+    # Vision keywords CRUD
+    path('visions/<uuid:vision_id>/keywords/', VisionKeywordListView.as_view()),
+    # Mission keywords CRUD
+    path('missions/<uuid:mission_id>/keywords/', MissionKeywordListView.as_view()),
+    # Vision-Mission keyword mappings
+    path('departments/<uuid:department_id>/vision-mission-mappings/', VisionMissionMappingView.as_view()),
+    # PEO/PO → Mission + Vision keyword mappings (program scoped)
+    path('programs/<uuid:program_id>/po-keyword-mappings/', ProgramPEOKeywordMappingView.as_view()),
+    # Batch-level Vision/Mission analytics for the OBE report
+    path('batches/<uuid:batch_id>/vision-mission-analytics/', BatchVisionMissionAnalyticsView.as_view()),
+    path('batches/<uuid:batch_id>/vision-mission-cqi/', VisionMissionCQIUpsertView.as_view()),
+    path('vision-mission-cqi/<uuid:cqi_id>/close/', VisionMissionCQICloseView.as_view()),
+    # Vision/Mission CQI review records (single-step closing: HOD Retained/Revised decision)
+    path('vision-mission-cqi-review/', VisionMissionCQIRecordListCreateView.as_view()),
+    # Consolidated HOD CQI closing advisory (3 separate lists, no merged tables)
+    path('cqi/closing-summary/', CQIClosingSummaryView.as_view()),
 ]

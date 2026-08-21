@@ -11,7 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from obe.models import GACQIRecord, GA
 from core.models import Program, Batch
 from core.permissions import IsHOD
-from obe.services import calculate_weighted_ga_score
+from obe.services import calculate_ga_report
 from ga_cqi_cohort.serializers import (
     GACQICohortSerializer,
     GACQICumulativeCloseSerializer,
@@ -23,9 +23,17 @@ def evaluate_ga_status_row(program, batch):
     Evaluate GA status row and trigger GACQIRecords for BELOW_TARGET GAs
     at program end.
     """
+    if not batch.is_program_end_ready:
+        return
+
+    report_by_ga_id = {
+        str(row['ga_id']): row
+        for row in calculate_ga_report(batch, force_recalculate=True)
+    }
+
     for ga in program.gas.filter(is_active=True):
-        cohort_score = calculate_weighted_ga_score(ga, batch)
-        final_score = cohort_score['final_score']
+        cohort_score = report_by_ga_id.get(str(ga.id), {})
+        final_score = cohort_score.get('final_score')
         
         if final_score is None:
             continue
@@ -35,6 +43,7 @@ def evaluate_ga_status_row(program, batch):
                 ga=ga, 
                 batch=batch, 
                 cqi_level='CUMULATIVE',
+                semester=None,
                 defaults={
                     'status': 'OPEN',
                     'issue_statement': f"Batch {batch.name} has failed to achieve "
@@ -68,15 +77,26 @@ class GAStatusRowView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        if str(batch.program_id) != str(program.id):
+            return Response(
+                {'error': 'Selected batch does not belong to the selected program.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Evaluate and trigger CQIs if needed
         evaluate_ga_status_row(program, batch)
         
         results = []
         gas = GA.objects.filter(program=program, is_active=True)
         
+        report_by_ga_id = {
+            str(row['ga_id']): row
+            for row in calculate_ga_report(batch, force_recalculate=True)
+        }
+
         for ga in gas:
-            cohort_result = calculate_weighted_ga_score(ga, batch)
-            final_score = cohort_result['final_score']
+            cohort_result = report_by_ga_id.get(str(ga.id), {})
+            final_score = cohort_result.get('final_score')
             
             status_str = 'NOT_ASSESSED'
             if final_score is not None:
@@ -84,8 +104,12 @@ class GAStatusRowView(APIView):
                 
             # Get existing GACQIRecord
             cqi_record = GACQIRecord.objects.filter(
-                ga=ga, batch=batch, cqi_level='CUMULATIVE', is_active=True
-            ).first()
+                ga=ga,
+                batch=batch,
+                cqi_level='CUMULATIVE',
+                semester__isnull=True,
+                is_active=True,
+            ).order_by('-updated_at', '-created_at').first()
             
             results.append({
                 'ga_id': str(ga.id),

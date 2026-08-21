@@ -10,7 +10,8 @@ from core.models import Batch, Semester, Program
 from students.models import Student
 from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score, CourseFeedbackGAScore
 from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
-from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions
+from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions, calculate_weighted_ga_score
+from django.utils import timezone
 from retake.report_access_wrapper import get_ga_report_with_invalidation_check
 
 
@@ -1092,8 +1093,6 @@ class BatchGAReportView(APIView):
             from ..services import calculate_weighted_ga_score
             for ga in gas:
                 weighted_result = calculate_weighted_ga_score(ga, batch)
-                final_score = weighted_result['final_score']
-                direct_attainment = weighted_result['direct_score']
                 indirect_attainment = weighted_result['indirect_score']
                 visible_scores = [
                     item['score']
@@ -1101,6 +1100,23 @@ class BatchGAReportView(APIView):
                     for item in report['ga_scores']
                     if item['ga_id'] == str(ga.id) and item['score'] is not None
                 ]
+                direct_attainment = None
+                if visible_scores:
+                    direct_attainment = round(
+                        sum(Decimal(str(score)) for score in visible_scores) / Decimal(len(visible_scores)),
+                        2,
+                    )
+
+                final_score = None
+                if direct_attainment is not None and indirect_attainment is not None:
+                    final_score = round(
+                        (direct_attainment * Decimal('0.8')) + (Decimal(str(indirect_attainment)) * Decimal('0.2')),
+                        2,
+                    )
+                elif direct_attainment is not None:
+                    final_score = direct_attainment
+                elif indirect_attainment is not None:
+                    final_score = Decimal(str(indirect_attainment))
                 # #region debug-point D:course-wise-footer
                 _emit_ga_view_debug_event(
                     "D",
@@ -1113,6 +1129,7 @@ class BatchGAReportView(APIView):
                         "visible_course_score_count": len(visible_scores),
                         "visible_course_scores": visible_scores,
                         "footer_direct_attainment": direct_attainment,
+                        "weighted_course_direct_attainment": weighted_result['direct_score'],
                     },
                 )
                 # #endregion
@@ -1822,3 +1839,66 @@ class EnableResultEditingView(APIView):
         return Response({
             "message": "Result editing enabled successfully."
         }, status=status.HTTP_200_OK)
+
+
+class GACQICloseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, cqi_id):
+        try:
+            cqi = GACQIRecord.objects.get(id=cqi_id)
+        except GACQIRecord.DoesNotExist:
+            return Response({'error': 'GA-CQI not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        user_role = request.user.role
+        user_secondary_role = request.user.secondary_role
+        is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
+        if not is_hod:
+            return Response({'error': 'Only HODs can close GA-CQI records'}, status=status.HTTP_403_FORBIDDEN)
+
+        if cqi.status == 'CLOSED_IMPLEMENTED':
+            return Response({'error': 'This GA-CQI record is already closed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        implemented_in_batch_id = request.data.get('implemented_in_batch')
+        action_taken_description = request.data.get('action_taken_description', '')
+
+        if not implemented_in_batch_id:
+            return Response(
+                {'error': 'implemented_in_batch is mandatory'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not action_taken_description or not str(action_taken_description).strip():
+            return Response(
+                {'error': 'action_taken_description is mandatory'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            impl_batch = Batch.objects.get(id=implemented_in_batch_id, is_active=True)
+        except Batch.DoesNotExist:
+            return Response({'error': 'Implementation batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        ga_result = calculate_weighted_ga_score(cqi.ga, impl_batch)
+        resulting_attainment = None
+        if ga_result and ga_result.get('final_score') is not None:
+            resulting_attainment = round(Decimal(str(ga_result['final_score'])), 2)
+
+        GACQIResubmissionHistory.objects.create(
+            cqi_record=cqi,
+            root_cause_snapshot=cqi.root_cause,
+            remedial_plan_snapshot=cqi.remedial_plan,
+            hod_comment_snapshot=cqi.hod_comment,
+            status_at_time=cqi.status
+        )
+
+        cqi.implemented_in_batch = impl_batch
+        cqi.action_taken_description = action_taken_description.strip()
+        cqi.resulting_attainment = resulting_attainment
+        cqi.closed_by = request.user
+        cqi.closed_at = timezone.now()
+        cqi.status = 'CLOSED_IMPLEMENTED'
+        cqi.is_locked = True
+        cqi.save()
+
+        return Response(GACQIRecordSerializer(cqi).data, status=status.HTTP_200_OK)

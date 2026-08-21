@@ -1203,9 +1203,9 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                 {mappingMatrix.gas?.map((ga: any) => {
                                   const weight = tempMappings[`${clo.id}_${ga.id}`];
                                   return (
-                                    <td key={`${clo.id}-${ga.id}`} className="px-2 py-3 text-center border-b border-r">
+                                    <td key={`${clo.id}-${ga.id}`} className={`px-2 py-3 text-center border-b border-r ${weight ? 'bg-indigo-50' : ''}`}>
                                       {isEditingObe ? (
-                                        <div className="flex flex-col items-center gap-2">
+                                        <div className="flex items-center justify-center">
                                           <input
                                             type="checkbox"
                                             checked={!!weight}
@@ -1216,25 +1216,8 @@ const CurriculumVersionDetailPage: React.FC<CurriculumVersionDetailPageProps> = 
                                               else newTemp[`${clo.id}_${ga.id}`] = 1;
                                               setTempMappings(normalizeCloRowWeights(mappingMatrix, clo.id, newTemp));
                                             }}
-                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                            className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 accent-indigo-600"
                                           />
-                                          {weight ? (
-                                            <input
-                                              type="number"
-                                              min="0"
-                                              max="1"
-                                              step="0.01"
-                                              value={formatDecimalWeight(weight)}
-                                              onChange={(e) => {
-                                                const nextValue = e.target.value === '' ? 0 : Number(e.target.value);
-                                                setTempMappings(prev => ({
-                                                  ...prev,
-                                                  [`${clo.id}_${ga.id}`]: nextValue
-                                                }));
-                                              }}
-                                              className="w-16 px-2 py-1 text-center text-xs font-bold border border-gray-200 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none"
-                                            />
-                                          ) : null}
                                         </div>
                                       ) : (
                                         weight ? (

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx-js-style';
 import obeService, { Batch, GACQIRecord } from '../api/obeService';
@@ -78,6 +78,14 @@ type BatchCategory = 'all' | 'ongoing' | 'graduated';
 const formatPercent = (value: number | null | undefined): string =>
   value === null || value === undefined ? 'N/A' : `${value.toFixed(1)}%`;
 
+const recordedCqiStatuses = new Set([
+  'SAVED',
+  'EXPORTED',
+  'FULLY_APPROVED',
+  'APPROVED',
+  'CLOSED_IMPLEMENTED',
+]);
+
 const GAReport: React.FC = () => {
   const [programs, setPrograms] = useState<any[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -96,6 +104,14 @@ const GAReport: React.FC = () => {
   const [hodActionPlan, setHodActionPlan] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const reportRequestRef = useRef(0);
+  const statusRequestRef = useRef(0);
+
+  const resetReportState = () => {
+    setReportData(null);
+    setReadinessInfo(null);
+    setGAStatusRow([]);
+  };
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -126,12 +142,15 @@ const GAReport: React.FC = () => {
   // Auto-generate report when batch or view mode changes
   useEffect(() => {
     if (!selectedBatchId) {
+      reportRequestRef.current += 1;
+      resetReportState();
       return;
     }
 
     const fetchReport = async () => {
-      const hasVisibleData = Boolean(reportData || readinessInfo);
-      setLoading(!hasVisibleData);
+      const requestId = reportRequestRef.current + 1;
+      reportRequestRef.current = requestId;
+      setLoading(true);
       
       try {
         const data = await obeService.getBatchGAReport(selectedBatchId, {
@@ -139,18 +158,28 @@ const GAReport: React.FC = () => {
           scope: viewMode === 'student-wise' ? 'all_students' : 'course_wise',
         });
 
+        if (reportRequestRef.current !== requestId) {
+          return;
+        }
+
         // Check if it's a readiness response
         if ('ready' in data && !data.ready) {
           setReadinessInfo(data);
+          setReportData(null);
         } else {
           setReportData(data as unknown as AllStudentsReportData);
           setReadinessInfo(null);
         }
       } catch (error) {
+        if (reportRequestRef.current !== requestId) {
+          return;
+        }
         console.error('Failed to fetch GA report:', error);
         toast.error('Failed to fetch GA report');
       } finally {
-        setLoading(false);
+        if (reportRequestRef.current === requestId) {
+          setLoading(false);
+        }
       }
     };
 
@@ -160,45 +189,36 @@ const GAReport: React.FC = () => {
   // Fetch GA Status Row when program and batch are selected
   useEffect(() => {
     if (!selectedProgramId || !selectedBatchId) {
+      statusRequestRef.current += 1;
       setGAStatusRow([]);
       return;
     }
     const fetchGAStatusRow = async () => {
+      const requestId = statusRequestRef.current + 1;
+      statusRequestRef.current = requestId;
       try {
         const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
+        if (statusRequestRef.current !== requestId) {
+          return;
+        }
         setGAStatusRow(data);
       } catch (error) {
+        if (statusRequestRef.current !== requestId) {
+          return;
+        }
         console.error('Failed to fetch GA status row:', error);
       }
     };
     fetchGAStatusRow();
   }, [selectedProgramId, selectedBatchId, refreshTick]);
 
-  useEffect(() => {
+  const handleRefreshReport = () => {
     if (!selectedBatchId) {
+      toast.error('Select a batch first');
       return;
     }
-
-    const bumpRefresh = () => setRefreshTick((tick) => tick + 1);
-    const intervalId = window.setInterval(bumpRefresh, 30000);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        bumpRefresh();
-      }
-    };
-
-    const handleFocus = () => bumpRefresh();
-
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [selectedBatchId]);
+    setRefreshTick((tick) => tick + 1);
+  };
 
   // Handle Trigger CQI button click
   const handleTriggerCQI = async (ga: GAStatusRow) => {
@@ -581,6 +601,7 @@ const GAReport: React.FC = () => {
               onChange={(e) => {
                 setSelectedProgramId(e.target.value);
                 setSelectedBatchId('');
+                resetReportState();
               }}
             >
               <option value="">Select a program</option>
@@ -603,6 +624,7 @@ const GAReport: React.FC = () => {
               onChange={(e) => {
                 setBatchCategory(e.target.value as BatchCategory);
                 setSelectedBatchId('');
+                resetReportState();
               }}
             >
               <option value="all">All Batches</option>
@@ -619,7 +641,15 @@ const GAReport: React.FC = () => {
             <select
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
               value={selectedBatchId}
-              onChange={(e) => setSelectedBatchId(e.target.value)}
+              onChange={(e) => {
+                const nextBatchId = e.target.value;
+                const nextBatch = batches.find((batch) => batch.id === nextBatchId);
+                setSelectedBatchId(nextBatchId);
+                if (nextBatch?.program?.id) {
+                  setSelectedProgramId(nextBatch.program.id);
+                }
+                resetReportState();
+              }}
               disabled={!selectedProgramId}
             >
               <option value="">Select a batch</option>
@@ -662,6 +692,13 @@ const GAReport: React.FC = () => {
 
           {/* Action Button */}
           <div className="flex items-end gap-3">
+            <button
+              onClick={handleRefreshReport}
+              disabled={!selectedBatchId || loading}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
+            >
+              Refresh
+            </button>
             <button
               onClick={handleExport}
               disabled={!reportData}
@@ -905,17 +942,21 @@ const GAReport: React.FC = () => {
                   </td>
                   {(reportData.gas || []).map((ga) => {
                     const gaStatus = gaStatusRow.find((s) => s.ga_id === ga.ga_id);
-                    const isSaved = gaStatus?.cqi_status === 'SAVED';
+                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                    const effectiveStatus = summary?.status ?? gaStatus?.status;
+                    const isSaved = Boolean(
+                      gaStatus?.cqi_status && recordedCqiStatuses.has(gaStatus.cqi_status)
+                    );
                     return (
                       <td
                         key={ga.ga_id}
                         className={`px-4 py-3 text-center text-sm font-semibold border-t-4 border-gray-300 ${
-                          gaStatus?.status === 'BELOW_TARGET'
+                          effectiveStatus === 'BELOW_TARGET'
                             ? 'bg-red-50'
                             : 'bg-gray-50'
                         }`}
                       >
-                        {gaStatus?.status === 'BELOW_TARGET' ? (
+                        {effectiveStatus === 'BELOW_TARGET' && gaStatus?.cqi_record_id ? (
                           <div className="mx-auto max-w-[220px] rounded-xl border-2 border-red-300 bg-white px-3 py-3 shadow-sm">
                             <div className="text-xs font-black uppercase tracking-[0.2em] text-red-600 mb-2">
                               BELOW_TARGET
@@ -936,6 +977,10 @@ const GAReport: React.FC = () => {
                               </button>
                             )}
                           </div>
+                        ) : effectiveStatus === 'BELOW_TARGET' ? (
+                          <span className="text-xs font-bold text-red-500">CQI unavailable</span>
+                        ) : effectiveStatus === 'NOT_ASSESSED' ? (
+                          <span className="text-xs font-bold text-gray-500">NOT ASSESSED</span>
                         ) : (
                           <span className="text-gray-500">-</span>
                         )}
