@@ -1,351 +1,197 @@
-import React, { useEffect, useState } from "react";
-import { api } from "../../api/api";
+import React, { useEffect, useState, useCallback } from "react";
+import axiosInstance from "../../api/axiosInstance";
+import { toast } from "react-hot-toast";
 
 interface Props {
   courseId: string;
   batchId: string;
-  semesterId: string;
+  semesterNumber: number | string;
+  onEditAssessment?: (assessment: AssessmentItem) => void;
+  forceLocked?: boolean; // Testing ya override ke liye optional prop
+}
+
+export interface AssessmentItem {
+  id: string;
+  title: string;
+  type: string;
+  date: string;
+  total_marks: number;
+  is_finalized: boolean;
+  is_locked: boolean;
 }
 
 const AssessmentHistory: React.FC<Props> = ({
   courseId,
   batchId,
-  semesterId,
+  semesterNumber,
+  onEditAssessment,
+  forceLocked = false,
 }) => {
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [assessments, setAssessments] = useState<AssessmentItem[]>([]);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-
-  const [assessments, setAssessments] = useState<any[]>([]);
-  const [open, setOpen] = useState(false);
-
-const [selectedAssessment, setSelectedAssessment] = useState<any>(null);
-
-const [studentMarks, setStudentMarks] = useState<any[]>([]);
-
-const [allowEditing, setAllowEditing] = useState(false);
-const [editedMarks, setEditedMarks] = useState<any[]>([]);
-const handleView = async (assessment: any) => {
-
-  try {
-
-    const res = await api.get(
-      `/assessments/history/${assessment.id}/`
-    );
-
-    setSelectedAssessment(assessment);
-
-    setStudentMarks(res.data.students);
-    setEditedMarks(res.data.students);
-    setAllowEditing(res.data.allow_editing);
-
-    setOpen(true);
-
-  } catch (err) {
-
-    console.log(err);
-
-  }
-
-};
-
-  useEffect(() => {
-
-    fetchHistory();
-
-  }, [courseId, batchId, semesterId]);
-
-  const fetchHistory = async () => {
-
-    try {
-
-      const res = await api.get(
-        `/assessments/history/`,
-        {
-          params: {
-            course: courseId,
-            batch: batchId,
-            semester: semesterId,
-          },
-        }
-      );
-
-      setAssessments(res.data);
-
-    } catch (err) {
-
-      console.log(err);
-
-    } finally {
-
+  // Fetch History List
+  const fetchHistory = useCallback(async () => {
+    if (!courseId || !batchId) {
       setLoading(false);
-
+      return;
     }
 
-  };
-  const saveChanges = async () => {
+    setLoading(true);
+    setError(null);
 
-  const payload: any[] = [];
-
-  editedMarks.forEach((student: any) => {
-
-    student.questions.forEach((q: any) => {
-
-      payload.push({
-        mark_id: q.mark_id,
-        marks_obtained: q.marks_obtained,
+    try {
+      const response = await axiosInstance.get("/assessments/history/", {
+        params: {
+          course: courseId,
+          batch: batchId,
+          semester: semesterNumber,
+        },
       });
 
-    });
+      // Backend data ko map kar ke agar forceLocked true ho to sab ko locked kar dein
+      const data = (response.data || []).map((item: any) => ({
+        ...item,
+        is_locked: forceLocked ? true : item.is_locked,
+      }));
 
-  });
+      setAssessments(data);
+    } catch (err) {
+      console.error("Error fetching assessment history:", err);
+      setError("Failed to load history. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId, batchId, semesterNumber, forceLocked]);
 
-  try {
-
-    await api.put("/assessments/update-student-marks/", {
-      marks: payload,
-    });
-
-    alert("Marks Updated Successfully");
-
-    setOpen(false);
-
+  useEffect(() => {
     fetchHistory();
+  }, [fetchHistory]);
 
-  } catch (err) {
+  const handleView = (assessment: AssessmentItem) => {
+    if (onEditAssessment) {
+      onEditAssessment(assessment);
+    }
+  };
 
-    console.log(err);
-
-  }
-
-};
+  // Request Unlock Handler for HOD approval
+  const requestEditing = async (assessmentId: string) => {
+    try {
+      setRequestingId(assessmentId);
+      const res = await axiosInstance.post(`/assessments/request-editing/${assessmentId}/`);
+      toast.success(res.data.message || "Edit request sent to HOD successfully!");
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || "Failed to send edit request");
+    } finally {
+      setRequestingId(null);
+    }
+  };
 
   if (loading) {
-
     return (
-      <div className="text-center p-5">
-        Loading...
+      <div className="flex justify-center items-center py-12 text-slate-600 font-medium">
+        Loading Assessment History...
       </div>
     );
-
   }
 
   return (
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-slate-800">
+          Assessment History
+        </h2>
+        <button
+          onClick={fetchHistory}
+          className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded transition-colors"
+        >
+          🔄 Refresh
+        </button>
+      </div>
 
-    <div className="bg-white rounded shadow p-5">
+      {error && (
+        <div className="mb-4 text-sm text-red-600 bg-red-50 p-3 rounded">
+          {error}
+        </div>
+      )}
 
-      <h2 className="text-xl font-bold mb-5">
-        Assessment History
-      </h2>
-
-      <table className="w-full border">
-
-        <thead>
-
-          <tr className="bg-gray-100">
-
-            <th className="border p-2">
-              #
-            </th>
-
-            <th className="border p-2">
-              Title
-            </th>
-
-            <th className="border p-2">
-              Type
-            </th>
-
-            <th className="border p-2">
-              Total Marks
-            </th>
-
-            <th className="border p-2">
-              Date
-            </th>
-
-            <th className="border p-2">
-              Action
-            </th>
-
-          </tr>
-
-        </thead>
-
-        <tbody>
-
-          {assessments.map((assessment, index) => (
-
-            <tr key={assessment.id}>
-
-              <td className="border p-2 text-center">
-                {index + 1}
-              </td>
-
-              <td className="border p-2">
-                {assessment.title}
-              </td>
-
-              <td className="border p-2 text-center">
-                {assessment.assessment_type}
-              </td>
-
-              <td className="border p-2 text-center">
-                {assessment.total_marks}
-              </td>
-
-              <td className="border p-2 text-center">
-                {assessment.date}
-              </td>
-
-              <td className="border p-2 text-center">
-
-                <button
-                  className="bg-blue-600 text-white px-3 py-1 rounded"
-                  onClick={() => handleView(assessment)}
-                >
-                  View
-                </button>
-
-              </td>
-
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse border border-slate-200">
+          <thead>
+            <tr className="bg-slate-100 text-slate-700 text-sm">
+              <th className="border border-slate-200 p-2.5 text-center w-12">#</th>
+              <th className="border border-slate-200 p-2.5 text-left">Title</th>
+              <th className="border border-slate-200 p-2.5 text-center">Type</th>
+              <th className="border border-slate-200 p-2.5 text-center">Total Marks</th>
+              <th className="border border-slate-200 p-2.5 text-center">Date</th>
+              <th className="border border-slate-200 p-2.5 text-center">Status</th>
+              <th className="border border-slate-200 p-2.5 text-center w-40">Action</th>
             </tr>
-
-          ))}
-
-        </tbody>
-
-      </table>
-      {
-allowEditing && (
-
-<div className="flex justify-end mt-5">
-
-<button
-onClick={saveChanges}
-className="bg-green-600 text-white px-5 py-2 rounded"
->
-
-Save Changes
-
-</button>
-
-</div>
-
-)
-}
-      {
-open && (
-
-<div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-
-<div className="bg-white w-11/12 max-h-[90vh] overflow-auto rounded p-5">
-
-<div className="flex justify-between mb-5">
-
-<h2 className="text-xl font-bold">
-
-{selectedAssessment?.title}
-
-</h2>
-
-<button
-onClick={() => setOpen(false)}
-className="text-red-600 font-bold"
->
-
-✕
-
-</button>
-
-</div>
-
-<table className="w-full border">
-
-  <thead>
-
-    <tr>
-
-      <th className="border p-2">Student</th>
-
-      {editedMarks.length > 0 &&
-        editedMarks[0].questions.map((q: any, index: number) => (
-          <th key={index} className="border p-2">
-            {q.question}
-            <br />
-            <span className="text-xs">({q.total_marks})</span>
-          </th>
-        ))}
-
-      <th className="border p-2">Total</th>
-
-    </tr>
-
-  </thead>
-
-  <tbody>
-
-    {editedMarks.map((student: any, studentIndex: number) => (
-
-      <tr key={student.student_id}>
-
-        <td className="border p-2">
-          {student.name}
-        </td>
-
-        {student.questions.map((q: any, qIndex: number) => (
-
-          <td key={qIndex} className="border p-2">
-
-            <input
-              type="number"
-              className="border w-16 text-center"
-              value={q.marks_obtained ?? ""}
-              min={0}
-              max={q.total_marks}
-              onChange={(e) => {
-
-                const value = Number(e.target.value);
-
-                const copy = [...editedMarks];
-
-                copy[studentIndex].questions[qIndex].marks_obtained = value;
-
-                setEditedMarks(copy);
-
-              }}
-            />
-
-          </td>
-
-        ))}
-
-        <td className="border p-2 font-bold">
-
-          {student.questions.reduce(
-            (sum: number, q: any) => sum + Number(q.marks_obtained),
-            0
-          )}
-
-        </td>
-
-      </tr>
-
-    ))}
-
-  </tbody>
-
-</table>
-</div>
-
-</div>
-
-)
-}
-
+          </thead>
+          <tbody>
+            {assessments.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center p-4 text-slate-500">
+                  No assessment history found.
+                </td>
+              </tr>
+            ) : (
+              assessments.map((item, index) => (
+                <tr key={item.id || index} className="hover:bg-slate-50 text-sm">
+                  <td className="border border-slate-200 p-2 text-center text-slate-600">
+                    {index + 1}
+                  </td>
+                  <td className="border border-slate-200 p-2 font-medium text-slate-800">
+                    {item.title}
+                  </td>
+                  <td className="border border-slate-200 p-2 text-center text-slate-600 capitalize">
+                    {item.type}
+                  </td>
+                  <td className="border border-slate-200 p-2 text-center font-semibold text-slate-700">
+                    {item.total_marks}
+                  </td>
+                  <td className="border border-slate-200 p-2 text-center text-slate-600">
+                    {item.date}
+                  </td>
+                  <td className="border border-slate-200 p-2 text-center">
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded font-medium ${
+                        item.is_locked
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-emerald-100 text-emerald-800"
+                      }`}
+                    >
+                      {item.is_locked ? "Locked" : "Active"}
+                    </span>
+                  </td>
+                  <td className="border border-slate-200 p-2 text-center">
+                    {item.is_locked ? (
+                      <button
+                        onClick={() => requestEditing(item.id)}
+                        disabled={requestingId === item.id}
+                        className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded transition-colors font-semibold shadow-sm disabled:opacity-50"
+                      >
+                        {requestingId === item.id ? "Sending..." : "Request Unlock"}
+                      </button>
+                    ) : (
+                      <button
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded transition-colors font-semibold"
+                        onClick={() => handleView(item)}
+                      >
+                        Edit Marks
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
-
   );
-
 };
 
 export default AssessmentHistory;

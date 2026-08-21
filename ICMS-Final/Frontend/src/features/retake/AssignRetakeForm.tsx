@@ -156,9 +156,10 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
         let courseRows: CourseOption[] = [];
 
         if (selectedBatch.curriculum_version_id) {
-          const versionResponse = await curriculumService.getVersion(
-            Number(selectedBatch.curriculum_version_id)
-          );
+  const versionResponse =
+    await curriculumService.getVersion(
+      String(selectedBatch.curriculum_version_id)
+    );
           const versionData = versionResponse.data?.data || versionResponse.data;
           const groupedCourses = versionData?.courses_by_semester || {};
 

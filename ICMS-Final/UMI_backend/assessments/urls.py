@@ -18,6 +18,7 @@ urlpatterns = [
         'clo-report/<uuid:course_id>/<uuid:batch_id>/<uuid:semester_id>/',
         CLOReportView.as_view()
     ),
+    path('update-marks/', UpdateStudentMarksView.as_view(), name='update-marks'),
 
     # ✅ CQI (Instructor)
     path("cqi/", CQIView.as_view()),
@@ -33,7 +34,7 @@ urlpatterns = [
     path('student/result/', student_result),
     path('cqi/coordinator/', CoordinatorCQIView.as_view()),
     path('previous-cqi/', PreviousCQIView.as_view()),
-    path("update-student-marks/",UpdateStudentMarksView.as_view()),
+    # path("update-student-marks/",UpdateStudentMarksView.as_view()),
     path("history/",AssessmentHistoryView.as_view()),
 
 path("history/<uuid:assessment_id>/",AssessmentMarksView.as_view()),

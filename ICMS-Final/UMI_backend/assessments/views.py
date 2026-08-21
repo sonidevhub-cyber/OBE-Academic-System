@@ -7,7 +7,7 @@ from decimal import Decimal
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from students.models import Student
-from .models import Assessment, StudentAssessment, INTERNAL_ASSESSMENT_TYPES
+from .models import Assessment, StudentAssessment, INTERNAL_ASSESSMENT_TYPES, EditRequest
 
 import uuid
 
@@ -434,7 +434,7 @@ class EnterMarksView(APIView):
 
         # ✅ Step 7: allow_result_editing reset karo agar tha
         if course_session and course_session.allow_result_editing:
-            course_session.allow_result_editing = False
+            # course_session.allow_result_editing = False
             course_session.save()
 
         # ✅ Step 8: Check if this is a retake assessment OR it's a normal final assessment (case-insensitive)
@@ -1103,15 +1103,14 @@ class AssessmentHistoryView(APIView):
 
         course_id = request.GET.get("course")
         batch_id = request.GET.get("batch")
-        semester_number = request.GET.get("semester")
+        semester_param = request.GET.get("semester")  # Can be UUID or integer number
         retake_id = request.GET.get("retake_id")
         
-        logger.info(f"[AssessmentHistoryView] Called with course_id: {course_id}, batch_id: {batch_id}, semester_number: {semester_number}, retake_id: {retake_id}")
+        logger.info(f"[AssessmentHistoryView] Called with course_id: {course_id}, batch_id: {batch_id}, semester_param: {semester_param}, retake_id: {retake_id}")
 
         assessments_query = Assessment.objects.all()
 
         if retake_id:
-            # If retake_id is provided, filter for that specific retake
             logger.info(f"[AssessmentHistoryView] Filtering by retake_id: {retake_id}")
             try:
                 retake = CourseRetake.objects.get(id=retake_id)
@@ -1124,13 +1123,19 @@ class AssessmentHistoryView(APIView):
                 logger.warning(f"[AssessmentHistoryView] Retake {retake_id} not found, returning none")
                 assessments_query = Assessment.objects.none()
         else:
-            # Normal case: filter by course, batch, semester, no retake
-            # Get course to get program
             logger.info(f"[AssessmentHistoryView] Normal case, no retake")
             course = Course.objects.get(id=course_id)
             
-            # Get semester by program and number
-            semester = Semester.objects.get(program=course.program, number=semester_number)
+            # --- UPDATED SEMESTER FETCH LOGIC ---
+            if semester_param:
+                if str(semester_param).isdigit():
+                    # Agar integer hai (e.g. "1", "2")
+                    semester = Semester.objects.get(program=course.program, number=int(semester_param))
+                else:
+                    # Agar UUID string hai (e.g. "54341428-b615-4b5f...")
+                    semester = Semester.objects.get(id=semester_param)
+            else:
+                semester = None
 
             assessments_query = Assessment.objects.filter(
                 course_id=course_id,
@@ -1139,23 +1144,14 @@ class AssessmentHistoryView(APIView):
                 course_retake__isnull=True
             ).order_by("-created_at")
 
-        data = []
-
-        for ass in assessments_query:
-            data.append({
-                "id": ass.id,
-                "title": ass.title,
-                "type": ass.assessment_type,
-                "date": ass.assessment_date,
-                "total_marks": ass.total_marks,
-                "is_finalized": ass.is_finalized,
-                "is_locked": ass.is_locked,
-            })
+        # 🔥 UPDATE: Optimized Query & Serializer
+        # select_related aur prefetch_related lagane se N+1 database queries se bachat hoti hai
+        assessments_query = assessments_query.prefetch_related('questions__clo')
         
-        logger.info(f"[AssessmentHistoryView] Returning {len(data)} assessments")
-        return Response(data)
-
-
+        serializer = AssessmentDetailSerializer(assessments_query, many=True)
+        
+        logger.info(f"[AssessmentHistoryView] Returning {len(serializer.data)} assessments with questions")
+        return Response(serializer.data)
 class CourseSessionStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1256,27 +1252,22 @@ class AssessmentMarksView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, assessment_id):
-
-        assessment = Assessment.objects.get(id=assessment_id)
+        try:
+            assessment = Assessment.objects.get(id=assessment_id)
+        except Assessment.DoesNotExist:
+            return Response({"error": "Assessment not found"}, status=404)
 
         session = CourseSession.objects.filter(
-
             course=assessment.course,
-
             batch=assessment.batch,
-
             semester=assessment.semester,
-
             is_active=True
-
         ).first()
 
         if assessment.course_retake:
             students = [assessment.course_retake.student]
         else:
-            students = Student.objects.filter(
-                user__batch=assessment.batch
-            )
+            students = Student.objects.filter(user__batch=assessment.batch)
 
         questions = Question.objects.filter(
             assessment=assessment
@@ -1285,82 +1276,76 @@ class AssessmentMarksView(APIView):
         result = []
 
         for student in students:
-
             row = {
-
                 "student_id": student.student_id,
-
                 "name": student.name,
-
                 "questions": []
-
             }
 
             total = Decimal("0")
 
-            for q in questions:
+            for idx, q in enumerate(questions, start=1):
                 mark_query = StudentQuestionMark.objects.filter(
                     student=student,
                     question=q
                 )
                 if assessment.course_retake:
                     mark_query = mark_query.filter(course_retake=assessment.course_retake)
+                
                 mark = mark_query.first()
-
-                obtained = mark.marks_obtained if mark else 0
-
-                total += Decimal(obtained)
+                obtained = mark.marks_obtained if mark else Decimal("0")
+                total += Decimal(str(obtained))
 
                 row["questions"].append({
-                    "mark_id": mark.id if mark else None,
-
-                    "question_id": q.id,
-                    "question": f"Q{len(row['questions']) + 1}",
-                    "clo": f"CLO-{q.clo.order_number}",
-
+                    "mark_id": str(mark.id) if mark else None,
+                    "question_id": str(q.id),
+                    "question": f"Q{idx}",
+                    "clo": f"CLO-{q.clo.order_number}" if q.clo else "No CLO",
                     "marks_obtained": float(obtained),
-
                     "total": float(q.marks)
-
                 })
 
             row["total"] = float(total)
-
             result.append(row)
 
         return Response({
-
             "assessment": {
-
                 "id": str(assessment.id),
-
                 "title": assessment.title,
-
                 "type": assessment.assessment_type,
-
                 "total_marks": float(assessment.total_marks),
-
             },
-
             "allow_editing": session.allow_result_editing if session else False,
-
             "students": result
+        })
+# from django.db import transaction
+# from django.db.models import Sum
 
-        })        
+# from rest_framework.views import APIView
+# from rest_framework.response import Response
+# from rest_framework import status
+# from rest_framework.permissions import IsAuthenticated
+
+# from assessments.models import StudentQuestionMark, StudentAssessment
+# from obe.models import CourseSession, GA
+# from obe.services import (
+#     calculate_all_course_ga_scores,
+#     check_and_trigger_ga_cqi,
+# )
+
+
+from decimal import Decimal
 from django.db import transaction
 from django.db.models import Sum
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
-from assessments.models import StudentQuestionMark, StudentAssessment
+from assessments.models import Assessment, Question, StudentQuestionMark, StudentAssessment
 from obe.models import CourseSession, GA
-from obe.services import (
-    calculate_all_course_ga_scores,
-    check_and_trigger_ga_cqi,
-)
+from obe.services import calculate_all_course_ga_scores, check_and_trigger_ga_cqi
+from assessments.workflows import validate_semester_write_allowed
 
 
 class UpdateStudentMarksView(APIView):
@@ -1368,7 +1353,6 @@ class UpdateStudentMarksView(APIView):
 
     @transaction.atomic
     def put(self, request):
-
         marks = request.data.get("marks", [])
 
         if not marks:
@@ -1377,34 +1361,44 @@ class UpdateStudentMarksView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Get first assessment/session only once
+        # 1. Fetch First Assessment & Course Session Safely
+        first_item = marks[0]
+        first_mark_id = first_item.get("mark_id")
+        first_question_id = first_item.get("question_id")
+
+        assessment = None
+        if first_mark_id:
+            first_mark = StudentQuestionMark.objects.filter(id=first_mark_id).select_related("question__assessment").first()
+            if first_mark:
+                assessment = first_mark.question.assessment
+        elif first_question_id:
+            question = Question.objects.filter(id=first_question_id).select_related("assessment").first()
+            if question:
+                assessment = question.assessment
+
+        if not assessment:
+            return Response(
+                {"error": "Invalid assessment or question ID in request payload."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         try:
-            first_mark = StudentQuestionMark.objects.select_related(
-                "question__assessment"
-            ).get(id=marks[0]["mark_id"])
-
-            assessment = first_mark.question.assessment
-
             session = CourseSession.objects.get(
                 course=assessment.course,
                 batch=assessment.batch,
                 semester=assessment.semester,
                 is_active=True
             )
-
-        except StudentQuestionMark.DoesNotExist:
-            return Response(
-                {"error": "Invalid mark id."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
         except CourseSession.DoesNotExist:
             return Response(
                 {"error": "Course Session not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # HOD Permission
+        # 🔍 Debugging print to verify editing status in terminal
+        print(f"[UpdateStudentMarksView] Checking session {session.id} | allow_result_editing: {session.allow_result_editing}")
+
+        # 2. Permissions & Locked Assessment Checks
         if not session.allow_result_editing:
             return Response(
                 {"error": "Result editing is disabled."},
@@ -1427,61 +1421,68 @@ class UpdateStudentMarksView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # 3. Main Loop For Updating Marks
         updated = 0
         updated_assessments = set()
 
         for item in marks:
-
             mark_id = item.get("mark_id")
+            question_id = item.get("question_id")
+            student_id = item.get("student_id")
             obtained = item.get("marks_obtained")
 
-            try:
-                mark = StudentQuestionMark.objects.select_related(
-                    "student",
-                    "question",
-                    "question__assessment"
-                ).get(id=mark_id)
+            if obtained is None:
+                continue
 
-            except StudentQuestionMark.DoesNotExist:
+            # Mark fetch or create logic
+            mark = None
+            if mark_id:
+                mark = StudentQuestionMark.objects.filter(id=mark_id).first()
+            
+            if not mark and question_id and student_id:
+                mark, _ = StudentQuestionMark.objects.get_or_create(
+                    student_id=student_id,
+                    question_id=question_id,
+                    defaults={'marks_obtained': 0}
+                )
+
+            if not mark:
                 continue
 
             question = mark.question
-            assessment = question.assessment
-
-            updated_assessments.add(assessment.id)
+            curr_assessment = question.assessment
 
             # Validation
             if float(obtained) > float(question.marks):
                 return Response(
-                    {
-                        "error": f"Marks cannot exceed {question.marks}"
-                    },
+                    {"error": f"Marks cannot exceed maximum question marks ({question.marks})"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Update Marks
+            # Save
             mark.marks_obtained = obtained
             mark.save()
 
-            # Recalculate Student Assessment
+            # Recalculate Student Assessment Total
             total_marks = StudentQuestionMark.objects.filter(
                 student=mark.student,
-                question__assessment=assessment
+                question__assessment=curr_assessment
             ).aggregate(
                 total=Sum("marks_obtained")
             )["total"] or 0
 
-            student_assessment, created = StudentAssessment.objects.get_or_create(
+            student_assessment, _ = StudentAssessment.objects.get_or_create(
                 student=mark.student,
-                assessment=assessment
+                assessment=curr_assessment
             )
 
             student_assessment.marks_obtained = total_marks
             student_assessment.save()
 
             updated += 1
+            updated_assessments.add(str(curr_assessment.id))
 
-        # Recalculate OBE once
+        # 4. Recalculate OBE Scores
         calculate_all_course_ga_scores(session)
 
         if session.batch and session.batch.is_program_end_ready:
@@ -1503,3 +1504,50 @@ class UpdateStudentMarksView(APIView):
             },
             status=status.HTTP_200_OK
         )
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from obe.models import CourseSession
+from assessments.models import EditRequest  # Jo model aapne banaya hai
+
+class RequestEditingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, course_session_id):
+        try:
+            session = CourseSession.objects.get(id=course_session_id, is_active=True)
+        except CourseSession.DoesNotExist:
+            return Response({"error": "Active course session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Instructor ki request create ya pending state mein get karein
+        edit_req, created = EditRequest.objects.get_or_create(
+            course_session=session,
+            instructor=request.user,
+            defaults={'status': 'pending'}
+        )
+        
+        if not created and edit_req.status == 'approved':
+            edit_req.status = 'pending'
+            edit_req.save()
+
+        return Response({"message": "Editing request sent to HOD successfully."}, status=status.HTTP_201_CREATED)
+
+
+class HODUnlockSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, course_session_id):
+        try:
+            session = CourseSession.objects.get(id=course_session_id)
+        except CourseSession.DoesNotExist:
+            return Response({"error": "Course session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Session ko unlock karein
+        session.allow_result_editing = True
+        session.save()
+
+        # Is session ki pending requests ko approved kar dein
+        EditRequest.objects.filter(course_session=session, status='pending').update(status='approved')
+
+        return Response({"message": "Course session unlocked successfully by HOD."}, status=status.HTTP_200_OK)

@@ -90,6 +90,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'course_id': alloc.course.id,
                 'course_name': alloc.course.name,
                 'course_code': alloc.course.code,
+                'course_type': alloc.course.course_type,
                 'course_description': alloc.course.description if hasattr(alloc.course, 'description') else '',
                 'credits': alloc.course.credit_hours,
                 'credit_hours': alloc.course.credit_hours,

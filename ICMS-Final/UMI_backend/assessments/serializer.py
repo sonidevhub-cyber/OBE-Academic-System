@@ -65,3 +65,17 @@ class CQISerializer(serializers.ModelSerializer):
 
     def get_instructor_name(self, obj):
         return obj.instructor.full_name if obj.instructor else "N/A"
+# Backend serializer ya view ki misaal
+class AssessmentHistorySerializer(serializers.ModelSerializer):
+    is_locked = serializers.SerializerMethodField()
+
+    def get_is_locked(self, obj):
+        # Agar course_session ka allow_result_editing False hai, to is_locked True hona chahiye
+        # (Assuming assessment ka relation course_session se hai)
+        if hasattr(obj, 'course_session') and obj.course_session:
+            return not obj.course_session.allow_result_editing
+        return True # Defaulting to locked if session not found
+    
+    class Meta:
+        model = Assessment
+        fields = ['id', 'title', 'type', 'date', 'total_marks', 'is_finalized', 'is_locked']    

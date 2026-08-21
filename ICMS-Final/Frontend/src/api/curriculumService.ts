@@ -1,13 +1,29 @@
 import { api } from './api';
 
 export interface CurriculumVersion {
-  id: number;
-  program: number;
+  id: string;
+  program: string;
   program_name: string;
   program_total_semesters?: number;
-  batch: string;
-  batch_name: string;
-  assigned_batches?: Array<{ id: string; name: string }>;
+
+  curriculum_mode: 'progressive' | 'complete';
+  current_semester: number | null;
+
+  assigned_batches?: Array<{
+    id: string;
+    name: string;
+    curriculum_mode?: 'progressive' | 'complete';
+    mode?: 'progressive' | 'complete';
+    current_semester?: number | null;
+    currentSemester?: number | null;
+    batch_current_semester?: number | null;
+    semester?: number | null;
+    curriculum?: {
+      mode?: 'progressive' | 'complete';
+      current_semester?: number | null;
+    };
+  }>;
+
   version_no: string;
   status: 'draft' | 'finalized' | 'archived';
   cloned_from: number | null;
@@ -33,44 +49,186 @@ export interface CurriculumCourse {
   credit_hours: number;
   semester_no: number;
   is_active: boolean;
-  allocation?: any; // Module 2 data
+  allocation?: any;
+}
+export interface AddCourseToVersionPayload {
+  course: string | number;
+  semester_no: number;
+  batch_id?: string | number;
 }
 
 export const curriculumService = {
-  getVersions: (params?: any) => 
+  // ============================================================
+  // CURRICULUM VERSIONS
+  // ============================================================
+
+  getVersions: (params?: any) =>
     api.get('curriculum-versions/', { params }),
-  
-  getVersion: (id: number) => {
-    if (isNaN(id)) {
-      console.warn('curriculumService.getVersion called with NaN');
-      return Promise.reject(new Error('Invalid ID'));
+
+  getVersion: (id: string) => {
+  if (!id || typeof id !== 'string') {
+    console.warn(
+      'curriculumService.getVersion called with invalid ID'
+    );
+
+    return Promise.reject(
+      new Error('Invalid curriculum version ID')
+    );
+  }
+
+  return api.get(
+    `curriculum-versions/${id}/`
+  );
+},
+
+  createCurriculumVersion: (data: any) =>
+    api.post(
+      'curriculum-versions/',
+      data
+    ),
+
+  updateVersion: (
+    id: string,
+    data: any
+  ) =>
+    api.patch(
+      `curriculum-versions/${id}/`,
+      data
+    ),
+
+  finalizeVersion: (id: string) =>
+    api.post(
+      `curriculum-versions/${id}/finalize/`
+    ),
+
+  syncVersionCourses: (id: string) =>
+    api.post(
+      `curriculum-versions/${id}/sync_courses/`
+    ),
+
+  // ============================================================
+  // BRANCH
+  // ============================================================
+
+  branchVersion: (
+  id: string,
+  batchId: string | number
+) =>
+  api.post(
+    `curriculum-versions/${id}/branch/`,
+    {
+      batch_id: batchId,
     }
-    return api.get(`curriculum-versions/${id}/`);
+  ),
+
+  // ============================================================
+  // CLONE
+  // ============================================================
+
+  cloneVersion: (
+  id: string,
+  payload:
+    | string
+    | {
+        batch_id: string;
+        curriculum_mode?: string;
+        current_semester?: number;
+      }
+) => {
+    const data =
+      typeof payload === 'string'
+        ? {
+            batch_id: payload,
+            target_batch_id: payload,
+            curriculum_mode: 'complete',
+            current_semester: 1,
+          }
+        : {
+            ...payload,
+            target_batch_id:
+              payload.batch_id,
+          };
+
+    return api.post(
+      `curriculum-versions/${id}/clone/`,
+      data
+    );
   },
-  
-  createCurriculumVersion: (data: any) => 
-    api.post('curriculum-versions/', data),
-  
-  updateVersion: (id: number, data: any) => 
-    api.patch(`curriculum-versions/${id}/`, data),
-  
-  finalizeVersion: (id: number) => 
-    api.post(`curriculum-versions/${id}/finalize/`),
-  syncVersionCourses: (id: number) =>
-    api.post(`curriculum-versions/${id}/sync_courses/`),
-  branchVersion: (id: number, batchId: string) =>
-    api.post(`curriculum-versions/${id}/branch/`, { batch_id: batchId }),
-  cloneVersion: (id: number, targetBatchId: string) =>
-    api.post(`curriculum-versions/${id}/clone/`, { target_batch_id: targetBatchId }),
-  getMasterCurricula: (programId: string) =>
-    api.get(`curriculum-versions/master/`, { params: { program_id: programId } }),
+
+  // ============================================================
+  // ASSIGN BATCH
+  // ============================================================
+
+  assignBatch: (
+    id: string,
+    payload: {
+      batch_id: string;
+      curriculum_mode: string;
+      current_semester?: number;
+    }
+  ) =>
+    api.post(
+      `curriculum-versions/${id}/assign_batch/`,
+      payload
+    ),
+
+  // ============================================================
+  // MASTER CURRICULA
+  // ============================================================
+
+  getMasterCurricula: (
+    programId: string
+  ) =>
+    api.get(
+      'curriculum-versions/master/',
+      {
+        params: {
+          program_id: programId,
+        },
+      }
+    ),
+
   getAllMasterCurricula: () =>
-    api.get(`curriculum-versions/master/`),
+    api.get(
+      'curriculum-versions/master/'
+    ),
+
+  // ============================================================
+  // HISTORY
+  // ============================================================
+
+ getVersionHistory: (
+  programId?: string
+) =>
+  api.get(
+    'curriculum-versions/history/',
+    {
+      params: programId
+        ? {
+            program_id: programId,
+          }
+        : {},
+    }
+  ),
+  // ============================================================
+  // COURSES
+  // ============================================================
+
   getAllCourses: () =>
     api.get('courses/'),
-  addCourseToVersion: (versionId: number, courseId: string | number, semester: number) => {
-    // Backend `Course` PK is UUID (string), so DO NOT convert to Number.
-    // Only guard against null/undefined-like values.
+
+  /*
+   * Add existing course to curriculum version.
+   *
+   * IMPORTANT:
+   * Progressive curriculum requires batch_id.
+   */
+  addCourseToVersion: (
+    versionId: string,
+    courseId: string | number,
+    semester: number,
+    batchId?: string | number
+  ) => {
     const isNullish =
       courseId === null ||
       courseId === undefined ||
@@ -79,38 +237,127 @@ export const curriculumService = {
       courseId === '';
 
     if (!versionId || isNullish) {
-      return Promise.reject(new Error('Invalid course selection'));
+      return Promise.reject(
+        new Error(
+          'Invalid course selection'
+        )
+      );
     }
 
-    return api.post(`curriculum-versions/${versionId}/courses/`, {
+    if (
+      semester === null ||
+      semester === undefined ||
+      Number.isNaN(Number(semester))
+    ) {
+      return Promise.reject(
+        new Error(
+          'Invalid semester'
+        )
+      );
+    }
+
+    const payload: AddCourseToVersionPayload = {
       course: courseId,
-      semester_no: semester,
-    });
+      semester_no: Number(semester),
+    };
+
+    /*
+     * Send batch_id whenever we have an active batch.
+     *
+     * This fixes:
+     * "Batch is required for progressive curriculum editing."
+     */
+    if (
+      batchId !== undefined &&
+      batchId !== null &&
+      String(batchId).trim() !== ''
+    ) {
+      payload.batch_id = batchId;
+    }
+
+    console.log(
+      '📚 Adding course to curriculum version:',
+      {
+        versionId,
+        courseId,
+        semester: Number(semester),
+        batchId,
+        payload,
+      }
+    );
+
+    return api.post(
+      `curriculum-versions/${versionId}/courses/`,
+      payload
+    );
   },
 
+  // ============================================================
+  // NESTED COURSES
+  // ============================================================
 
+  getCourses: (
+    versionId: string
+  ) =>
+    api.get(
+      `curriculum-versions/${versionId}/courses/`
+    ),
 
-  // Nested Courses
-  getCourses: (versionId: number) => 
-    api.get(`curriculum-versions/${versionId}/courses/`),
-  
-  addCourse: (versionId: number, data: any) => 
-    api.post(`curriculum-versions/${versionId}/courses/`, data),
-  
-  updateCourse: (versionId: number, courseId: number, data: any) => 
-    api.patch(`curriculum-versions/${versionId}/courses/${courseId}/`, data),
-  
-  removeCourse: (versionId: number, courseId: number) => 
-    api.delete(`curriculum-versions/${versionId}/courses/${courseId}/`),
+  addCourse: (
+    versionId: string,
+    data: AddCourseToVersionPayload | any
+  ) =>
+    api.post(
+      `curriculum-versions/${versionId}/courses/`,
+      data
+    ),
 
-  createCourse: (data: { 
-    name: string; 
-    code: string; 
-    credit_hours: number; 
+ updateCourse: (
+  versionId: string,
+  courseId: number,
+  data: any
+) => {
+  console.log("🔥 updateCourse SERVICE CALLED", {
+    versionId,
+    courseId,
+    data,
+    url: `curriculum-versions/${versionId}/courses/${courseId}/`,
+  });
+
+  return api.patch(
+    `curriculum-versions/${versionId}/courses/${courseId}/`,
+    data
+  );
+},
+
+  removeCourse: (
+  versionId: string,
+  courseId: number,
+  batchId?: string
+) =>
+  api.delete(
+    `curriculum-versions/${versionId}/courses/${courseId}/`,
+    {
+      data: {
+        batch_id: batchId,
+      },
+    }
+  ),
+  // ============================================================
+  // CREATE NEW COURSE
+  // ============================================================
+
+  createCourse: (data: {
+    name: string;
+    code: string;
+    credit_hours: number;
     course_type: string;
     program_id: number | string;
     semester_no: number;
     parent_course?: string | number;
   }) =>
-    api.post('courses/', data),
+    api.post(
+      'courses/',
+      data
+    ),
 };

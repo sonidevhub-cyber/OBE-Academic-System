@@ -16,7 +16,6 @@ class CourseSerializer(serializers.ModelSerializer):
         model = Course
         fields = [
             'id',
-            'custom_id',
             'name',
             'code',
             'course_type',

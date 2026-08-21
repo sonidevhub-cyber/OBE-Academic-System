@@ -564,7 +564,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     }
   };
 
-  const loadClos = async (courseId: string, versionId: number) => {
+  const loadClos = async (courseId: string, versionId: string) => {
     if (!courseId || !versionId) return;
     try {
       const res = await obeService.getCLOs(courseId, versionId);
@@ -1554,7 +1554,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
               <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Curriculum Version (Draft)</label>
               <select 
                 value={selectedVersion?.id || ''} 
-                onChange={(e) => setSelectedVersion(versions.find(v => v.id === Number(e.target.value)) || null)}
+                onChange={(e) => setSelectedVersion(versions.find(v => v.id === e.target.value) || null)}
                 className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
               >
                 {versions.length === 0 && <option value="">No Draft Versions</option>}

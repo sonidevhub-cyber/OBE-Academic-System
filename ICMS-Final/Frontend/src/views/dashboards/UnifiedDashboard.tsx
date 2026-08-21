@@ -13,7 +13,6 @@ import {
   CalendarDays,
 } from 'lucide-react';
 
-import AnnouncementModule from '../modules/AnnouncementModule';
 import ProfileModule from '../modules/ProfileModule';
 import AnalyticsModule from '../modules/AnalyticsModule';
 
@@ -39,8 +38,7 @@ const UnifiedDashboard: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <AnalyticsModule token="" userType={'student'} />;
-      case 'announcements':
-        return <AnnouncementModule token="" canCreate={hasPermission('manage_announcements')} />;
+  
       case 'profile':
         return <ProfileModule profileData={userProfile} userType={'student'} />;
       default:
