@@ -17,9 +17,11 @@ import {
 } from 'recharts';
 import html2canvas from 'html2canvas';
 import { pdf } from '@react-pdf/renderer';
+import * as XLSX from 'xlsx-js-style';
 import { toast } from 'react-hot-toast';
 import OBEReportPDF from './OBEReportPDF';
 import logo2 from '../../../assets/logo2.png';
+import ExportChoiceModal from '../../../components/reports/ExportChoiceModal';
 import academicStructureService, { Program } from '../../../api/academicStructureService';
 import obeService, {
   Batch,
@@ -115,6 +117,7 @@ const OBEReportDashboard: React.FC = () => {
   const [selectedSemester, setSelectedSemester] = useState<SemesterFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -459,11 +462,7 @@ const OBEReportDashboard: React.FC = () => {
       setPrograms(loadedPrograms);
       setBatches(loadedBatches);
 
-      const defaultBatch = loadedBatches[0] || null;
-      if (defaultBatch) {
-        setSelectedBatchId(defaultBatch.id);
-        setSelectedProgramId(defaultBatch.program?.id || loadedPrograms[0]?.id || '');
-      } else if (loadedPrograms[0]) {
+      if (loadedPrograms[0]) {
         setSelectedProgramId(loadedPrograms[0].id);
       }
     } catch (err) {
@@ -483,14 +482,16 @@ const OBEReportDashboard: React.FC = () => {
       return;
     }
 
-    if (!filteredBatches.some((batch) => batch.id === selectedBatchId)) {
-      setSelectedBatchId(filteredBatches[0].id);
+    if (selectedBatchId && !filteredBatches.some((batch) => batch.id === selectedBatchId)) {
+      setSelectedBatchId('');
+      setDashboard(null);
     }
   }, [selectedProgramId, filteredBatches, selectedBatchId]);
 
   useEffect(() => {
     if (selectedBatchId && !filteredBatches.some((batch) => batch.id === selectedBatchId)) {
-      setSelectedBatchId(filteredBatches[0]?.id || '');
+      setSelectedBatchId('');
+      setDashboard(null);
     }
   }, [batchCategory, filteredBatches, selectedBatchId]);
 
@@ -650,8 +651,160 @@ const OBEReportDashboard: React.FC = () => {
       link.download = `OBE_Report_${batchName}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
+      toast.success('OBE report PDF exported');
+      setExportModalOpen(false);
     } catch (err) {
       console.error('PDF export failed:', err);
+      toast.error('Failed to export PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const addStyledSheet = (wb: XLSX.WorkBook, name: string, rows: any[][], mergeRows: number[] = []) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const maxCol = Math.max(0, rows.reduce((max, row) => Math.max(max, row.length - 1), 0));
+    ws['!merges'] = mergeRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: maxCol } }));
+    ws['!cols'] = Array.from({ length: maxCol + 1 }, (_, index) => ({
+      wch: index === 0 ? 18 : index === 1 ? 34 : 20,
+    }));
+    ws['!rows'] = rows.map((_, index) => ({ hpt: mergeRows.includes(index) ? 26 : 22 }));
+
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R += 1) {
+      for (let C = 0; C <= range.e.c; C += 1) {
+        const address = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[address]) continue;
+        const isTitle = mergeRows.includes(R);
+        const isHeader = rows[R]?.every((cell) => cell !== '') && R > 0 && rows[R - 1]?.length <= 1;
+        ws[address].s = {
+          fill: isTitle
+            ? { fgColor: { rgb: '1E3A8A' } }
+            : isHeader
+              ? { fgColor: { rgb: 'DBEAFE' } }
+              : undefined,
+          font: {
+            bold: isTitle || isHeader,
+            color: isTitle ? { rgb: 'FFFFFF' } : isHeader ? { rgb: '1E3A8A' } : { rgb: '111827' },
+          },
+          alignment: {
+            horizontal: isTitle || isHeader ? 'center' : C >= 2 ? 'center' : 'left',
+            vertical: 'center',
+            wrapText: true,
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          },
+        };
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  };
+
+  const handleExportExcel = () => {
+    if (!dashboard) {
+      toast.error('Select a batch and load a report first');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const wb = XLSX.utils.book_new();
+      const batchName = selectedBatch?.name || 'Selected Batch';
+      const programName = selectedProgram?.name || 'Program';
+      const generatedAt = new Date().toLocaleString();
+
+      addStyledSheet(wb, 'Executive Summary', [
+        ['OBE Report Dashboard'],
+        [`Program: ${programName}`],
+        [`Batch: ${batchName}`],
+        [`Generated: ${generatedAt}`],
+        [],
+        ['Metric', 'Value'],
+        ['Students', dashboard.totalStudents],
+        ['Program End Ready', dashboard.isProgramEndReady ? 'Yes' : 'No'],
+        ['GA Metrics', dashboard.gaRows.length],
+        ['PO Metrics', dashboard.peoRows.length],
+        ['CLO CQI Rows', dashboard.cloCqiRows.length],
+        ['GA CQI Rows', dashboard.gaCqiRows.length],
+        ['PO CQI Rows', dashboard.peoCqiRows.length],
+      ], [0, 1, 2, 3]);
+
+      addStyledSheet(wb, 'CLO Attainment', [
+        ['Course-wise CLO Attainment'],
+        [`Program: ${programName} | Batch: ${batchName}`],
+        [],
+        ['Semester', 'Course Code', 'Course Name', 'CLO', 'Attainment %', 'Status'],
+        ...dashboard.cloGroups.flatMap((group) =>
+          group.courses.flatMap((course) =>
+            course.clo_summary.map((clo) => [
+              group.semester,
+              course.code,
+              course.name,
+              clo.clo,
+              Number(clo.percentage || 0).toFixed(1),
+              clo.achieved ? 'Achieved' : 'Not Achieved',
+            ])
+          )
+        ),
+      ], [0, 1]);
+
+      addStyledSheet(wb, 'GA Attainment', [
+        ['GA Attainment'],
+        [`Program: ${programName} | Batch: ${batchName}`],
+        [],
+        ['GA Code', 'Attribute', 'Direct %', 'Indirect %', 'Total %', 'Target KPI %', 'CQI Triggered'],
+        ...dashboard.gaRows.map((ga) => [
+          ga.ga_code,
+          ga.ga_title,
+          ga.directAttainment.toFixed(1),
+          ga.indirectAttainment.toFixed(1),
+          ga.totalAttainment.toFixed(1),
+          ga.targetKpi.toFixed(1),
+          ga.cqiTriggered,
+        ]),
+      ], [0, 1]);
+
+      addStyledSheet(wb, 'PO Attainment', [
+        ['PO Attainment'],
+        [`Program: ${programName} | Batch: ${batchName}`],
+        [],
+        ['PO', 'Statement', 'Target KPI %', 'Direct %', 'Indirect %', 'Final %', 'Status'],
+        ...dashboard.peoRows.map((peo) => [
+          peo.id.replace(/^PEO-/, 'PO-'),
+          peo.statement,
+          peo.targetKpi.toFixed(1),
+          peo.directScore.toFixed(1),
+          peo.indirectScore.toFixed(1),
+          peo.finalAttainment.toFixed(1),
+          peo.status,
+        ]),
+      ], [0, 1]);
+
+      addStyledSheet(wb, 'CQI Summary', [
+        ['CQI Summary'],
+        [`Program: ${programName} | Batch: ${batchName}`],
+        [],
+        ['Type', 'Item', 'Detail', 'Reason', 'Remedy', 'Status'],
+        ...[...dashboard.cloCqiRows, ...dashboard.gaCqiRows, ...dashboard.peoCqiRows].map((row) => [
+          row.type,
+          row.item,
+          row.detail,
+          row.reason,
+          row.remedy,
+          row.status || '-',
+        ]),
+      ], [0, 1]);
+
+      XLSX.writeFile(wb, `OBE_Report_${batchName.replace(/\s+/g, '_')}.xlsx`);
+      toast.success('OBE report Excel exported');
+      setExportModalOpen(false);
+    } catch (err) {
+      console.error('Excel export failed:', err);
+      toast.error('Failed to export Excel');
     } finally {
       setExporting(false);
     }
@@ -1028,18 +1181,36 @@ const OBEReportDashboard: React.FC = () => {
               </button>
 
               <button
-                onClick={handleExportPDF}
+                onClick={() => setExportModalOpen(true)}
                 disabled={exporting || !dashboard}
                 className="shrink-0 flex items-center gap-2 rounded-xl border border-white/15 bg-gradient-to-r from-blue-700/90 via-indigo-800/85 to-blue-900/90 px-6 py-2.5 font-semibold text-white shadow-xl shadow-blue-950/15 backdrop-blur-md transition-all hover:border-white/25 hover:from-blue-600/95 hover:via-indigo-700/90 hover:to-blue-800/95 disabled:opacity-60"
               >
                 <FileText size={18} />
-                {exporting ? 'Generating PDF...' : 'Export PDF'}
+                {exporting ? 'Exporting...' : 'Export'}
               </button>
             </div>
           </div>
         </div>
       </div>
 
+      <ExportChoiceModal
+        open={exportModalOpen}
+        title="Export OBE Report"
+        description="Choose a professional PDF or a formatted Excel workbook."
+        exporting={exporting}
+        onClose={() => setExportModalOpen(false)}
+        onPdf={handleExportPDF}
+        onExcel={handleExportExcel}
+      />
+
+      {!selectedBatchId ? (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center text-sm font-semibold text-gray-500">
+          Select a batch to view OBE reports and CQI summaries.
+        </div>
+      ) : null}
+
+      {selectedBatchId && (
+      <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
           <div className="flex items-center gap-4">
@@ -1413,6 +1584,9 @@ const OBEReportDashboard: React.FC = () => {
           </>
         )}
       </div>
+
+      </>
+      )}
 
     </div>
   );

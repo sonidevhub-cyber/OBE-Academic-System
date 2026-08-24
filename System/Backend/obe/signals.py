@@ -128,13 +128,6 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
         # Delete all existing entries for this master cache to avoid unique constraint violations
         StudentGAEntry.objects.filter(master_cache=master_cache).delete()
 
-        # Get all students or alumni in batch
-        student_objs = Student.objects.filter(
-            (models.Q(user__batch=batch) | models.Q(batch=batch)),
-            user__role__in=['student', 'alumni'],
-            user__is_active=True
-        ).select_related('user')
-
         # Get all GAs for the program
         gas = GA.objects.filter(program=batch.program, is_active=True).order_by('order_number')
 
@@ -148,6 +141,19 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
             cs_query = cs_query.filter(course_id__in=allowed_course_ids)
         course_sessions = cs_query.select_related('course')
         session_ids = [cs.id for cs in course_sessions]
+
+        scored_student_ids = StudentCLOScore.objects.filter(
+            course_session_id__in=session_ids,
+            is_active=True,
+        ).values_list('student_id', flat=True).distinct()
+        # Batch-level GA cache entries are keyed from CourseSession -> batch,
+        # not live student.batch, so frozen/rejoined students stay in the
+        # cohort where their assessment data was recorded.
+        student_objs = Student.objects.filter(
+            student_id__in=scored_student_ids,
+            user__role__in=['student', 'alumni'],
+            user__is_active=True,
+        ).select_related('user')
 
         # Get all mappings for these courses and GAs
         mappings = CLOGAMapping.objects.filter(

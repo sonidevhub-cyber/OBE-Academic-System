@@ -13,10 +13,6 @@ const PEOReport: React.FC = () => {
       try {
         const data = await obeService.getAllBatches({ alumni_feedback: 'all' });
         setBatches(data);
-        
-        if (data.length > 0) {
-          setSelectedBatchId(data[0].id);
-        }
       } catch (error) {
         console.error('Failed to fetch batches:', error);
         toast.error('Failed to fetch batches');
@@ -36,7 +32,7 @@ const PEOReport: React.FC = () => {
     [batches]
   );
 
-  const selectedBatch = alumniBatches.find((b) => b.id === selectedBatchId) || alumniBatches[0];
+  const selectedBatch = alumniBatches.find((b) => b.id === selectedBatchId) || null;
   const programId = String(selectedBatch?.program?.id || '');
   const reportYear = useMemo(() => {
     const baseDate = selectedBatch?.graduated_at || selectedBatch?.alumni_feedback_enabled_at;
@@ -56,7 +52,7 @@ const PEOReport: React.FC = () => {
     <div className="space-y-6">
       {/* Filters and Header */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <h2 className="text-2xl font-black text-gray-900 mb-6">PEO Attainment Report</h2>
+        <h2 className="text-2xl font-black text-gray-900 mb-6">PO Attainment Report</h2>
         <div className="grid gap-4 md:grid-cols-3">
           {/* Batch Select */}
           <div className="md:col-span-2">
@@ -84,13 +80,17 @@ const PEOReport: React.FC = () => {
       </div>
 
       {/* Report Dashboard */}
-      {selectedBatch && programId && (
+      {selectedBatch && programId ? (
         <PEOReportDashboard
           programId={programId}
           year={reportYear}
           batchId={selectedBatch.id}
           batchName={selectedBatch.name}
         />
+      ) : (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center text-sm font-semibold text-gray-500">
+          Select an alumni batch to view the PO report.
+        </div>
       )}
     </div>
   );

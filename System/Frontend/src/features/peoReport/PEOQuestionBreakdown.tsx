@@ -62,7 +62,7 @@ const PEOQuestionBreakdown: React.FC<PEOQuestionBreakdownProps> = ({ breakdowns,
   if (items.length === 0) {
     return (
       <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm">
-        No question-wise survey breakdown is available for this PEO report yet.
+        No question-wise survey breakdown is available for this PO report yet.
       </div>
     );
   }
@@ -83,7 +83,7 @@ const PEOQuestionBreakdown: React.FC<PEOQuestionBreakdownProps> = ({ breakdowns,
           <section key={item.peoId} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4">
               <h3 className="text-lg font-bold text-slate-900">
-                {item.description || 'PEO'}{' '}
+                {item.description || 'PO'}{' '}
                 <span className="text-slate-500 text-sm font-semibold">
                   (Target: {item.targetPercentage.toFixed(2)}% | Achieved:{' '}
                   {item.achievedPercentage === null || item.achievedPercentage === undefined

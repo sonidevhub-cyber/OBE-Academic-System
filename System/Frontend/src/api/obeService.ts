@@ -132,6 +132,11 @@ export interface EmployerSurveySubmissionAnswer {
   text_answer?: string;
 }
 
+export interface EmployerSurveySubmissionPayload {
+  answers: EmployerSurveySubmissionAnswer[];
+  additional_feedback?: string;
+}
+
 export interface GA {
   id: string;
   program: string;
@@ -1100,13 +1105,14 @@ class OBEService {
 
   async submitEmployerSurveyByToken(
     token: string,
-    answers: EmployerSurveySubmissionAnswer[]
+    payload: EmployerSurveySubmissionAnswer[] | EmployerSurveySubmissionPayload
   ): Promise<{
     response_id: string;
     answers_recorded: number;
     submitted_at: string;
   }> {
-    const response = await api.post(`/obe/public/employer-survey/${token}/submit/`, { answers });
+    const requestBody = Array.isArray(payload) ? { answers: payload } : payload;
+    const response = await api.post(`/obe/public/employer-survey/${token}/submit/`, requestBody);
     return response.data;
   }
 
@@ -1434,6 +1440,112 @@ class OBEService {
     const response = await api.post('/obe/vision-mission-cqi-review/', data);
     return response.data;
   }
+
+  // ========== FRAMEWORK SNAPSHOT (READ-ONLY) ==========
+
+  async getFrameworkSnapshot(batchId: string): Promise<FrameworkSnapshotResponse> {
+    const response = await api.get(`/batches/${batchId}/framework-snapshot/`);
+    return response.data;
+  }
+
+  async getDossierList(params?: { program?: string; status?: 'active' | 'graduated' }): Promise<DossierListItem[]> {
+    const response = await api.get('/batches/dossier-list/', { params });
+    const payload = response.data;
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.results)) return payload.results;
+    return [];
+  }
+}
+
+// ========== FRAMEWORK SNAPSHOT INTERFACES ==========
+
+export interface PEOSnapshotItem {
+  id: string;
+  order_number: number;
+  title: string | null;
+  description: string;
+  kpi_threshold: number;
+  is_active: boolean;
+  ga_mappings?: GAPEOSnapshotMapping[];
+  keyword_mappings?: POKeywordSnapshotMapping[];
+}
+
+export interface GASnapshotItem {
+  id: string;
+  order_number: number;
+  code: string;
+  title: string;
+  description: string;
+  kpi_threshold: number;
+  is_active: boolean;
+}
+
+export interface VisionMissionSnapshotItem {
+  id: string | null;
+  statement_type: 'VISION' | 'MISSION';
+  statement: string;
+  keywords: Array<{
+    id: string;
+    text: string;
+  }>;
+}
+
+export interface FrameworkSnapshotResponse {
+  batch_id: string;
+  batch_name: string;
+  program_id: string;
+  program_name: string;
+  snapshot_locked_date: string | null;
+  is_locked: boolean;
+  peo_snapshot: PEOSnapshotItem[];
+  ga_snapshot: GASnapshotItem[];
+  vision_mission_snapshot: VisionMissionSnapshotItem[];
+  ga_peo_mappings?: GAPEOSnapshotMapping[];
+  po_keyword_mappings?: POKeywordSnapshotMapping[];
+  vision_mission_mappings?: VisionMissionSnapshotMapping[];
+}
+
+export interface GAPEOSnapshotMapping {
+  id?: string | null;
+  po_id?: string | null;
+  po_code: string;
+  po_title?: string | null;
+  ga_id?: string | null;
+  ga_code: string;
+  ga_title?: string | null;
+  weight?: string | number | null;
+}
+
+export interface POKeywordSnapshotMapping {
+  id?: string | null;
+  po_id?: string | null;
+  po_code: string;
+  po_title?: string | null;
+  mission_keyword?: string | null;
+  vision_keyword?: string | null;
+}
+
+export interface VisionMissionSnapshotMapping {
+  mapping_id?: string | null;
+  mission_keyword_id?: string | null;
+  mission_keyword?: string | null;
+  vision_keyword_id?: string | null;
+  vision_keyword?: string | null;
+}
+
+export interface DossierListItem {
+  id: string;
+  name: string;
+  program_id: string;
+  program_name: string;
+  start_year: number;
+  end_year: number;
+  status: 'active' | 'graduated';
+  is_active: boolean;
+  current_semester: number | null;
+  has_snapshot: boolean;
+  snapshot_locked_date: string | null;
 }
 
 // ========== VISION & MISSION INTERFACES ==========

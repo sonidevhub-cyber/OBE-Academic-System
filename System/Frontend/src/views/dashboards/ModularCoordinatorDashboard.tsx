@@ -10,6 +10,7 @@ import {
   FileBarChart,
   Award,
   Layers,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { fetchCurrentProfile } from '../../api/profileService';
@@ -25,8 +26,9 @@ import { coordinatorService } from '../../api/coordinatorService';
 
 import { api } from '../../api/api';
 import CoordinatorFeedbackView from "../pages/CoordinatorFeedbackView";
+import CoordinatorBatchStructureView from '../modules/coordinator/CoordinatorBatchStructureView';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'feedback';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'batch-structure' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'feedback';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -209,6 +211,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
+    { id: 'batch-structure', label: 'Batch Structure', icon: Archive },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
   ];
 
@@ -387,6 +390,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
         );
       case 'course-allocations':
         return <CourseAllocationBulkModule />;
+      case 'batch-structure':
+        return <CoordinatorBatchStructureView />;
       case 'clo-reports':
         return <CoordinatorCLOReportModule />;
       case 'ga-reports':

@@ -5,8 +5,22 @@ from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 
 from core.models.batch import Batch
-from core.permissions import IsHOD, IsSAC, IsSACOrCoordinator
-from core.serializers.batch import BatchCreateSerializer, BatchFrameworkSnapshotSerializer, BatchListSerializer
+from core.permissions import (
+    IsHOD,
+    IsSAC,
+    IsSACOrCoordinator,
+    CanAccessFrameworkSnapshot,
+    IsHODDepartmentOnly,
+    IsHODOrCoordinator,
+    _get_user_department,
+)
+from core.serializers.batch import (
+    BatchCreateSerializer,
+    BatchFrameworkSnapshotSerializer,
+    BatchListSerializer,
+    BatchStructureSerializer,
+    DossierListSerializer,
+)
 from core.serializers.user import UserListSerializer
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
@@ -200,14 +214,109 @@ class BatchSemesterSelectorView(APIView):
 
 
 class BatchFrameworkSnapshotView(generics.RetrieveAPIView):
-    permission_classes = [IsHOD]
+    """Read-only locked framework snapshot per batch (role-scoped access).
+
+    Permission model (single endpoint, role-based branching via
+    CanAccessFrameworkSnapshot):
+
+    * HOD — any batch whose program.department matches the HOD's department
+      (user.instructor_profile.department).
+    * Coordinator — only batches where batch.coordinator == request.user OR
+      batch.program is one of the coordinator's assigned programs (user.programs M2M).
+    * All other roles (SAC, Teacher, Student, Alumni) receive HTTP 403 Forbidden.
+
+    The response is always built from the Batch instance's write-once snapshot
+    JSON fields (peo_snapshot, ga_snapshot, vision_mission_snapshot) and NEVER
+    from the live GA/PEO/VisionMission tables — snapshots are immutable once
+    written at batch creation.
+    """
+
+    permission_classes = [CanAccessFrameworkSnapshot]
     serializer_class = BatchFrameworkSnapshotSerializer
     lookup_url_kwarg = 'pk'
+    lookup_field = 'id'
 
     def get_queryset(self):
-        queryset = Batch.objects.filter(is_active=True).select_related('program')
-        program_id = self.kwargs.get('program_id')
+        return Batch.objects.filter(is_active=True).select_related('program')
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {self.lookup_field: self.kwargs[lookup_kwarg]}
+        from django.shortcuts import get_object_or_404
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+
+class BatchStructureView(generics.RetrieveAPIView):
+    """Shared read-only batch structure endpoint for HOD and Coordinator."""
+
+    permission_classes = [permissions.IsAuthenticated, IsHODOrCoordinator]
+    serializer_class = BatchStructureSerializer
+    lookup_url_kwarg = 'pk'
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Batch.objects.filter(is_active=True).select_related('program', 'curriculum_version')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        semester = self.request.query_params.get('semester')
+        if semester not in (None, ''):
+            try:
+                context['semester'] = int(semester)
+            except (TypeError, ValueError):
+                context['semester'] = None
+        else:
+            context['semester'] = None
+        return context
+
+
+class BatchDossierListView(generics.ListAPIView):
+    """Lightweight HOD/Coordinator listing for the Batch Dossier Vault UI.
+
+    Access: HOD and Coordinator. 403 for all other roles.
+
+    The queryset is automatically scoped to the HOD's department or the
+    coordinator's assigned programs.
+
+    Query parameters:
+      - program=<uuid>: restrict to a specific program (must still be within
+        the HOD's department scope).
+      - status=active|graduated: filter by batch.status.
+    """
+
+    permission_classes = [IsHODDepartmentOnly]
+    serializer_class = DossierListSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        base = Batch.objects.select_related('program').filter(is_active=True)
+
+        if getattr(user, 'role', None) == 'hod' or getattr(user, 'secondary_role', None) == 'hod':
+            dept = _get_user_department(user)
+            if dept is not None:
+                base = base.filter(program__department_id=dept.id)
+            else:
+                base = base.none()
+        elif getattr(user, 'role', None) == 'coordinator' or getattr(user, 'secondary_role', None) == 'coordinator':
+            base = base.filter(program__in=user.programs.all())
+        else:
+            base = base.none()
+
+        program_id = self.request.query_params.get('program')
         if program_id:
-            queryset = queryset.filter(program_id=program_id)
-        return queryset
+            base = base.filter(program_id=program_id)
+
+        status_filter = self.request.query_params.get('status')
+        if status_filter and status_filter in ('active', 'graduated'):
+            base = base.filter(status=status_filter)
+
+        return base.order_by('-start_year', 'name')
 

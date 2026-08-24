@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PEO Report</title>
+  <title>PO Report</title>
   <style>
     @page {
       size: A4;
@@ -160,6 +160,9 @@
       color: #64748b;
     }
 
+    .status-open { color: #92400e; font-weight: 700; }
+    .status-closed { color: #166534; font-weight: 700; }
+
     .chart {
       width: 100%;
       margin: 8px 0;
@@ -169,7 +172,7 @@
 <body>
   <div class="page">
     <div class="brand">
-      <h1>PEO Attainment Report</h1>
+      <h1>PO Attainment Report</h1>
       <div class="meta">
         <div>
           <div><strong>Department:</strong> {{ report.header.department }}</div>
@@ -184,11 +187,11 @@
 
     <!-- Matrix first -->
     <div class="card">
-      <h2>PEO Attainment Matrix</h2>
+      <h2>PO Attainment Matrix</h2>
       <table>
         <thead>
           <tr>
-            <th>PEO</th>
+            <th>PO</th>
             <th>Description</th>
             <th>Direct %</th>
             <th>Indirect %</th>
@@ -200,11 +203,11 @@
         <tbody>
           {% for row in report.matrix %}
           <tr>
-            <td>PEO {{ forloop.counter }}</td>
+            <td>PO {{ forloop.counter }}</td>
             <td>{{ row.description }}</td>
-            <td>{% if row.directPercentage is not None %}{{ row.directPercentage }}{% else %}N/A{% endif %}</td>
-            <td>{% if row.indirectPercentage is not None %}{{ row.indirectPercentage }}{% else %}N/A{% endif %}</td>
-            <td>{% if row.combinedAttainmentPercentage is not None %}{{ row.combinedAttainmentPercentage }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.directPercentage is not None %}{{ row.directPercentage }}{% else %}Unavailable{% endif %}</td>
+            <td>{% if row.indirectPercentage is not None %}{{ row.indirectPercentage }}{% else %}Unavailable{% endif %}</td>
+            <td>{% if row.combinedAttainmentPercentage is not None %}{{ row.combinedAttainmentPercentage }}{% else %}Unavailable{% endif %}</td>
             <td>{{ row.targetPercentage }}</td>
             <td>{% if row.status == 'Achieved' %}Achieved{% else %}Not Achieved{% endif %}</td>
           </tr>
@@ -215,37 +218,37 @@
 
     <!-- Then charts -->
     <div class="card">
-      <h2>PEO Attainment Visuals</h2>
+      <h2>PO Attainment Visuals</h2>
       <div class="grid" style="margin-bottom: 10px;">
         <div><strong>Target Threshold:</strong> {{ report.summary.targetThreshold }}%</div>
         <div>
           <strong>Overall Program Status:</strong>
           {% if report.summary.overallStatus == 'achieved' %}
-            <span class="pill good">All PEOs achieved</span>
+            <span class="pill good">All POs achieved</span>
           {% else %}
-            <span class="pill bad">Not All PEOs achieved</span>
+            <span class="pill bad">Not All POs achieved</span>
           {% endif %}
         </div>
       </div>
       <div class="chart-grid">
         <div class="chart-panel">
-          <h3>PEO Attainment vs Target</h3>
+          <h3>PO Attainment vs Target</h3>
           {% if chart_image %}
-            <img alt="PEO attainment chart" class="chart-image" src="data:image/png;base64,{{ chart_image }}" />
+            <img alt="PO attainment chart" class="chart-image" src="data:image/png;base64,{{ chart_image }}" />
           {% endif %}
         </div>
         <div class="chart-panel">
-          <h3>PEO Status Split</h3>
+          <h3>PO Status Split</h3>
           <div class="pie-wrap">
             {{ pie_chart_svg|safe }}
             <div class="pie-legend">
               <div class="legend-row">
                 <span class="legend-swatch" style="background:#2563eb;"></span>
-                <span>Achieved PEOs</span>
+                <span>Achieved POs</span>
               </div>
               <div class="legend-row">
                 <span class="legend-swatch" style="background:#f59e0b;"></span>
-                <span>CQI Required PEOs</span>
+                <span>CQI Required POs</span>
               </div>
             </div>
           </div>
@@ -292,6 +295,75 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+
+    <div class="card">
+      <h2>Employer Comments</h2>
+      {% if report.employerComments %}
+      <table>
+        <thead>
+          <tr>
+            <th>PO</th>
+            <th>Question</th>
+            <th>Comment</th>
+            <th>Employer</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for comment in report.employerComments %}
+          <tr>
+            <td>{% if comment.peoCode %}{{ comment.peoCode }}{% else %}General{% endif %}</td>
+            <td>{{ comment.questionText }}</td>
+            <td>{{ comment.comment }}</td>
+            <td>
+              {% if comment.employerIdentifier %}{{ comment.employerIdentifier }}{% else %}Employer{% endif %}
+              {% if comment.employeeName %}<br /><span class="muted">Employee: {{ comment.employeeName }}</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No employer comments have been submitted for this report cycle yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>PO CQI Details</h2>
+      {% if report.cqiSections %}
+      <table>
+        <thead>
+          <tr>
+            <th>PO</th>
+            <th>CQI Status</th>
+            <th>Identified Weakness</th>
+            <th>Corrective Action Plan</th>
+            <th>Approved By</th>
+            <th>Approved Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cqi in report.cqiSections %}
+          <tr>
+            <td>{{ cqi.peoId }}</td>
+            <td>
+              {% if cqi.cqiStatus == 'Closed' %}
+                <span class="status-closed">Closed</span>
+              {% else %}
+                <span class="status-open">Open</span>
+              {% endif %}
+            </td>
+            <td>{% if cqi.rootCause %}{{ cqi.rootCause }}{% else %}Pending HOD submission{% endif %}</td>
+            <td>{% if cqi.remedialPlan %}{{ cqi.remedialPlan }}{% else %}Pending HOD submission{% endif %}</td>
+            <td>{% if cqi.hodApprovedBy %}{{ cqi.hodApprovedBy }}{% else %}Pending HOD approval{% endif %}</td>
+            <td>{% if cqi.hodApprovedDate %}{{ cqi.hodApprovedDate }}{% else %}-{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No PO CQI records are available for this report cycle.</p>
+      {% endif %}
     </div>
   </div>
 </body>

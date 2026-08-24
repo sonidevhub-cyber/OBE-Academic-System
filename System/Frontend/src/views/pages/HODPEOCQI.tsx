@@ -163,6 +163,17 @@ const HODPEOCQI: React.FC = () => {
     );
   };
 
+  const normalizeMatchValue = (value: unknown) =>
+    String(value ?? '').trim().toLowerCase();
+
+  const getPeoRecordKeys = (record: PEOCQIRecord) => [
+    record.peo,
+    record.peo_id,
+    (record as any).peo_uuid,
+    (record as any).peoCode,
+    record.peo_code,
+  ].map(normalizeMatchValue).filter(Boolean);
+
   const handleCreateCqi = async (peoReport: PEOReportItem) => {
     try {
       setSubmitting(true);
@@ -274,10 +285,18 @@ const HODPEOCQI: React.FC = () => {
     }
   };
 
-  const getCqiRecordForPeo = (peoId: string) =>
-    peoCqiRecords.find(
-      (record) => record.peo === peoId || record.peo_id === peoId
+  const getCqiRecordForPeo = (peoReport: PEOReportItem) => {
+    const lookupKeys = [
+      peoReport.peo_id,
+      peoReport.peo_code,
+      (peoReport as any).peo,
+      (peoReport as any).id,
+    ].map(normalizeMatchValue).filter(Boolean);
+
+    return peoCqiRecords.find((record) =>
+      getPeoRecordKeys(record).some((key) => lookupKeys.includes(key))
     );
+  };
 
   const handleDownloadPdf = async () => {
     if (!activeBatch) {
@@ -347,7 +366,7 @@ const HODPEOCQI: React.FC = () => {
         ],
         body: peoReports.length
           ? peoReports.map((peoReport) => {
-              const existingCqi = getCqiRecordForPeo(peoReport.peo_id);
+              const existingCqi = getCqiRecordForPeo(peoReport);
               const needsCqi =
                 peoReport.final_score !== null && peoReport.final_score < 60;
               const approvedOn =
@@ -540,7 +559,7 @@ const HODPEOCQI: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {peoReports.map((peoReport) => {
-                  const existingCqi = getCqiRecordForPeo(peoReport.peo_id);
+                  const existingCqi = getCqiRecordForPeo(peoReport);
                   const isExpanded = expandedPeos.includes(peoReport.peo_id);
                   const kpi = 60;
                   const needsCqi =
@@ -661,56 +680,57 @@ const HODPEOCQI: React.FC = () => {
                         </td>
                       </tr>
 
-                      {isExpanded && existingCqi ? (
+                      {isExpanded ? (
                         <tr>
                           <td colSpan={8} className="bg-gray-50/70 p-0">
-                            <div className="grid gap-4 p-5 lg:grid-cols-2">
-                              <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
-                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
-                                  Root Cause
-                                </p>
-                                <textarea
-                                  value={draft.root_cause}
-                                  onChange={(e) =>
-                                    handleUpdateCqi(
-                                      existingCqi.id,
-                                      'root_cause',
-                                      e.target.value
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
-                                  rows={4}
-                                  placeholder="Describe the root cause..."
-                                  disabled={
-                                    existingCqi.status === 'APPROVED' ||
-                                    existingCqi.status === 'CLOSED_IMPLEMENTED' ||
-                                    existingCqi.is_locked
-                                  }
-                                />
-                              </div>
-                              <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
-                                <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
-                                  Remedial Plan
-                                </p>
-                                <textarea
-                                  value={draft.remedial_plan}
-                                  onChange={(e) =>
-                                    handleUpdateCqi(
-                                      existingCqi.id,
-                                      'remedial_plan',
-                                      e.target.value
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
-                                  rows={4}
-                                  placeholder="Describe the remedial plan..."
-                                  disabled={
-                                    existingCqi.status === 'APPROVED' ||
-                                    existingCqi.status === 'CLOSED_IMPLEMENTED' ||
-                                    existingCqi.is_locked
-                                  }
-                                />
-                              </div>
+                            {existingCqi ? (
+                              <div className="grid gap-4 p-5 lg:grid-cols-2">
+                                <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
+                                  <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                    Root Cause
+                                  </p>
+                                  <textarea
+                                    value={draft.root_cause}
+                                    onChange={(e) =>
+                                      handleUpdateCqi(
+                                        existingCqi.id,
+                                        'root_cause',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
+                                    rows={4}
+                                    placeholder="Describe the root cause..."
+                                    disabled={
+                                      existingCqi.status === 'APPROVED' ||
+                                      existingCqi.status === 'CLOSED_IMPLEMENTED' ||
+                                      existingCqi.is_locked
+                                    }
+                                  />
+                                </div>
+                                <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
+                                  <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                                    Remedial Plan
+                                  </p>
+                                  <textarea
+                                    value={draft.remedial_plan}
+                                    onChange={(e) =>
+                                      handleUpdateCqi(
+                                        existingCqi.id,
+                                        'remedial_plan',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
+                                    rows={4}
+                                    placeholder="Describe the remedial plan..."
+                                    disabled={
+                                      existingCqi.status === 'APPROVED' ||
+                                      existingCqi.status === 'CLOSED_IMPLEMENTED' ||
+                                      existingCqi.is_locked
+                                    }
+                                  />
+                                </div>
 
                               {existingCqi.status === 'CLOSED_IMPLEMENTED' && (
                                 <>
@@ -882,7 +902,16 @@ const HODPEOCQI: React.FC = () => {
                                   </div>
                                 ) : null}
                               </div>
-                            </div>
+                              </div>
+                            ) : (
+                              <div className="p-5">
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                  {needsCqi
+                                    ? 'CQI action plan not yet submitted by HOD. Create the CQI record to enter identified weakness and corrective action plan.'
+                                    : 'No CQI action is required for this PO because the target is achieved.'}
+                                </div>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ) : null}

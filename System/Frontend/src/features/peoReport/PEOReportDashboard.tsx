@@ -8,7 +8,6 @@ import { useParams } from 'react-router-dom';
 
 import { useAuth } from '../../context/AuthContext';
 import {
-  downloadPEOReportPDF,
   getPEOReport,
   getPEOCQIRecord,
   upsertPEOCQI,
@@ -18,8 +17,8 @@ import {
 import type { PEOReportData, PEOReportMatrixItem, PEOCQIRecord } from './types';
 import PEOEmploymentAnalytics from './PEOEmploymentAnalytics';
 import PEOAttainmentChart from './PEOAttainmentChart';
-import PEOMatrixTable from './PEOMatrixTable';
-import PEOQuestionBreakdown from './PEOQuestionBreakdown';
+import PEOMatrixTable from './POReportMatrixTable';
+import PEOEmployerComments from './PEOEmployerComments';
 
 interface PEOReportDashboardProps {
   programId?: string;
@@ -56,8 +55,28 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
   const currentRole = currentUser?.effective_role || currentUser?.active_role || currentUser?.role;
   const canDownloadPdf = isSAC || currentRole === 'hod';
 
+  const getCqiSectionsForPdf = () => {
+    if (!reportData) return [];
+    if (reportData.cqiSections?.length) return reportData.cqiSections;
+
+    return reportData.matrix
+      .filter((row) => row.status === 'CQI Triggered' || row.cqiRecordId)
+      .map((row, index) => ({
+        peoId: row.peoCode || `PO-${index + 1}`,
+        rootCause: row.rootCause || null,
+        remedialPlan: row.remedialPlan || null,
+        cqiStatus:
+          row.cqiStatus === 'APPROVED' || row.cqiStatus === 'CLOSED_IMPLEMENTED' || row.cqiIsLocked
+            ? 'Closed'
+            : 'Open',
+        hodApprovedBy: reportData.signatures.hodApprovedBy,
+        hodApprovedDate: reportData.signatures.hodApprovedDate,
+        cqiPending: !row.rootCause && !row.remedialPlan,
+      }));
+  };
+
   const generatePdfLocally = (chartImage: string) => {
-    const cqiSections = reportData?.cqiSections ?? [];
+    const cqiSections = getCqiSectionsForPdf();
     const pdf = new jsPDF('landscape', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
@@ -68,7 +87,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
 
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(16);
-    pdf.text('PEO CQI Advisory Export', pageWidth / 2, 14, { align: 'center' });
+    pdf.text('PO CQI Advisory Export', pageWidth / 2, 14, { align: 'center' });
 
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(10);
@@ -82,7 +101,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
 
     const targetThreshold = reportData?.summary.targetThreshold?.toFixed(2) || '0.00';
     const overallStatus =
-      reportData?.summary.overallStatus === 'achieved' ? 'All PEOs achieved' : 'CQI required';
+      reportData?.summary.overallStatus === 'achieved' ? 'All POs achieved' : 'CQI required';
 
     pdf.setFont('helvetica', 'bold');
     pdf.text(`Target Threshold: ${targetThreshold}%`, pageWidth - marginX, 22, { align: 'right' });
@@ -102,7 +121,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
     autoTable(pdf, {
       startY: chartY + chartHeight + 8,
       head: [[
-        'PEO',
+        'PO',
         'Description',
         'Mapped Questions',
         'Direct %',
@@ -112,12 +131,12 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
         'Status',
       ]],
       body: reportData?.matrix.map((row, index) => [
-        `PEO ${index + 1}`,
+        row.peoCode || `PO-${index + 1}`,
         row.description,
         row.mappedQuestions.length > 0 ? row.mappedQuestions.join('\n') : 'No mapped questions',
-        row.directPercentage === null ? 'N/A' : `${row.directPercentage.toFixed(2)}%`,
-        row.indirectPercentage === null ? 'N/A' : `${row.indirectPercentage.toFixed(2)}%`,
-        row.combinedAttainmentPercentage === null ? 'N/A' : `${row.combinedAttainmentPercentage.toFixed(2)}%`,
+        row.directPercentage === null ? 'Unavailable' : `${row.directPercentage.toFixed(2)}%`,
+        row.indirectPercentage === null ? 'Unavailable' : `${row.indirectPercentage.toFixed(2)}%`,
+        row.combinedAttainmentPercentage === null ? 'Unavailable' : `${row.combinedAttainmentPercentage.toFixed(2)}%`,
         `${row.targetPercentage.toFixed(2)}%`,
         row.status === 'Achieved' ? 'Achieved' : 'Not Achieved',
       ]) || [],
@@ -152,7 +171,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
     autoTable(pdf, {
       startY: (pdf as any).lastAutoTable?.finalY ? (pdf as any).lastAutoTable.finalY + 8 : pageHeight - 60,
       head: [[
-        'PEO',
+        'PO',
         'CQI Status',
         'Identified Weakness',
         'Corrective Action Plan',
@@ -195,7 +214,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       margin: { left: marginX, right: marginX, bottom: 12 },
     });
 
-    pdf.save(`peo-cqi-advisory-${reportData?.header.program || 'peo'}-${reportData?.header.evaluationCycleYear || year}.pdf`);
+    pdf.save(`po-cqi-advisory-${reportData?.header.program || 'po'}-${reportData?.header.evaluationCycleYear || year}.pdf`);
   };
 
   useEffect(() => {
@@ -213,8 +232,8 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
           setReportData(data);
         }
       } catch (err) {
-        console.error('Failed to load PEO report:', err);
-        toast.error('Failed to load PEO report');
+        console.error('Failed to load PO report:', err);
+        toast.error('Failed to load PO report');
       } finally {
         if (active) {
           setLoading(false);
@@ -242,17 +261,11 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
 
     setPdfLoading(true);
     try {
-      await downloadPEOReportPDF(programId, year, chartImage, batchId);
-      toast.success('PEO report PDF downloaded');
+      generatePdfLocally(chartImage);
+      toast.success('PO report PDF downloaded');
     } catch (err) {
-      console.warn('Backend PDF export failed, falling back to local export:', err);
-      try {
-        generatePdfLocally(chartImage);
-        toast.success('PEO report PDF downloaded');
-      } catch (fallbackErr) {
-        console.error('Failed to download PEO report PDF:', fallbackErr);
-        toast.error('Failed to download PEO report PDF');
-      }
+      console.error('Failed to download PO report PDF:', err);
+      toast.error('Failed to download PO report PDF');
     } finally {
       setPdfLoading(false);
     }
@@ -363,7 +376,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       {/* Header with download button */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600 mb-2">PEO Report</p>
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600 mb-2">PO Report</p>
           <h1 className="text-2xl font-black text-gray-900">{batchName || reportData.header.program}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {reportData.header.program} • Evaluation Cycle {reportData.header.evaluationCycleYear}
@@ -438,19 +451,14 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
         canManageCQI={canDownloadPdf}
       />
 
-      <PEOQuestionBreakdown
-        breakdowns={reportData.questionBreakdown || []}
-        matrix={reportData.matrix}
-      />
-
       {/* Then chart */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-6">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-gray-400">PEO Attainment</p>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-gray-400">PO Attainment</p>
           </div>
           <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700">
-            Target Threshold: {reportData.summary.targetThreshold.toFixed(2)}% • {reportData.summary.overallStatus === 'achieved' ? 'All PEOs achieved' : 'Not All PEOs achieved'}
+            Target Threshold: {reportData.summary.targetThreshold.toFixed(2)}% • {reportData.summary.overallStatus === 'achieved' ? 'All POs achieved' : 'Not All POs achieved'}
           </div>
         </div>
         <PEOAttainmentChart ref={chartRef} chartData={reportData.summary.chartData} />
@@ -459,6 +467,8 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       {/* Then employment analytics */}
       <PEOEmploymentAnalytics stats={reportData.employmentStats} />
 
+      <PEOEmployerComments comments={reportData.employerComments || []} />
+
       {/* CQI Modal */}
       {modalOpen && currentRow && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -466,7 +476,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
             <div className="p-6 border-b border-gray-200">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-xl font-bold text-gray-900">
-                  PEO CQI: {currentRow.description.substring(0, 50)}... • {batchName}
+                  PO CQI: {currentRow.description.substring(0, 50)}... • {batchName}
                 </h3>
                 {currentCQIRecord?.status === 'APPROVED' && (
                   <span className="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-700">

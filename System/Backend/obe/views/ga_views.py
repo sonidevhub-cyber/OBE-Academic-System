@@ -99,7 +99,7 @@ class GAListCreateView(APIView):
         gas = GA.objects.filter(
             program_id=program_id,
             is_active=True
-        )
+        ).order_by('order_number')
         serializer = GASerializer(gas, many=True)
         return Response(serializer.data)
 
@@ -359,6 +359,7 @@ class BatchSemesterGASummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get_readiness_for_semester(self, batch: Batch, semester: Semester):
+        from django.db.models import Q
         # Get pending courses for this specific semester
         allowed_course_ids = []
         if batch.curriculum_version:
@@ -376,7 +377,12 @@ class BatchSemesterGASummaryView(APIView):
         
         sessions = sessions_query.select_related('course', 'instructor')
         courses_total = sessions.count()
-        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+        done_filter = (
+            Q(assessment_status='ASSESSMENT_DONE')
+            | Q(final_submitted=True)
+            | Q(assessment_done=True)
+        )
+        courses_assessment_done = sessions.filter(done_filter).count()
 
         pending_courses_list = []
         finalized_courses_list = []
@@ -389,7 +395,12 @@ class BatchSemesterGASummaryView(APIView):
                 'course_name': session.course.name,
                 'instructor_name': session.instructor.full_name if session.instructor else 'N/A',
             }
-            if session.assessment_status == 'ASSESSMENT_DONE':
+            is_done = (
+                session.assessment_status == 'ASSESSMENT_DONE'
+                or session.final_submitted
+                or session.assessment_done
+            )
+            if is_done:
                 finalized_courses_list.append(course_info)
             else:
                 in_process_courses_list.append(course_info)
@@ -831,26 +842,33 @@ class BatchGAReportView(APIView):
             except (User.DoesNotExist, Student.DoesNotExist):
                 return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
         elif scope == 'all_students':
-            # Get all students OR alumni in the batch with pre-fetched user
-            student_objs = Student.objects.filter(
-                (models.Q(user__batch=batch) | models.Q(batch=batch)),
-                user__role__in=['student', 'alumni'],
-                user__is_active=True
-            ).select_related('user')
+            # Cohort roster comes from course-session score linkage through
+            # get_students_for_batch, not live student.batch, so frozen/rejoined
+            # students remain visible in the batch where their marks were earned.
+            student_objs = get_students_for_batch(batch).filter(
+                user__role__in=['student', 'alumni']
+            ).select_related('user', 'batch', 'original_batch')
 
         # Readiness gate (only when scope=cohort)
         readiness = self._get_readiness_for_cumulative_cohort(batch)
         is_program_end_ready = batch.is_program_end_ready
         
-        # Refresh indirect source tables first so the report can show real component percentages.
-        from feedback.views import FeedbackService
-        from ..services import calculate_exit_survey_ga_score
-        FeedbackService.calculate(batch)
-
-        # Calculate Exit Survey scores for all GAs before building the report
+        # Indirect source tables: only refresh feedback if contributors are stale.
+        # Heavy FeedbackService/exit-survey refresh is skipped whenever cached
+        # GAReport rows are valid (per-GA stale check still runs inside
+        # calculate_weighted_ga_score).
+        from ..services import ga_report_has_stale_contributors
         gas = GA.objects.filter(program=batch.program, is_active=True).order_by('order_number')
-        for ga in gas:
-            calculate_exit_survey_ga_score(ga, batch)
+        any_stale = any(
+            ga_report_has_stale_contributors(batch, ga, require_assessment_done=True)
+            for ga in gas
+        )
+        if any_stale:
+            from feedback.views import FeedbackService
+            from ..services import calculate_exit_survey_ga_score
+            FeedbackService.calculate(batch)
+            for ga in gas:
+                calculate_exit_survey_ga_score(ga, batch)
         
         if scope == 'all_students':
             # Build student-level data
@@ -947,7 +965,9 @@ class BatchGAReportView(APIView):
                     'registration_number': student_obj.registration_number,
                     'ga_scores': student_ga_scores,
                     'is_dropped': not user.is_active,
-                    'is_frozen': False
+                    'is_frozen': student_obj.is_frozen,
+                    'frozen_at_semester': student_obj.frozen_at_semester,
+                    'frozen_date': student_obj.frozen_date,
                 })
             
             # Calculate cohort-level summary for footer
@@ -976,22 +996,6 @@ class BatchGAReportView(APIView):
                     final_score = direct_attainment
                 elif indirect_attainment is not None:
                     final_score = Decimal(str(indirect_attainment))
-                # #region debug-point D:all-students-footer
-                _emit_ga_view_debug_event(
-                    "D",
-                    "obe/views/ga_views.py:BatchGAReportView.all_students",
-                    "Calculated all-students footer direct attainment from visible student rows",
-                    {
-                        "batch_id": str(batch.id),
-                        "ga_id": str(ga.id),
-                        "ga_code": f"GA-{ga.order_number}",
-                        "visible_student_score_count": len(visible_scores),
-                        "visible_student_scores": visible_scores,
-                        "footer_direct_attainment": direct_attainment,
-                        "weighted_course_direct_attainment": weighted_result['direct_score'],
-                    },
-                )
-                # #endregion
                 cohort_summary.append({
                     'ga_id': str(ga.id),
                     'ga_code': f'GA-{ga.order_number}',
@@ -1066,20 +1070,6 @@ class BatchGAReportView(APIView):
                             'score': None,
                             'is_below_threshold': False
                         })
-                # #region debug-point A:course-wise-visible-rows
-                _emit_ga_view_debug_event(
-                    "A",
-                    "obe/views/ga_views.py:BatchGAReportView.course_wise",
-                    "Built course-wise visible GA row set for a course session",
-                    {
-                        "batch_id": str(batch.id),
-                        "course_session_id": str(session.id),
-                        "course_code": session.course.code,
-                        "assessment_status": session.assessment_status,
-                        "ga_scores": course_ga_list,
-                    },
-                )
-                # #endregion
                 course_reports.append({
                     'course_id': str(session.course.id),
                     'course_code': session.course.code,

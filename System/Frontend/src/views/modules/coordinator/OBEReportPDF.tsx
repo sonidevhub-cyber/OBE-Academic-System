@@ -581,17 +581,17 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
         </View>
       </Page>
 
-      {/* ---- PEO PAGE ---- */}
+      {/* ---- PO PAGE ---- */}
       <Page size="A4" style={styles.page}>
         <Watermark logoUrl={logoUrl} />
         <HeaderFooter programName={programName} />
         <View style={styles.content}>
-          <Text style={styles.sectionTitle}>PEO Attainment</Text>
+          <Text style={styles.sectionTitle}>PO Attainment</Text>
           {peoChartImage && <Image src={peoChartImage} style={styles.chartImage} />}
 
           <View style={styles.table}>
             <View style={styles.tableRowHeader}>
-              <Text style={styles.th}>PEO ID</Text>
+              <Text style={styles.th}>PO ID</Text>
               <Text style={styles.thWide}>Statement</Text>
               <Text style={styles.th}>Target</Text>
               <Text style={styles.th}>Direct</Text>
@@ -601,7 +601,7 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
             </View>
             {peoData.map((peo) => (
               <View key={peo.id} style={styles.tableRow}>
-                <Text style={styles.td}>{peo.id}</Text>
+                <Text style={styles.td}>{peo.id.replace(/^PEO-/, 'PO-')}</Text>
                 <Text style={styles.tdWide}>{peo.statement}</Text>
                 <Text style={styles.td}>{peo.targetKpi}</Text>
                 <Text style={styles.td}>{peo.directScore}</Text>
@@ -615,7 +615,7 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
           </View>
         </View>
         <View style={styles.content}>
-          <Text style={styles.sectionTitle}>PEO CQI Details</Text>
+          <Text style={styles.sectionTitle}>PO CQI Details</Text>
           <View style={styles.table}>
             <View style={styles.tableRowHeader}>
               <Text style={styles.thWide}>Item</Text>
@@ -625,8 +625,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
             </View>
             {peoCqiRows.length === 0 ? (
               <View style={styles.tableRow}>
-                <Text style={styles.tdWide}>No PEO CQI entries found</Text>
-                <Text style={styles.tdWide}>All PEOs meet target</Text>
+                <Text style={styles.tdWide}>No PO CQI entries found</Text>
+                <Text style={styles.tdWide}>All POs meet target</Text>
                 <Text style={styles.tdWide}>-</Text>
                 <Text style={styles.tdWide}>-</Text>
               </View>

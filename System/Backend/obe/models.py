@@ -1458,6 +1458,7 @@ class EmployerSurveyResponse(models.Model):
     employer_organization = models.CharField(max_length=255, null=True, blank=True)
     employer_designation = models.CharField(max_length=255, null=True, blank=True)
     employee_name_at_org = models.CharField(max_length=255, null=True, blank=True)
+    additional_feedback = models.TextField(null=True, blank=True)
     response_token = models.UUIDField(
         default=uuid.uuid4,
         editable=False,

@@ -1,8 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FileBarChart, ArrowLeft, Download, RotateCw, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import obeService, {
   CLOMasterCompilationResponse,
   CLOMasterCompilationCourse,
@@ -11,6 +13,8 @@ import obeService, {
 } from '../../../api/obeService';
 import academicStructureService, { Program, Semester } from '../../../api/academicStructureService';
 import { toast } from 'react-hot-toast';
+import BatchFrameworkBanner from '../../../components/obe/BatchFrameworkBanner';
+import ExportChoiceModal from '../../../components/reports/ExportChoiceModal';
 
 type BatchCategory = 'all' | 'ongoing' | 'graduated';
 
@@ -25,6 +29,8 @@ const CoordinatorCLOReportModule: React.FC = () => {
   const [batchCategory, setBatchCategory] = useState<BatchCategory>('all');
   const [report, setReport] = useState<CLOMasterCompilationResponse | null>(null);
   const [expandedCqi, setExpandedCqi] = useState<Set<string>>(new Set());
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const toggleCqi = (key: string) => {
     const newSet = new Set(expandedCqi);
@@ -35,6 +41,11 @@ const CoordinatorCLOReportModule: React.FC = () => {
     }
     setExpandedCqi(newSet);
   };
+
+  const selectedBatchName = useMemo(() => {
+    const batch = allBatches.find((b) => b.id === selectedBatchId);
+    return batch?.name || null;
+  }, [allBatches, selectedBatchId]);
 
   // Fetch initial data
   useEffect(() => {
@@ -53,10 +64,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
         setAllSemesters(uniqueSemesters);
         setAllBatches(batches);
         
-        if (batches.length > 0) {
-          setSelectedProgramId(batches[0].program?.id || '');
-          setSelectedBatchId(batches[0].id);
-        }
+        if (programs[0]) setSelectedProgramId(programs[0].id);
       } catch (error) {
         console.error(error);
         toast.error('Failed to load initial data');
@@ -139,106 +147,86 @@ const CoordinatorCLOReportModule: React.FC = () => {
     };
   }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
-  // Handle export to Excel
-  const handleExport = async () => {
+  const buildExportRows = () => {
+    if (!report) return null;
+
+    const selectedBatch = allBatches.find((b) => b.id === selectedBatchId);
+    const courseColumns = report.finalized_courses.flatMap((course) =>
+      course.clos.map((clo) => ({ course, clo }))
+    );
+    const cqiRows = report.finalized_courses.flatMap((course) =>
+      course.clos
+        .filter((clo) => clo.cqi)
+        .map((clo) => ({ course, clo }))
+    );
+
+    const rows: any[][] = [
+      [report.program.name],
+      [`Program Code: ${report.program.code}`],
+      [`Batch: ${selectedBatch?.name || report.batch?.name || 'Selected Batch'}`],
+      [`Semester: ${report.semester.name}`],
+      ['CLO Master Compilation'],
+      [`Date: ${new Date().toLocaleDateString()}`],
+      [],
+    ];
+
+    const header = ['Sr. No.', 'Reg. No.', 'Student Name', ...courseColumns.map(({ course, clo }) => `${course.course_code} - ${clo.clo_code}`)];
+    rows.push(header);
+
+    report.students.forEach((student) => {
+      const row: any[] = [student.sr_no, student.reg_no, student.name];
+      courseColumns.forEach(({ course, clo }) => {
+        const score = student.courses?.[course.course_id]?.[clo.clo_code];
+        row.push(score ? `${score.score.toFixed(1)}%` : '-');
+      });
+      rows.push(row);
+    });
+
+    rows.push([]);
+    rows.push(['No. of Students Achieving CLOs KPI (50%)', '', '', ...courseColumns.map(({ clo }) => `${clo.cohort_achieved_count}`)]);
+    rows.push(['% of Students Achieving CLOs at Cohort-Level (50%)', '', '', ...courseColumns.map(({ clo }) => `${clo.cohort_percentage.toFixed(2)}%`)]);
+
+    const cqiSectionStart = rows.length;
+    rows.push([]);
+    rows.push(['CQI Details']);
+    rows.push(['Course Code', 'CLO Code', 'KPI Target', 'Cohort %', 'Reason', 'Action Plan', 'Coordinator Comment']);
+    if (cqiRows.length === 0) {
+      rows.push(['No CQI records found']);
+    } else {
+      cqiRows.forEach(({ course, clo }) => {
+        rows.push([
+          course.course_code,
+          clo.clo_code,
+          `${clo.kpi_target.toFixed(1)}%`,
+          `${clo.cohort_percentage.toFixed(2)}%`,
+          clo.cqi?.reason || '',
+          clo.cqi?.action_plan || '',
+          clo.cqi?.coordinator_comment || '',
+        ]);
+      });
+    }
+
+    return { selectedBatch, courseColumns, cqiSectionStart, rows };
+  };
+
+  const handleExportExcel = async () => {
     if (!report) return;
+    setExporting(true);
 
     try {
+      const exportData = buildExportRows();
+      if (!exportData) return;
+      const { courseColumns, cqiSectionStart, rows } = exportData;
       const wb = XLSX.utils.book_new();
-      const selectedBatch = allBatches.find((b) => b.id === selectedBatchId);
-      const courseColumns = report.finalized_courses.flatMap((course) =>
-        course.clos.map((clo) => ({
-          course,
-          clo,
-        }))
-      );
-      const cqiRows = report.finalized_courses.flatMap((course) =>
-        course.clos
-          .filter((clo) => clo.cqi)
-          .map((clo) => ({
-            course,
-            clo,
-          }))
-      );
-
-      const rows: any[][] = [
-        [report.program.name],
-        [`Program Code: ${report.program.code}`],
-        [`Batch: ${selectedBatch?.name || report.batch?.name || 'Selected Batch'}`],
-        [`Semester: ${report.semester.name}`],
-        ['CLO Master Compilation'],
-        [`Date: ${new Date().toLocaleDateString()}`],
-        [],
-      ];
-
-      const header = [
-        'Sr. No.',
-        'Reg. No.',
-        'Student Name',
-        ...courseColumns.map(({ course, clo }) => `${course.course_code} - ${clo.clo_code}`),
-      ];
-      rows.push(header);
-
-      report.students.forEach((student) => {
-        const row: any[] = [student.sr_no, student.reg_no, student.name];
-        courseColumns.forEach(({ course, clo }) => {
-          const score = student.courses?.[course.course_id]?.[clo.clo_code];
-          row.push(score ? `${score.score.toFixed(1)}%` : '-');
-        });
-        rows.push(row);
-      });
-
-      rows.push([]);
-      rows.push([
-        'No. of Students Achieving CLOs KPI (50%)',
-        '',
-        '',
-        ...courseColumns.map(({ course, clo }) => `${clo.cohort_achieved_count}`),
-      ]);
-      rows.push([
-        '% of Students Achieving CLOs at Cohort-Level (50%)',
-        '',
-        '',
-        ...courseColumns.map(({ clo }) => `${clo.cohort_percentage.toFixed(2)}%`),
-      ]);
-
-      const cqiSectionStart = rows.length;
-      rows.push([]);
-      rows.push(['CQI Details']);
-      rows.push([
-        'Course Code',
-        'CLO Code',
-        'KPI Target',
-        'Cohort %',
-        'Reason',
-        'Action Plan',
-        'Coordinator Comment',
-      ]);
-      if (cqiRows.length === 0) {
-        rows.push(['No CQI records found']);
-      } else {
-        cqiRows.forEach(({ course, clo }) => {
-          rows.push([
-            course.course_code,
-            clo.clo_code,
-            `${clo.kpi_target.toFixed(1)}%`,
-            `${clo.cohort_percentage.toFixed(2)}%`,
-            clo.cqi?.reason || '',
-            clo.cqi?.action_plan || '',
-            clo.cqi?.coordinator_comment || '',
-          ]);
-        });
-      }
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
+      const maxCol = Math.max(6, 2 + courseColumns.length);
       ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(2, 2 + courseColumns.length) } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: Math.max(2, 2 + courseColumns.length) } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: Math.max(2, 2 + courseColumns.length) } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: Math.max(2, 2 + courseColumns.length) } },
-        { s: { r: 4, c: 0 }, e: { r: 4, c: Math.max(2, 2 + courseColumns.length) } },
-        { s: { r: 5, c: 0 }, e: { r: 5, c: Math.max(2, 2 + courseColumns.length) } },
+        ...[0, 1, 2, 3, 4, 5].map((r) => ({ s: { r, c: 0 }, e: { r, c: maxCol } })),
+        { s: { r: cqiSectionStart + 1, c: 0 }, e: { r: cqiSectionStart + 1, c: 6 } },
       ];
+      ws['!freeze'] = { xSplit: 3, ySplit: 8 };
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 7, c: 0 }, e: { r: 7 + report.students.length, c: maxCol } }) };
 
       const columnWidths = [
         { wch: 10 },
@@ -250,6 +238,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
         columnWidths.push({ wch: 20 });
       }
       ws['!cols'] = columnWidths;
+      ws['!rows'] = rows.map((_, index) => ({ hpt: index <= 5 ? 24 : index === 7 || index === cqiSectionStart + 2 ? 34 : 22 }));
 
       const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
       for (let R = 0; R <= range.e.r; R++) {
@@ -257,12 +246,19 @@ const CoordinatorCLOReportModule: React.FC = () => {
           const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
           const cell = ws[cellAddress];
           if (!cell) continue;
+          const baseBorder = {
+            top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          };
 
           if (R <= 5) {
             cell.s = {
               fill: { fgColor: { rgb: '1D4ED8' } },
               font: { color: { rgb: 'FFFFFF' }, bold: true },
               alignment: { horizontal: 'center', vertical: 'center' },
+              border: baseBorder,
             };
           } else if (R === 7) {
             cell.s = {
@@ -332,9 +328,74 @@ const CoordinatorCLOReportModule: React.FC = () => {
       const filename = `CLO_Master_Compilation_${report.program.code}_${report.semester.name.replace(/\s+/g, '_')}.xlsx`;
       XLSX.writeFile(wb, filename);
       toast.success('Export successful!');
+      setExportModalOpen(false);
     } catch (error) {
       console.error(error);
       toast.error('Failed to export');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!report) return;
+    setExporting(true);
+    try {
+      const exportData = buildExportRows();
+      if (!exportData) return;
+      const { selectedBatch, courseColumns, cqiSectionStart, rows } = exportData;
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(16);
+      pdf.text('CLO Master Compilation', pageWidth / 2, 14, { align: 'center' });
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      pdf.text(`${report.program.name} | ${selectedBatch?.name || report.batch?.name || 'Selected Batch'} | ${report.semester.name}`, 14, 22);
+
+      autoTable(pdf, {
+        startY: 28,
+        head: [['Sr.', 'Reg. No.', 'Student Name', ...courseColumns.map(({ course, clo }) => `${course.course_code} - ${clo.clo_code}`)]],
+        body: rows.slice(8, 8 + report.students.length),
+        theme: 'grid',
+        styles: { fontSize: 6, cellPadding: 1.2, overflow: 'linebreak', valign: 'middle' },
+        headStyles: { fillColor: [29, 78, 216], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: 8, right: 8 },
+      });
+
+      autoTable(pdf, {
+        startY: ((pdf as any).lastAutoTable?.finalY || 28) + 8,
+        head: [['Metric', '', '', ...courseColumns.map(({ clo }) => clo.clo_code)]],
+        body: rows.slice(8 + report.students.length + 1, 8 + report.students.length + 3),
+        theme: 'grid',
+        styles: { fontSize: 6.5, cellPadding: 1.4, overflow: 'linebreak' },
+        headStyles: { fillColor: [15, 23, 42], textColor: 255 },
+        margin: { left: 8, right: 8 },
+      });
+
+      pdf.addPage();
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(13);
+      pdf.text('CLO CQI Details', 14, 16);
+      autoTable(pdf, {
+        startY: 22,
+        head: [rows[cqiSectionStart + 2]],
+        body: rows.slice(cqiSectionStart + 3),
+        theme: 'grid',
+        styles: { fontSize: 7, cellPadding: 1.6, overflow: 'linebreak', valign: 'top' },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+        margin: { left: 10, right: 10 },
+      });
+
+      pdf.save(`CLO_Master_Compilation_${report.program.code}_${report.semester.name.replace(/\s+/g, '_')}.pdf`);
+      toast.success('PDF exported successfully!');
+      setExportModalOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to export PDF');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -382,11 +443,11 @@ const CoordinatorCLOReportModule: React.FC = () => {
             </button>
             {report && (
               <button
-                onClick={handleExport}
+                onClick={() => setExportModalOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
               >
                 <Download className="w-4 h-4" />
-                Export to Excel
+                Export
               </button>
             )}
           </div>
@@ -468,6 +529,22 @@ const CoordinatorCLOReportModule: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Framework Snapshot Banner */}
+      <BatchFrameworkBanner
+        batchId={selectedBatchId || null}
+        batchName={selectedBatchName}
+      />
+
+      <ExportChoiceModal
+        open={exportModalOpen}
+        title="Export CLO Report"
+        description="Choose PDF for sharing or Excel for a formatted workbook."
+        exporting={exporting}
+        onClose={() => setExportModalOpen(false)}
+        onPdf={handleExportPDF}
+        onExcel={handleExportExcel}
+      />
 
       {/* Loading State */}
       {loading && (
@@ -673,21 +750,72 @@ const CoordinatorCLOReportModule: React.FC = () => {
           </div>
 
           {/* Pending Courses */}
-          {report.pending_courses.length > 0 && (
+          {report.pending_courses.filter((pc) => {
+            const s = String(pc.status || '').toUpperCase();
+            return s !== 'ASSESSMENT_DONE' && s !== 'FINAL_SUBMITTED' && s !== 'INTERNAL_COMPLETE_AWAITING_FINAL';
+          }).length > 0 && (
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h3 className="text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
                 Pending Courses
+                <span className="ml-2 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-black text-amber-800">
+                  {report.pending_courses.filter((pc) => {
+                    const s = String(pc.status || '').toUpperCase();
+                    return s !== 'ASSESSMENT_DONE' && s !== 'FINAL_SUBMITTED' && s !== 'INTERNAL_COMPLETE_AWAITING_FINAL';
+                  }).length}
+                </span>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {report.pending_courses.map((pc) => (
-                  <div key={pc.course_id} className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <div className="font-black text-amber-800">{pc.course_code} - {pc.course_name}</div>
-                      <div className="text-sm font-semibold text-amber-700">Instructor: {pc.instructor_name}</div>
+                {report.pending_courses.filter((pc) => {
+                  const s = String(pc.status || '').toUpperCase();
+                  return s !== 'ASSESSMENT_DONE' && s !== 'FINAL_SUBMITTED' && s !== 'INTERNAL_COMPLETE_AWAITING_FINAL';
+                }).map((pc) => {
+                  const statusRaw = String(pc.status || 'INTERNAL_LOCK_PENDING').toUpperCase();
+                  const isNoSession = statusRaw === 'NO_SESSION_CREATED';
+                  const isFinalPending = statusRaw === 'FINAL_SUBMISSION_PENDING';
+                  const isInternalPending = !isNoSession && !isFinalPending;
+                  let statusLabel = 'Internal Lock Pending';
+                  let cardBg = 'bg-amber-50 border-amber-100';
+                  let textTitle = 'text-amber-800';
+                  let textSub = 'text-amber-700';
+                  let badgeBg = 'bg-amber-200 text-amber-900';
+                  let iconColor = 'text-amber-500';
+                  if (isNoSession) {
+                    statusLabel = 'No Session Created';
+                    cardBg = 'bg-rose-50 border-rose-100';
+                    textTitle = 'text-rose-800';
+                    textSub = 'text-rose-700';
+                    badgeBg = 'bg-rose-200 text-rose-900';
+                    iconColor = 'text-rose-500';
+                  } else if (isFinalPending) {
+                    statusLabel = 'Final Submission Pending';
+                    cardBg = 'bg-sky-50 border-sky-100';
+                    textTitle = 'text-sky-800';
+                    textSub = 'text-sky-700';
+                    badgeBg = 'bg-sky-200 text-sky-900';
+                    iconColor = 'text-sky-500';
+                  }
+                  return (
+                    <div
+                      key={pc.course_id}
+                      className={`rounded-xl p-4 flex items-center justify-between border ${cardBg}`}
+                    >
+                      <div>
+                        <div className={`font-black ${textTitle}`}>
+                          {pc.course_code} - {pc.course_name}
+                        </div>
+                        <div className={`text-sm font-semibold ${textSub}`}>
+                          Instructor: {pc.instructor_name}
+                        </div>
+                        <span
+                          className={`mt-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${badgeBg}`}
+                        >
+                          {statusLabel}
+                        </span>
+                      </div>
+                      <AlertCircle className={`w-5 h-5 ${iconColor}`} />
                     </div>
-                    <AlertCircle className="w-5 h-5 text-amber-500" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

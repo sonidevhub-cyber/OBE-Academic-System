@@ -81,7 +81,7 @@ from .course_session_views import (
 from .report_views import (
     TeacherGAContextView,
     CourseCLOReportView,
-    AlumniDashboardView
+    AlumniDashboardView,
 )
 from .vision_mission_views import (
     DepartmentVisionView,

@@ -1,7 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx-js-style';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import obeService, { Batch, GACQIRecord } from '../api/obeService';
+import BatchFrameworkBanner from '../components/obe/BatchFrameworkBanner';
+import ExportChoiceModal from '../components/reports/ExportChoiceModal';
 
 type ViewMode = 'student-wise' | 'course-wise';
 
@@ -26,6 +30,8 @@ interface StudentReport {
   ga_scores: StudentGA[];
   is_dropped?: boolean;
   is_frozen?: boolean;
+  frozen_at_semester?: number | null;
+  frozen_date?: string | null;
 }
 
 interface CourseGA {
@@ -78,6 +84,17 @@ type BatchCategory = 'all' | 'ongoing' | 'graduated';
 const formatPercent = (value: number | null | undefined): string =>
   value === null || value === undefined ? 'N/A' : `${value.toFixed(1)}%`;
 
+const getCodeNumber = (code: string | null | undefined): number => {
+  const match = String(code || '').match(/(\d+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+};
+
+const sortByCodeNumber = <T extends { ga_code?: string }>(items: T[]): T[] =>
+  [...items].sort((a, b) => {
+    const numberDiff = getCodeNumber(a.ga_code) - getCodeNumber(b.ga_code);
+    return numberDiff || String(a.ga_code || '').localeCompare(String(b.ga_code || ''));
+  });
+
 const recordedCqiStatuses = new Set([
   'SAVED',
   'EXPORTED',
@@ -104,6 +121,8 @@ const GAReport: React.FC = () => {
   const [hodActionPlan, setHodActionPlan] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const reportRequestRef = useRef(0);
   const statusRequestRef = useRef(0);
 
@@ -128,7 +147,7 @@ const GAReport: React.FC = () => {
         
         if (batchesData.length > 0) {
           setSelectedProgramId(batchesData[0].program?.id || '');
-          setSelectedBatchId(batchesData[0].id);
+          setSelectedBatchId('');
         }
       } catch (error) {
         console.error('Failed to fetch batches:', error);
@@ -301,137 +320,142 @@ const GAReport: React.FC = () => {
         return true;
       });
 
-  const handleExport = async () => {
+  useEffect(() => {
+    if (!selectedBatchId && filteredBatches.length > 0) {
+      setSelectedBatchId(filteredBatches[0].id);
+    }
+  }, [filteredBatches, selectedBatchId]);
+
+  const selectedBatchName = useMemo(() => {
+    const batch = batches.find((b) => b.id === selectedBatchId);
+    return batch?.name || null;
+  }, [batches, selectedBatchId]);
+
+  const sortedGas = useMemo(() => sortByCodeNumber(reportData?.gas || []), [reportData]);
+
+  const getSelectedBatch = () => batches.find((b) => b.id === selectedBatchId);
+
+  const getProgramDepartmentName = (batch?: Batch) => {
+    const program = batch?.program || {};
+    const department = program.department;
+    if (typeof department === 'object' && department !== null) {
+      return department.name || department.department_name || department.title || department.code || 'Computer Science';
+    }
+    return program.department_name || program.department_title || program.department_code || 'Computer Science';
+  };
+
+  const getSummaryForGa = (gaId: string) =>
+    (reportData?.cohort_summary || []).find((summary) => summary.ga_id === gaId);
+
+  const getExportRows = async () => {
     if (!reportData) {
       toast.error('No report data to export');
-      return;
+      return null;
     }
 
-    try {
-      const selectedBatch = batches.find((b) => b.id === selectedBatchId);
-      const wb = XLSX.utils.book_new();
-      const cqiRecords = selectedProgramId && selectedBatchId
-        ? await obeService.getGACQIAdvisoryExport(selectedProgramId, selectedBatchId)
-        : [];
-      const rows: any[][] = [
-        [selectedBatch?.program?.name || 'Program Name'],
-        ['Department: ' + (selectedBatch?.program?.department || 'Computer Science')],
-        ['Batch: ' + (selectedBatch?.name || 'Selected Batch')],
-        [viewMode === 'student-wise' ? 'Student-wise Cohort Attainment' : 'Course-wise PLO Contribution'],
-        ['Date: ' + new Date().toLocaleDateString()],
-        [],
-      ];
+    const selectedBatch = getSelectedBatch();
+    const cqiRecords = selectedProgramId && selectedBatchId
+      ? await obeService.getGACQIAdvisoryExport(selectedProgramId, selectedBatchId)
+      : [];
+    const gas = sortedGas;
+    const rows: any[][] = [
+      [selectedBatch?.program?.name || 'Program Name'],
+      ['Department: ' + getProgramDepartmentName(selectedBatch)],
+      ['Batch: ' + (selectedBatch?.name || 'Selected Batch')],
+      [viewMode === 'student-wise' ? 'Student-wise Cohort Attainment' : 'Course-wise PLO Contribution'],
+      ['Date: ' + new Date().toLocaleDateString()],
+      [],
+    ];
 
-      // Header row
-      const gas = reportData.gas || [];
-      const header = viewMode === 'student-wise'
-        ? ['Sr. No.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
-        : ['Sr. No.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
-      rows.push(header);
+    const header = viewMode === 'student-wise'
+      ? ['Sr. No.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
+      : ['Sr. No.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
+    rows.push(header);
 
-      const items = viewMode === 'student-wise' ? (reportData.students || []) : (reportData.courses || []);
+    const items = viewMode === 'student-wise' ? (reportData.students || []) : (reportData.courses || []);
 
-      // Data rows
-      items.forEach((item, idx) => {
-        if ('name' in item) {
-          // Student row
-          const student = item as StudentReport;
-          if (student.is_dropped || student.is_frozen) {
-            const row = [
-              idx + 1,
-              student.registration_number,
-              student.name,
-              ...Array(reportData.gas.length).fill(student.is_dropped ? 'Dropped Out' : 'Semester Frozen'),
-            ];
-            rows.push(row);
-          } else {
-            const row = [
-              idx + 1,
-              student.registration_number,
-              student.name,
-              ...reportData.gas.map((g) => {
-                const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score;
-                return formatPercent(score);
-              }),
-            ];
-            rows.push(row);
-          }
-        } else {
-          // Course row
-          const course = item as CourseReport;
-          const row = [
+    items.forEach((item, idx) => {
+      if ('name' in item) {
+        const student = item as StudentReport;
+        if (student.is_dropped) {
+          rows.push([
             idx + 1,
-            course.course_code,
-            course.course_title,
-            ...reportData.gas.map((g) => {
-              const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
+            student.registration_number,
+            student.name,
+            ...Array(gas.length).fill('Dropped Out'),
+          ]);
+        } else {
+          const frozenSuffix = student.is_frozen
+            ? ` (Frozen - Sem ${student.frozen_at_semester || 'N/A'})`
+            : '';
+          rows.push([
+            idx + 1,
+            student.registration_number,
+            `${student.name}${frozenSuffix}`,
+            ...gas.map((g) => {
+              const score = student.ga_scores.find((s) => s.ga_id === g.ga_id)?.direct_score;
               return formatPercent(score);
             }),
-          ];
-          rows.push(row);
+          ]);
         }
-      });
-
-      // Footer rows (4 summary rows)
-      const cohortSummary = reportData.cohort_summary || [];
-      const dividerRow = ['', '', '', ...Array(gas.length).fill('')];
-      rows.push(dividerRow);
-      rows.push([
-        'Direct Attainment (%)',
-        '(From Exams/Labs)',
-        '',
-        ...cohortSummary.map((s) => formatPercent(s.direct_attainment)),
-      ]);
-      rows.push([
-        'Indirect Attainment (%)',
-        '(From Surveys)',
-        '',
-        ...cohortSummary.map((s) => formatPercent(s.indirect_attainment)),
-      ]);
-      rows.push([
-        'Final Combined Attainment (%)',
-        '(80% Direct + 20% Indirect)',
-        '',
-        ...cohortSummary.map((s) => formatPercent(s.final_attainment)),
-      ]);
-      rows.push([
-        'Status',
-        '(Target KPI: 50%)',
-        '',
-        ...cohortSummary.map((s) => s.status),
-      ]);
-
-      const cqiSectionStart = rows.length;
-      rows.push([]);
-      rows.push(['CQI Details']);
-      rows.push([
-        'GA Code',
-        'GA Title',
-        'Status',
-        'Issue / Problem Statement',
-        'HOD Action Plan',
-        'Saved By',
-        'Saved At',
-        'Root Cause',
-        'Remedial Plan',
-        'HOD Comment',
-      ]);
-      cqiRecords.forEach((record) => {
+      } else {
+        const course = item as CourseReport;
         rows.push([
-          record.ga_code,
-          record.ga_title,
-          record.status,
-          record.issue_statement || record.root_cause || '',
-          record.hod_action_plan || record.remedial_plan || '',
-          record.saved_by_hod_name || record.saved_by_hod?.full_name || record.saved_by_hod?.name || '',
-          record.saved_at ? new Date(record.saved_at).toLocaleString() : '',
-          record.root_cause || '',
-          record.remedial_plan || '',
-          record.hod_comment || '',
+          idx + 1,
+          course.course_code,
+          course.course_title,
+          ...gas.map((g) => {
+            const score = course.ga_scores.find((s) => s.ga_id === g.ga_id)?.score;
+            return formatPercent(score);
+          }),
         ]);
-      });
+      }
+    });
+
+    rows.push(['', '', '', ...Array(gas.length).fill('')]);
+    rows.push(['Direct Attainment (%)', '(From Exams/Labs)', '', ...gas.map((g) => formatPercent(getSummaryForGa(g.ga_id)?.direct_attainment))]);
+    rows.push(['Indirect Attainment (%)', '(From Surveys)', '', ...gas.map((g) => formatPercent(getSummaryForGa(g.ga_id)?.indirect_attainment))]);
+    rows.push(['Final Combined Attainment (%)', '(80% Direct + 20% Indirect)', '', ...gas.map((g) => formatPercent(getSummaryForGa(g.ga_id)?.final_attainment))]);
+    rows.push(['Status', '(Target KPI: 50%)', '', ...gas.map((g) => getSummaryForGa(g.ga_id)?.status || 'NOT_ASSESSED')]);
+
+    const cqiSectionStart = rows.length;
+    rows.push([]);
+    rows.push(['CQI Details']);
+    rows.push(['GA Code', 'GA Title', 'Status', 'Issue / Problem Statement', 'HOD Action Plan', 'Saved By', 'Saved At', 'Root Cause', 'Remedial Plan', 'HOD Comment']);
+    cqiRecords.forEach((record) => {
+      rows.push([
+        record.ga_code,
+        record.ga_title,
+        record.status,
+        record.issue_statement || record.root_cause || '',
+        record.hod_action_plan || record.remedial_plan || '',
+        record.saved_by_hod_name || record.saved_by_hod?.full_name || record.saved_by_hod?.name || '',
+        record.saved_at ? new Date(record.saved_at).toLocaleString() : '',
+        record.root_cause || '',
+        record.remedial_plan || '',
+        record.hod_comment || '',
+      ]);
+    });
+
+    return { selectedBatch, rows, gas, items, cqiSectionStart };
+  };
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const exportData = await getExportRows();
+      if (!exportData || !reportData) return;
+      const { selectedBatch, rows, gas, items, cqiSectionStart } = exportData;
+      const wb = XLSX.utils.book_new();
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
+      const maxCol = Math.max(9, rows.reduce((max, row) => Math.max(max, row.length - 1), 0));
+      ws['!merges'] = [
+        ...[0, 1, 2, 3, 4].map((r) => ({ s: { r, c: 0 }, e: { r, c: maxCol } })),
+        { s: { r: cqiSectionStart + 1, c: 0 }, e: { r: cqiSectionStart + 1, c: 9 } },
+      ];
+      ws['!freeze'] = { xSplit: 3, ySplit: 7 };
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 6, c: 0 }, e: { r: 6 + items.length, c: Math.max(2, 2 + gas.length) } }) };
 
       // Set column widths
       const colWidths = viewMode === 'student-wise'
@@ -450,6 +474,7 @@ const GAReport: React.FC = () => {
         { wch: 24 },
         { wch: 24 },
       ];
+      ws['!rows'] = rows.map((_, index) => ({ hpt: index < 5 ? 24 : index === 6 || index === cqiSectionStart + 2 ? 32 : 22 }));
 
       // Apply styles
       const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -458,17 +483,26 @@ const GAReport: React.FC = () => {
           const cellAddress = XLSX.utils.encode_cell({ c: C, r: R });
           if (!ws[cellAddress]) continue;
 
+          const baseBorder = {
+            top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          };
+
           if (R < 5) {
             ws[cellAddress].s = {
               fill: { fgColor: { rgb: '1F7A6B' } },
               font: { color: { rgb: 'FFFFFF' }, bold: true },
               alignment: { horizontal: 'center', vertical: 'center' },
+              border: baseBorder,
             };
           } else if (R === 6) {
             ws[cellAddress].s = {
               fill: { fgColor: { rgb: 'D9E1F2' } },
               font: { bold: true },
-              alignment: { horizontal: 'center' },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+              border: baseBorder,
             };
           } else if (R > 6 && R <= 6 + items.length && C > 2) {
             // Check if cell is below threshold
@@ -477,8 +511,8 @@ const GAReport: React.FC = () => {
               const studentIdx = R - 7;
               const gaIdx = C - 3;
               const student = items[studentIdx] as StudentReport;
-              if (student && !student.is_dropped && !student.is_frozen) {
-                const ga = reportData.gas[gaIdx];
+              if (student && !student.is_dropped) {
+                const ga = sortedGas[gaIdx];
                 const score = student.ga_scores.find((s) => s.ga_id === ga?.ga_id);
                 isBelow = score?.is_below_threshold ?? false;
               }
@@ -486,7 +520,7 @@ const GAReport: React.FC = () => {
               const courseIdx = R - 7;
               const gaIdx = C - 3;
               const course = items[courseIdx] as CourseReport;
-              const gaScore = course.ga_scores.find((s) => s.ga_id === reportData.gas[gaIdx].ga_id);
+              const gaScore = course.ga_scores.find((s) => s.ga_id === sortedGas[gaIdx]?.ga_id);
               isBelow = gaScore?.is_below_threshold ?? false;
             }
 
@@ -531,8 +565,9 @@ const GAReport: React.FC = () => {
               };
             } else if (R === 6 + items.length + 5) {
               // Status row
-              const summaryIdx = C - 3;
-              const summary = reportData.cohort_summary[summaryIdx];
+              const gaIdx = C - 3;
+              const ga = sortedGas[gaIdx];
+              const summary = ga ? (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id) : undefined;
               if (summary) {
                 ws[cellAddress].s = {
                   fill: {
@@ -578,9 +613,81 @@ const GAReport: React.FC = () => {
         .split('T')[0]}.xlsx`;
       XLSX.writeFile(wb, filename);
       toast.success('Report exported successfully');
+      setExportModalOpen(false);
     } catch (error) {
       console.error('Failed to export GA report:', error);
       toast.error('Failed to export report');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    setExporting(true);
+    try {
+      const exportData = await getExportRows();
+      if (!exportData || !reportData) return;
+      const { selectedBatch, gas, items, cqiSectionStart, rows } = exportData;
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(16);
+      pdf.text('GA Attainment Report', pageWidth / 2, 14, { align: 'center' });
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      pdf.text(`${selectedBatch?.program?.name || 'Program'} | ${selectedBatch?.name || 'Selected Batch'} | ${new Date().toLocaleString()}`, 14, 22);
+
+      const header = viewMode === 'student-wise'
+        ? ['Sr.', 'Reg. No.', 'Student Name', ...gas.map((g) => g.ga_code)]
+        : ['Sr.', 'Course Code', 'Course Title', ...gas.map((g) => g.ga_code)];
+      const body = rows.slice(7, 7 + items.length);
+      autoTable(pdf, {
+        startY: 28,
+        head: [header],
+        body,
+        theme: 'grid',
+        styles: { fontSize: 6.5, cellPadding: 1.4, overflow: 'linebreak', valign: 'middle' },
+        headStyles: { fillColor: [31, 122, 107], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: 10, right: 10 },
+      });
+
+      autoTable(pdf, {
+        startY: ((pdf as any).lastAutoTable?.finalY || 28) + 8,
+        head: [['Metric', 'Detail', ...gas.map((g) => g.ga_code)]],
+        body: rows.slice(7 + items.length + 1, 7 + items.length + 5).map((r) => [r[0], r[1], ...r.slice(3)]),
+        theme: 'grid',
+        styles: { fontSize: 7, cellPadding: 1.6, overflow: 'linebreak' },
+        headStyles: { fillColor: [15, 23, 42], textColor: 255 },
+        margin: { left: 10, right: 10 },
+      });
+
+      const cqiRows = rows.slice(cqiSectionStart + 3);
+      if (cqiRows.length) {
+        pdf.addPage();
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(13);
+        pdf.text('GA CQI Details', 14, 16);
+        autoTable(pdf, {
+          startY: 22,
+          head: [rows[cqiSectionStart + 2]],
+          body: cqiRows,
+          theme: 'grid',
+          styles: { fontSize: 6.5, cellPadding: 1.5, overflow: 'linebreak', valign: 'top' },
+          headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+          margin: { left: 10, right: 10 },
+        });
+      }
+
+      pdf.save(`GA_Report_${selectedBatch?.name?.replace(/\s+/g, '_') || 'Selected_Batch'}.pdf`);
+      toast.success('PDF exported successfully');
+      setExportModalOpen(false);
+    } catch (error) {
+      console.error('Failed to export GA PDF:', error);
+      toast.error('Failed to export PDF');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -700,15 +807,31 @@ const GAReport: React.FC = () => {
               Refresh
             </button>
             <button
-              onClick={handleExport}
+              onClick={() => setExportModalOpen(true)}
               disabled={!reportData}
               className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
             >
-              Export to Excel
+              Export
             </button>
           </div>
         </div>
       </div>
+
+      <ExportChoiceModal
+        open={exportModalOpen}
+        title="Export GA Report"
+        description="Choose PDF for a printable report or Excel for a formatted workbook."
+        exporting={exporting}
+        onClose={() => setExportModalOpen(false)}
+        onPdf={handleExportPDF}
+        onExcel={handleExportExcel}
+      />
+
+      {/* Framework Snapshot Banner */}
+      <BatchFrameworkBanner
+        batchId={selectedBatchId || null}
+        batchName={selectedBatchName}
+      />
 
       {/* Loading State */}
       {loading && (
@@ -754,7 +877,7 @@ const GAReport: React.FC = () => {
                       <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
                         Student Name
                       </th>
-                      {(reportData.gas || []).map((ga) => (
+                      {sortedGas.map((ga) => (
                         <th
                           key={ga.ga_id}
                           title={`${ga.ga_code}: ${ga.ga_title}`}
@@ -778,7 +901,7 @@ const GAReport: React.FC = () => {
                       <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500 border-b border-gray-200">
                         Course Title
                       </th>
-                      {(reportData.gas || []).map((ga) => (
+                      {sortedGas.map((ga) => (
                         <th
                           key={ga.ga_id}
                           title={`${ga.ga_code}: ${ga.ga_title}`}
@@ -799,8 +922,18 @@ const GAReport: React.FC = () => {
                     <tr key={student.id}>
                       <td className="px-4 py-3 text-sm font-semibold text-gray-900">{idx + 1}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{student.registration_number}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 font-semibold">{student.name}</td>
-                      {(reportData.gas || []).map((ga) => {
+                      <td className="px-4 py-3 text-sm text-gray-900 font-semibold">
+                        <div className="flex flex-col gap-1">
+                          <span>{student.name}</span>
+                          {student.is_frozen && (
+                            <span className="inline-flex w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                              Frozen - Sem {student.frozen_at_semester || 'N/A'}
+                              {student.frozen_date ? ` (since ${new Date(student.frozen_date).toLocaleDateString()})` : ''}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      {sortedGas.map((ga) => {
                         const score = (student.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
                         const isBelow = score?.is_below_threshold;
                         return (
@@ -812,8 +945,8 @@ const GAReport: React.FC = () => {
                                 : 'text-gray-900'
                             }`}
                           >
-                        {student.is_dropped || student.is_frozen ? (
-                              student.is_dropped ? 'Dropped Out' : 'Semester Frozen'
+                            {student.is_dropped ? (
+                              'Dropped Out'
                             ) : (
                               formatPercent(score?.direct_score)
                             )}
@@ -828,7 +961,7 @@ const GAReport: React.FC = () => {
                       <td className="px-4 py-3 text-sm font-semibold text-gray-900">{idx + 1}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{course.course_code}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-semibold">{course.course_title}</td>
-                      {(reportData.gas || []).map((ga) => {
+                      {sortedGas.map((ga) => {
                         const gaScore = (course.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
                         const isBelow = gaScore?.is_below_threshold;
                         return (
@@ -858,7 +991,7 @@ const GAReport: React.FC = () => {
                   >
                     Direct Attainment (%)
                   </td>
-                  {(reportData.gas || []).map((ga) => {
+                  {sortedGas.map((ga) => {
                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
                     return (
                       <td
@@ -877,7 +1010,7 @@ const GAReport: React.FC = () => {
                   >
                     Indirect Attainment (%) (From Surveys)
                   </td>
-                  {(reportData.gas || []).map((ga) => {
+                  {sortedGas.map((ga) => {
                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
                     return (
                       <td
@@ -896,7 +1029,7 @@ const GAReport: React.FC = () => {
                   >
                     Final Combined Attainment (%) (80% Direct + 20% Indirect)
                   </td>
-                  {(reportData.gas || []).map((ga) => {
+                  {sortedGas.map((ga) => {
                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
                     return (
                       <td
@@ -915,7 +1048,7 @@ const GAReport: React.FC = () => {
                   >
                     Status (Target KPI: 50%)
                   </td>
-                  {(reportData.gas || []).map((ga) => {
+                  {sortedGas.map((ga) => {
                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
                     return (
                       <td
@@ -940,7 +1073,7 @@ const GAReport: React.FC = () => {
                   >
                     CQI Action
                   </td>
-                  {(reportData.gas || []).map((ga) => {
+                  {sortedGas.map((ga) => {
                     const gaStatus = gaStatusRow.find((s) => s.ga_id === ga.ga_id);
                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
                     const effectiveStatus = summary?.status ?? gaStatus?.status;

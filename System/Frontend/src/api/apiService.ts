@@ -20,6 +20,8 @@ export const studentService = {
   delete: (id: string | number) => api.delete(`students/${id}/`),
   getProfile: () => api.get('students/profile/'),
   uploadImage: (id: string | number, formData: FormData) => api.post(`students/${id}/upload-image/`, formData),
+  freezeStudent: (id: string | number, freeze_at_semester: number) => api.post(`students/${id}/freeze/`, { freeze_at_semester }),
+  unfreezeStudent: (id: string | number, target_batch_id?: string) => api.post(`students/${id}/unfreeze/`, target_batch_id ? { target_batch_id } : {}),
   getStatistics: () => api.get('students/department-stats/'),
   getByDepartment: (departmentId?: number) => api.get(`students/department-filter/${departmentId ? '?department_id=' + departmentId : ''}`),
   // Backward compatibility aliases

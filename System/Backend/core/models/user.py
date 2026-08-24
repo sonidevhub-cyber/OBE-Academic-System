@@ -107,17 +107,17 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     current_semester = models.IntegerField( 
         null=True, blank=True 
     ) 
-    promotion_status = models.CharField( 
-        max_length=20, 
-        choices=[ 
-            ('none', 'None'), 
-            ('provisional', 'Provisional'), 
-            ('confirmed', 'Confirmed'), 
-            ('repeat', 'Repeat'), 
-            ('freeze', 'Freeze'), 
-        ], 
-        default='none' 
-    ) 
+    promotion_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('none', 'None'),
+            ('provisional', 'Provisional'),
+            ('confirmed', 'Confirmed'),
+            ('repeat', 'Repeat'),
+            ('freeze', 'Freeze'),
+        ],
+        default='none'
+    )
  
     is_active = models.BooleanField(default=True) 
     is_staff = models.BooleanField(default=False) 

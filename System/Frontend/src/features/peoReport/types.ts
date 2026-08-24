@@ -41,7 +41,7 @@ export interface PEOEmploymentStats {
 export interface PEOReportSummaryItem {
   peoId: string;
   target: number;
-  achieved: number;
+  achieved: number | null;
 }
 
 export interface PEOReportSummary {
@@ -52,7 +52,11 @@ export interface PEOReportSummary {
 
 export interface PEOCQIRecord {
   id: string;
+  peo?: string;
   peo_id: string;
+  peo_code?: string | null;
+  peo_title?: string | null;
+  batch?: string;
   batch_id: string;
   root_cause: string | null;
   remedial_plan: string | null;
@@ -63,6 +67,7 @@ export interface PEOCQIRecord {
 
 export interface PEOReportMatrixItem {
   peoId: string;
+  peoCode?: string;
   description: string;
   mappedQuestions: string[];
   directPercentage: number | null;
@@ -75,6 +80,8 @@ export interface PEOReportMatrixItem {
   cqiRecordId: string | null;
   cqiStatus: string | null;
   cqiIsLocked: boolean;
+  rootCause?: string | null;
+  remedialPlan?: string | null;
 }
 
 export interface PEOQuestionBreakdownItem {
@@ -84,6 +91,7 @@ export interface PEOQuestionBreakdownItem {
   label: string;
   source?: 'Alumni Survey' | 'Employer Survey' | string;
   legacy?: boolean;
+  responseCount?: number;
 }
 
 export interface PEOReportQuestionBreakdown {
@@ -107,9 +115,23 @@ export interface PEOReportSignatures {
   hodApprovedDate: string | null;
 }
 
+export interface PEOEmployerComment {
+  id: string;
+  peoId: string | null;
+  peoCode: string | null;
+  peoTitle: string | null;
+  questionText: string;
+  comment: string;
+  employerIdentifier: string | null;
+  employerOrganization: string | null;
+  employeeName: string | null;
+  submittedAt: string | null;
+}
+
 export interface PEOReportData {
   header: PEOReportHeader;
   employmentStats: PEOEmploymentStats;
+  employerComments?: PEOEmployerComment[];
   indirectWeightConfig?: PEOIndirectWeightConfig;
   summary: PEOReportSummary;
   matrix: PEOReportMatrixItem[];

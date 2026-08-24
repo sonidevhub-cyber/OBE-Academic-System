@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
-import ForgotPassword from "../components/forms/ForgotPassword";
 
 const Login = () => {
   const { login, error: authError, loading } = useAuth();
@@ -13,7 +12,6 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
   
   // Role display mapping
   const roleDisplayNames: { [key: string]: string } = {
@@ -75,9 +73,6 @@ const Login = () => {
 
   return (
     <AnimatePresence mode="wait">
-      {showForgotPassword ? (
-        <ForgotPassword onBack={() => setShowForgotPassword(false)} />
-      ) : (
     <motion.div
       key="login"
       initial={{ opacity: 0, y: 20 }}
@@ -188,18 +183,8 @@ const Login = () => {
           )}
         </motion.button>
         
-        <div className="text-center mt-4">
-          <button
-            type="button"
-            onClick={() => setShowForgotPassword(true)}
-            className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            Forgot your password?
-          </button>
-        </div>
       </motion.form>
     </motion.div>
-      )}
     </AnimatePresence>
   );
 };

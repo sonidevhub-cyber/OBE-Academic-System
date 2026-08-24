@@ -4,6 +4,7 @@ from django.conf import settings
 
 
 class Student(models.Model):
+
     # STATUS_CHOICES = [
     #     ('active', 'Active'),
     #     ('alumni', 'Alumni'),
@@ -23,6 +24,16 @@ class Student(models.Model):
         null=True,
         blank=True,
         related_name="profile_students"
+    )
+    is_frozen = models.BooleanField(default=False)
+    frozen_at_semester = models.PositiveSmallIntegerField(null=True, blank=True)
+    frozen_date = models.DateTimeField(null=True, blank=True)
+    original_batch = models.ForeignKey(
+        "core.Batch",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="original_profile_students",
     )
     phone = models.CharField(max_length=20, blank=True, null=True)
     date_of_birth = models.DateField(blank=True, null=True)
@@ -59,6 +70,9 @@ class Student(models.Model):
                 self.department = Department.objects.get(code='CS', is_active=True)
             except Exception:
                 pass
+
+        if self.user:
+            pass
                 
         super().save(*args, **kwargs)
 

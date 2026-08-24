@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -59,58 +59,18 @@ const EmployerSurveyPublicPage: React.FC = () => {
 
   const [questions, setQuestions] = useState<EmployerSurveyPublicQuestion[]>([]);
   const [responses, setResponses] = useState<Record<string, EmployerAnswerValue>>({});
-  const [questionNotes, setQuestionNotes] = useState<Record<string, string>>({});
   const [additionalFeedback, setAdditionalFeedback] = useState('');
 
-  const peoGroupedQuestions = useMemo(() => {
-    const groups: Array<{
-      key: string;
-      title: string;
-      subtitle?: string;
-      items: EmployerSurveyPublicQuestion[];
-    }> = [];
-    const generalItems: EmployerSurveyPublicQuestion[] = [];
-
-    questions.forEach(q => {
-      if (q.is_general || !q.peo_title) {
-        generalItems.push(q);
-        return;
-      }
-      const key = `peo-${q.peo_order_number ?? q.peo_title}`;
-      let existing = groups.find(g => g.key === key);
-      if (!existing) {
-        existing = {
-          key,
-          title: `PEO ${q.peo_order_number ?? ''} · ${q.peo_title}`.trim(),
-          subtitle: q.peo_order_number ? `Program Educational Objective #${q.peo_order_number}` : undefined,
-          items: [],
-        };
-        groups.push(existing);
-      }
-      existing.items.push(q);
-    });
-
-    if (generalItems.length > 0) {
-      groups.unshift({
-        key: 'general',
-        title: 'General Feedback',
-        subtitle: 'Overall impressions and open feedback',
-        items: generalItems,
-      });
-    }
-    return groups;
-  }, [questions]);
-
-  const isQuestionAnswered = (question: EmployerSurveyPublicQuestion) => {
+  const isQuestionAnswered = useCallback((question: EmployerSurveyPublicQuestion) => {
     const answer = responses[question.id] || {};
     if (getQuestionType(question) === 'TEXT') {
       return Boolean(answer.text_answer?.trim());
     }
     return Boolean(answer.selected_option_label?.trim()) || Boolean(answer.score && answer.score > 0);
-  };
+  }, [responses]);
   const answeredCount = useMemo(
     () => questions.filter(isQuestionAnswered).length,
-    [questions, responses],
+    [questions, isQuestionAnswered],
   );
   const requiredCount = questions.length;
   const progressPct = requiredCount === 0 ? 0 : Math.round((answeredCount / requiredCount) * 100);
@@ -183,11 +143,14 @@ const EmployerSurveyPublicPage: React.FC = () => {
         question_id: q.id,
         score: responses[q.id]?.score,
         selected_option_label: responses[q.id]?.selected_option_label,
-        text_answer: responses[q.id]?.text_answer,
-      }));
+        text_answer: getQuestionType(q) === 'TEXT' ? responses[q.id]?.text_answer : undefined,
+    }));
     try {
       setSubmitting(true);
-      await obeService.submitEmployerSurveyByToken(token, answers);
+      await obeService.submitEmployerSurveyByToken(token, {
+        answers,
+        additional_feedback: additionalFeedback.trim() || undefined,
+      });
       setHasSubmitted(true);
       toast.success('Thank you! Your employer feedback has been recorded successfully.');
     } catch (err: any) {
@@ -200,20 +163,20 @@ const EmployerSurveyPublicPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/40 to-indigo-50/40">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_32%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.20),_transparent_30%),linear-gradient(135deg,_#f8fafc_0%,_#ecfdf5_45%,_#eef2ff_100%)]">
       <Toaster position="top-center" />
 
       {/* Header */}
-      <header className="bg-white/70 backdrop-blur-md border-b border-slate-200 sticky top-0 z-20">
+      <header className="bg-white/75 backdrop-blur-md border-b border-emerald-100 sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-5 sm:px-8 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-emerald-100">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-emerald-100">
               <Briefcase size={22} />
             </div>
             <div>
               <h1 className="font-black text-gray-900 leading-tight">Employer Outcome Survey</h1>
               <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                Program Educational Objectives · Employer Feedback
+                Employer Feedback
               </p>
             </div>
           </div>
@@ -279,7 +242,7 @@ const EmployerSurveyPublicPage: React.FC = () => {
             className="space-y-6"
           >
             {/* Respondent Info */}
-            <section className="bg-white rounded-[32px] shadow-xl border border-slate-100 p-7 sm:p-8">
+            <section className="bg-white/90 rounded-[32px] shadow-xl border border-emerald-100 p-7 sm:p-8">
               <div className="flex items-start gap-3 mb-5">
                 <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                   <User size={18} />
@@ -336,148 +299,119 @@ const EmployerSurveyPublicPage: React.FC = () => {
             </section>
 
             {/* Progress */}
-            <section className="bg-white rounded-[32px] shadow-xl border border-slate-100 p-7 sm:p-8">
+            <section className="bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 rounded-[32px] shadow-xl p-7 sm:p-8 text-white">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                 <div>
                   <h2 className="font-black text-gray-900 text-lg flex items-center gap-2">
                     Your Progress
                   </h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p className="text-sm text-emerald-50/90 mt-0.5">
                     Rate the graduate on each item below. All questions are required.
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-3xl font-black text-emerald-600 leading-none">{progressPct}%</div>
-                    <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mt-1">
+                    <div className="text-3xl font-black text-white leading-none">{progressPct}%</div>
+                    <div className="text-[11px] font-bold text-emerald-50/80 uppercase tracking-wider mt-1">
                       {answeredCount} / {requiredCount} answered
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+              <div className="w-full h-3 bg-white/20 rounded-full overflow-hidden">
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${progressPct}%` }}
-                  className="h-full bg-gradient-to-r from-emerald-500 to-indigo-500 rounded-full"
+                  className="h-full bg-gradient-to-r from-yellow-300 via-lime-300 to-white rounded-full"
                 />
               </div>
             </section>
 
-            {/* Questions by Group */}
-            {peoGroupedQuestions.map((group, gIdx) => (
-              <motion.section
-                key={group.key}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(gIdx * 0.04, 0.2) }}
-                className="bg-white rounded-[32px] shadow-xl border border-slate-100 overflow-hidden"
-              >
-                <div className={`px-7 sm:px-8 py-5 border-b border-slate-100 ${
-                  group.key === 'general'
-                    ? 'bg-gradient-to-r from-slate-50 to-white'
-                    : 'bg-gradient-to-r from-indigo-50/60 via-white to-emerald-50/40'
-                }`}>
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
-                      Section {gIdx + 1}
-                    </span>
-                    {group.key !== 'general' && (
-                      <span className="text-[10px] font-black bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                        PEO Mapped
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-black text-gray-900 text-lg leading-snug">{group.title}</h3>
-                  {group.subtitle && (
-                    <p className="text-sm text-gray-500 mt-0.5">{group.subtitle}</p>
-                  )}
-                </div>
-                <div className="p-7 sm:p-8 space-y-6 sm:space-y-7">
-                  {group.items.map((q, qIdx) => {
-                    const selected = responses[q.id] || {};
-                    const questionType = getQuestionType(q);
-                    const options = getQuestionOptions(q);
-                    return (
-                      <div key={q.id} className="border-t border-dashed border-slate-100 first:border-0 pt-6 first:pt-0">
-                        <div className="flex items-start gap-3 mb-4">
-                          <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-slate-100 text-slate-600 font-black text-xs shrink-0 mt-0.5">
-                            Q{qIdx + 1}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-base font-bold text-gray-900 leading-relaxed">
-                              {q.question_text}
-                            </p>
-                            {!q.is_general && q.peo_title && (
-                              <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider mt-1.5">
-                                Mapped to: PEO {q.peo_order_number ?? ''} · {q.peo_title}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="sm:pl-11">
-                          {questionType === 'TEXT' ? (
-                            <textarea
-                              value={selected.text_answer || ''}
-                              onChange={(e) => setTextAnswer(q.id, e.target.value)}
-                              placeholder="Write your answer..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all resize-none placeholder:text-slate-400"
-                              rows={4}
-                            />
-                          ) : (
-                            <>
-                          <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 sm:gap-3 mb-3">
-                            {options.map((option, optionIndex) => {
-                              const value = optionIndex + 1;
-                              const isSelected = selected.selected_option_label === option || selected.score === value;
-                              return (
-                                <button
-                                  key={`${q.id}-${optionIndex}`}
-                                  type="button"
-                                  onClick={() => setOptionAnswer(q.id, option, value)}
-                                  className={`group flex flex-col items-center justify-center py-3.5 sm:py-4 rounded-2xl border-2 transition-all ${
-                                    isSelected
-                                      ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200/60 scale-[1.02]'
-                                      : 'bg-white border-slate-200 text-gray-700 hover:border-emerald-300 hover:bg-emerald-50/50'
-                                  }`}
-                                >
-                                  <span className={`text-lg sm:text-xl font-black leading-none ${isSelected ? 'text-white' : 'text-gray-800'}`}>
-                                    {value}
-                                  </span>
-                                  <span className={`mt-1.5 text-[10px] sm:text-[11px] font-bold leading-tight text-center px-1 ${
-                                    isSelected ? 'text-emerald-50' : 'text-gray-500'
-                                  }`}>
-                                    {option}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {selected.score && (
-                            <p className="text-[11px] font-bold text-gray-400 mb-2">
-                              Hint: {ratingLabels.find(r => r.value === selected.score)?.hint || selected.selected_option_label}
-                            </p>
-                          )}
-                          <textarea
-                            value={questionNotes[q.id] || ''}
-                            onChange={(e) => setQuestionNotes(prev => ({ ...prev, [q.id]: e.target.value }))}
-                            placeholder="Optional comments or examples to justify this rating…"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all resize-none placeholder:text-slate-400"
-                            rows={2}
-                          />
-                            </>
-                          )}
+            {/* Questions */}
+            <motion.section
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/95 rounded-[32px] shadow-xl border border-indigo-100 overflow-hidden"
+            >
+              <div className="px-7 sm:px-8 py-5 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-emerald-50 to-white">
+                <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em]">
+                  Feedback Items
+                </span>
+                <h3 className="font-black text-gray-900 text-lg leading-snug mt-1">Graduate Performance Feedback</h3>
+                <p className="text-sm text-gray-500 mt-0.5">Please rate each item based on your experience with the graduate.</p>
+              </div>
+              <div className="p-7 sm:p-8 space-y-4">
+                {questions.map((q, qIdx) => {
+                  const selected = responses[q.id] || {};
+                  const questionType = getQuestionType(q);
+                  const options = getQuestionOptions(q);
+                  return (
+                    <div key={q.id} className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-emerald-50/50 p-5 shadow-sm">
+                      <div className="flex items-start gap-3 mb-4">
+                        <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-500 text-white font-black text-xs shrink-0 mt-0.5 shadow-md shadow-indigo-100">
+                          Q{qIdx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-base font-bold text-gray-900 leading-relaxed">
+                            {q.question_text}
+                          </p>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </motion.section>
-            ))}
+
+                      <div className="sm:pl-12">
+                        {questionType === 'TEXT' ? (
+                          <textarea
+                            value={selected.text_answer || ''}
+                            onChange={(e) => setTextAnswer(q.id, e.target.value)}
+                            placeholder="Write your answer..."
+                            className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all resize-none placeholder:text-slate-400"
+                            rows={4}
+                          />
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 sm:gap-3 mb-3">
+                              {options.map((option, optionIndex) => {
+                                const value = optionIndex + 1;
+                                const isSelected = selected.selected_option_label === option || selected.score === value;
+                                return (
+                                  <button
+                                    key={`${q.id}-${optionIndex}`}
+                                    type="button"
+                                    onClick={() => setOptionAnswer(q.id, option, value)}
+                                    className={`group flex flex-col items-center justify-center py-3.5 sm:py-4 rounded-2xl border-2 transition-all ${
+                                      isSelected
+                                        ? 'bg-gradient-to-br from-emerald-600 to-indigo-600 border-emerald-500 text-white shadow-lg shadow-emerald-200/60 scale-[1.02]'
+                                        : 'bg-white border-slate-200 text-gray-700 hover:border-emerald-300 hover:bg-emerald-50'
+                                    }`}
+                                  >
+                                    <span className={`text-lg sm:text-xl font-black leading-none ${isSelected ? 'text-white' : 'text-gray-800'}`}>
+                                      {value}
+                                    </span>
+                                    <span className={`mt-1.5 text-[10px] sm:text-[11px] font-bold leading-tight text-center px-1 ${
+                                      isSelected ? 'text-emerald-50' : 'text-gray-500'
+                                    }`}>
+                                      {option}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {selected.score && (
+                              <p className="text-[11px] font-bold text-emerald-700">
+                                Hint: {ratingLabels.find(r => r.value === selected.score)?.hint || selected.selected_option_label}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.section>
 
             {/* Additional Feedback */}
-            <section className="bg-white rounded-[32px] shadow-xl border border-slate-100 p-7 sm:p-8">
+            <section className="bg-white/95 rounded-[32px] shadow-xl border border-emerald-100 p-7 sm:p-8">
               <h3 className="font-black text-gray-900 text-lg mb-2">Additional Comments (Optional)</h3>
               <p className="text-sm text-gray-500 mb-4">
                 Any other strengths, areas for improvement, or overall feedback on the graduate&apos;s performance and program preparation.
@@ -487,7 +421,7 @@ const EmployerSurveyPublicPage: React.FC = () => {
                 onChange={(e) => setAdditionalFeedback(e.target.value)}
                 placeholder="Share any overall thoughts, examples of strengths, or areas where the program could better prepare graduates for your industry…"
                 rows={5}
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-sm text-gray-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all resize-none placeholder:text-slate-400"
+                className="w-full bg-gradient-to-br from-slate-50 to-emerald-50/60 border border-emerald-100 rounded-2xl px-5 py-4 text-sm text-gray-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all resize-none placeholder:text-slate-400"
               />
             </section>
 
@@ -553,7 +487,7 @@ const EmployerSurveyPublicPage: React.FC = () => {
             <h2 className="font-black text-gray-900 text-3xl mb-3">Thank You!</h2>
             <p className="text-gray-600 text-base leading-relaxed max-w-xl mx-auto mb-3">
               Your employer feedback has been recorded successfully. It will be combined with other stakeholder responses
-              to evaluate Program Educational Objectives and improve the curriculum for future graduates.
+              to evaluate program outcomes and improve the curriculum for future graduates.
             </p>
             <p className="text-sm text-gray-400 max-w-lg mx-auto mb-10">
               On behalf of the program and institution, we greatly appreciate your time and valuable input.

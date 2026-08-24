@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx-js-style';
+import ExportChoiceModal from '../../components/reports/ExportChoiceModal';
 import obeService, {
   Batch,
   CQIClosingSummaryResponse,
@@ -372,6 +374,158 @@ const HODCQIClosingAdvisory: React.FC = () => {
     }
   };
 
+  const addWorkbookSheet = (wb: XLSX.WorkBook, name: string, rows: any[][], mergeRows: number[] = []) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const maxCol = Math.max(0, rows.reduce((max, row) => Math.max(max, row.length - 1), 0));
+    ws['!merges'] = mergeRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: maxCol } }));
+    ws['!cols'] = Array.from({ length: maxCol + 1 }, (_, index) => ({
+      wch: index <= 1 ? 24 : index === 6 ? 46 : 20,
+    }));
+    ws['!rows'] = rows.map((_, index) => ({ hpt: mergeRows.includes(index) ? 26 : 24 }));
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let R = 0; R <= range.e.r; R += 1) {
+      for (let C = 0; C <= range.e.c; C += 1) {
+        const address = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[address]) continue;
+        const isTitle = mergeRows.includes(R);
+        const isHeader = R === mergeRows.length + 1 || rows[R]?.[0] === 'GA' || rows[R]?.[0] === 'PO' || rows[R]?.[0] === 'Type';
+        ws[address].s = {
+          fill: isTitle
+            ? { fgColor: { rgb: '064E3B' } }
+            : isHeader
+              ? { fgColor: { rgb: 'D1FAE5' } }
+              : undefined,
+          font: {
+            bold: isTitle || isHeader,
+            color: isTitle ? { rgb: 'FFFFFF' } : isHeader ? { rgb: '065F46' } : { rgb: '111827' },
+          },
+          alignment: {
+            horizontal: isTitle || isHeader ? 'center' : 'left',
+            vertical: 'center',
+            wrapText: true,
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+            right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          },
+        };
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  };
+
+  const handleExportExcel = () => {
+    if (!exportBatchId || !selectedExportBatch) {
+      toast.error('Please select a batch to export');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const scoped = getBatchScopedClosures();
+      const batchName = selectedExportBatch.name || selectedExportBatch.custom_id || 'Batch';
+      const generatedAt = new Date().toLocaleString();
+      const wb = XLSX.utils.book_new();
+
+      addWorkbookSheet(wb, 'Summary', [
+        ['Consolidated CQI Closing Report'],
+        [`Batch: ${batchName}`],
+        [`Generated: ${generatedAt}`],
+        [],
+        ['Section', 'Records'],
+        ['GA CQI Closings', scoped.ga.length],
+        ['PO CQI Closings', scoped.po.length],
+        ['Vision/Mission CQI Closings', scoped.vmCqi.length],
+        ['Vision/Mission Reviews', scoped.vmReviews.length],
+      ], [0, 1, 2]);
+
+      addWorkbookSheet(wb, 'GA Closings', [
+        ['Graduate Attribute CQI Closings'],
+        [`Batch: ${batchName}`],
+        [],
+        ['GA', 'Title', 'Flagged Batch', 'Initial', 'Implemented In', 'Result', 'Action Taken', 'Closed On'],
+        ...(scoped.ga.length
+          ? scoped.ga.map((item: GACQIClosingSummaryItem) => [
+              item.flagged.ga_code,
+              item.flagged.ga_title || '-',
+              item.flagged.batch_name || '-',
+              formatPercent(item.flagged.attainment_value),
+              item.closed_in_batch_name || '-',
+              formatPercent(item.resulting_attainment),
+              item.action_taken || '-',
+              formatDate(item.closed_date),
+            ])
+          : [['-', 'No GA CQI closures for selected batch', '-', '-', '-', '-', '-', '-']]),
+      ], [0, 1]);
+
+      addWorkbookSheet(wb, 'PO Closings', [
+        ['Program Outcome CQI Closings'],
+        [`Batch: ${batchName}`],
+        [],
+        ['PO', 'Title', 'Flagged Batch', 'Initial', 'Implemented In', 'Result', 'Action Taken', 'Closed On'],
+        ...(scoped.po.length
+          ? scoped.po.map((item: PEOCQIClosingSummaryItem) => [
+              item.flagged.peo_code,
+              item.flagged.peo_title || '-',
+              item.flagged.batch_name || '-',
+              formatPercent(item.flagged.attainment_value),
+              item.closed_in_batch_name || '-',
+              formatPercent(item.resulting_attainment),
+              item.action_taken || '-',
+              formatDate(item.closed_date),
+            ])
+          : [['-', 'No PO CQI closures for selected batch', '-', '-', '-', '-', '-', '-']]),
+      ], [0, 1]);
+
+      addWorkbookSheet(wb, 'Vision Mission CQI', [
+        ['Vision / Mission Keyword CQI Closings'],
+        [`Batch: ${batchName}`],
+        [],
+        ['Type', 'Keyword', 'Flagged Batch', 'Initial', 'Implemented In', 'Result', 'Action Taken', 'Closed On'],
+        ...(scoped.vmCqi.length
+          ? scoped.vmCqi.map((item: VisionMissionCQIClosingSummaryItem) => [
+              item.flagged.statement_type,
+              item.flagged.keyword || '-',
+              item.flagged.batch_name || '-',
+              formatPercent(item.flagged.attainment_value),
+              item.closed_in_batch_name || '-',
+              formatPercent(item.resulting_attainment),
+              item.action_taken || '-',
+              formatDate(item.closed_date),
+            ])
+          : [['-', 'No Vision/Mission CQI closures for selected batch', '-', '-', '-', '-', '-', '-']]),
+      ], [0, 1]);
+
+      addWorkbookSheet(wb, 'Statement Reviews', [
+        ['Vision / Mission Statement Reviews'],
+        [`Batch: ${batchName}`],
+        [],
+        ['Type', 'Trigger', 'Decision', 'Previous Statement', 'Justification', 'Reviewed On'],
+        ...(scoped.vmReviews.length
+          ? scoped.vmReviews.map((item: VisionMissionReviewSummaryItem) => [
+              item.flagged.statement_type,
+              item.flagged.trigger_type,
+              item.resulting_outcome,
+              item.flagged.previous_statement_snapshot || '-',
+              item.action_taken.justification || '-',
+              formatDate(item.review_date),
+            ])
+          : [['-', '-', '-', 'No Vision/Mission statement reviews recorded', '-', '-']]),
+      ], [0, 1]);
+
+      XLSX.writeFile(wb, `cqi-closing-report-${batchName.replace(/\s+/g, '_')}.xlsx`);
+      toast.success('CQI report Excel exported');
+      setExportModalOpen(false);
+    } catch (error) {
+      console.error('Failed to export CQI closing Excel:', error);
+      toast.error('Failed to export CQI report Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="rounded-2xl border border-gray-100 bg-gradient-to-br from-emerald-50 via-white to-indigo-50 p-6 shadow-sm">
@@ -674,60 +828,33 @@ const HODCQIClosingAdvisory: React.FC = () => {
         </SectionCard>
       )}
 
-      {exportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-indigo-50 p-6">
-              <h3 className="text-xl font-black text-gray-900">
-                Export CQI Report
-              </h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Select a batch to export GA, PO, and Vision/Mission CQI reports in one PDF.
-              </p>
-            </div>
-            <div className="p-6">
-              <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                Batch
-              </label>
-              <select
-                value={exportBatchId}
-                onChange={(event) => setExportBatchId(event.target.value)}
-                className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 focus:border-emerald-500 focus:ring-0"
-              >
-                <option value="">Select a batch</option>
-                {batches.map((batch) => (
-                  <option key={batch.id} value={batch.id}>
-                    {batch.name || batch.custom_id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center justify-end gap-3 border-t border-gray-100 bg-gray-50 p-6">
-              <button
-                type="button"
-                onClick={() => setExportModalOpen(false)}
-                disabled={exporting}
-                className="rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-300 disabled:opacity-70"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExportPdf}
-                disabled={exporting || !exportBatchId}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {exporting ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                {exporting ? 'Exporting...' : 'Export PDF'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ExportChoiceModal
+        open={exportModalOpen}
+        title="Export CQI Report"
+        description="Select a batch, then choose PDF or Excel."
+        exporting={exporting}
+        pdfDisabled={!exportBatchId}
+        excelDisabled={!exportBatchId}
+        onClose={() => setExportModalOpen(false)}
+        onPdf={handleExportPdf}
+        onExcel={handleExportExcel}
+      >
+        <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
+          Batch
+        </label>
+        <select
+          value={exportBatchId}
+          onChange={(event) => setExportBatchId(event.target.value)}
+          className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 focus:border-emerald-500 focus:ring-0"
+        >
+          <option value="">Select a batch</option>
+          {batches.map((batch) => (
+            <option key={batch.id} value={batch.id}>
+              {batch.name || batch.custom_id}
+            </option>
+          ))}
+        </select>
+      </ExportChoiceModal>
     </div>
   );
 };

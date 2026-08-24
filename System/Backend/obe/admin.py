@@ -5,7 +5,7 @@ from .models import (
     GACQIResubmissionHistory, StudentCLOScore,
     ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse,
     ExitSurveyTemplate, PEOCQIRecord, PEOCQISubmissionHistory,
-    GAReport, CourseFeedbackGAScore, ExitSurveyGAScore
+    GAReport, CourseFeedbackGAScore, ExitSurveyGAScore,
 )
 
 admin.site.register(PEO)

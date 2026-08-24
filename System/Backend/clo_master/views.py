@@ -110,7 +110,8 @@ def get_clo_master_report(request, program_id, semester_id):
         all_course_sessions = all_course_sessions.filter(course__id__in=valid_course_ids)
     pending_course_sessions = all_course_sessions.exclude(
         Q(assessment_status="ASSESSMENT_DONE")
-        | Q(internal_complete_awaiting_final=True)
+        | Q(final_submitted=True)
+        | Q(assessment_done=True)
     )
 
     sessions_by_course_id = {
@@ -231,22 +232,24 @@ def get_clo_master_report(request, program_id, semester_id):
             achieved_count = kpi_achieved_lookup.get((course_info["course"].id, clo.id), 0)
             kpi_achieved_counts[clo_key] = achieved_count
 
-    pending_courses_info = [
-        {
+    pending_courses_info = []
+    for cs in pending_course_sessions:
+        if getattr(cs, "internal_complete_awaiting_final", False):
+            pending_status = "FINAL_SUBMISSION_PENDING"
+        else:
+            pending_status = "INTERNAL_LOCK_PENDING"
+        pending_courses_info.append({
             "course_id": cs.course.id,
             "course_code": cs.course.code,
             "course_name": cs.course.name,
             "instructor_name": cs.instructor.full_name if cs.instructor else "Not Assigned",
-            "status": "Pending",
-        }
-        for cs in pending_course_sessions
-    ]
+            "status": pending_status,
+        })
 
-    # Include curriculum courses that do not yet have a CourseSession row at all.
-    pending_course_ids = {cs.course.id for cs in pending_course_sessions}
+    all_session_course_ids = {cs.course.id for cs in all_course_sessions}
     for course_info in sorted_courses:
         course = course_info["course"]
-        if course.id in pending_course_ids:
+        if course.id in all_session_course_ids:
             continue
         pending_courses_info.append(
             {
@@ -254,7 +257,7 @@ def get_clo_master_report(request, program_id, semester_id):
                 "course_code": course.code,
                 "course_name": course.name,
                 "instructor_name": "Not Assigned",
-                "status": "Pending",
+                "status": "NO_SESSION_CREATED",
             }
         )
 
@@ -376,8 +379,9 @@ def export_to_excel(data):
     headers = ["Sr. No", "Reg. No", "Student Name"]
     for course in data["finalized_courses"]:
         for clo in course["clos"]:
+            cohort_pct = round(float(clo.get("cohort_percentage", 0)), 2)
             headers.append(
-                f"{course['course_code']} - {clo['clo_code']} (Target: {clo.get('kpi_target', 0)}%, Cohort: {round(clo.get('cohort_percentage', 0), 2)}%)"
+                f"{course['course_code']} - {clo['clo_code']} (Target: {clo.get('kpi_target', 0)}%, Cohort: {cohort_pct:.2f}%)"
             )
             if clo.get("cqi"):
                 headers.append(f"{course['course_code']} - {clo['clo_code']} - CQI Reason")
@@ -405,12 +409,13 @@ def export_to_excel(data):
         for course in data["finalized_courses"]:
             course_id = str(course["course_id"])
             for clo in course["clos"]:
-                clo_key = f"CLO-{clo['clo_code'].split('-')[1]}"
+                clo_code = clo["clo_code"]
                 course_data = student["courses"].get(course_id, {})
-                clo_data = course_data.get(clo_key)
+                clo_data = course_data.get(clo_code)
 
-                if clo_data:
-                    cell_val = f"{clo_data['score']}%"
+                if clo_data is not None:
+                    score_val = round(float(clo_data["score"]), 1)
+                    cell_val = f"{score_val:.1f}%"
                     cell = ws.cell(row=row_num, column=col, value=cell_val)
                     cell.alignment = cell_alignment
                     if clo_data["achieved"]:
@@ -464,24 +469,15 @@ def export_to_excel(data):
     for course in data["finalized_courses"]:
         course_id = str(course["course_id"])
         for clo in course["clos"]:
-            clo_key = f"CLO-{clo['clo_code'].split('-')[1]}"
-
-            achieved_count = 0
-            for student in data["students"]:
-                course_student_data = student["courses"].get(course_id, {})
-                if (
-                    clo_key in course_student_data
-                    and course_student_data[clo_key]
-                    and course_student_data[clo_key]["achieved"]
-                ):
-                    achieved_count += 1
+            achieved_count = int(clo.get("cohort_achieved_count", 0))
 
             cell1 = ws.cell(row=summary_row1, column=col, value=achieved_count)
             cell1.font = Font(bold=True)
             cell1.alignment = cell_alignment
 
-            percentage = round((achieved_count / total_students * 100), 2) if total_students > 0 else 0
-            cell2 = ws.cell(row=summary_row2, column=col, value=f"{percentage}%")
+            cohort_pct = round(float(clo.get("cohort_percentage", 0)), 2)
+            percentage = cohort_pct
+            cell2 = ws.cell(row=summary_row2, column=col, value=f"{percentage:.2f}%")
             cell2.font = Font(bold=True)
             cell2.alignment = cell_alignment
             col += 1

@@ -5,6 +5,7 @@ import academicStructureService, { Program } from '../../api/academicStructureSe
 import StudentModal from '../../components/ui/modals/StudentModal';
 import EnhancedStudentProfile from '../../components/ui/EnhancedStudentProfile';
 import { getFullImageUrl } from '../../utils/imageHelpers';
+import { toast } from 'react-toastify';
 
 // Custom scrollbar styling
 const scrollbarStyle = `
@@ -64,6 +65,20 @@ interface Student {
   performance_notes?: string;
   current_semester?: number;
   promotion_status?: string;
+  is_frozen?: boolean;
+  is_freezable?: boolean;
+  frozen_at_semester?: number | null;
+  frozen_date?: string | null;
+  original_batch_id?: string | null;
+  original_batch_name?: string | null;
+}
+
+interface FreezeBatchCandidate {
+  id: string;
+  batch_name?: string;
+  name?: string;
+  current_semester: number;
+  program_id?: string;
 }
 
 interface StudentManagementProps {
@@ -79,6 +94,11 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showStudentProfile, setShowStudentProfile] = useState<boolean>(false);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
+  const [freezeTarget, setFreezeTarget] = useState<Student | null>(null);
+  const [freezeSemester, setFreezeSemester] = useState<number | null>(null);
+  const [unfreezeTarget, setUnfreezeTarget] = useState<Student | null>(null);
+  const [unfreezeCandidates, setUnfreezeCandidates] = useState<FreezeBatchCandidate[]>([]);
+  const [actionLoading, setActionLoading] = useState<boolean>(false);
   
   const [programs, setPrograms] = useState<Program[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -195,6 +215,59 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
     () => batches.find(b => b.id === selectedBatchId) || null,
     [batches, selectedBatchId]
   );
+
+  const formatFreezeDate = useCallback((value?: string | null) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleDateString();
+  }, []);
+
+  const openFreezeDialog = useCallback((student: Student) => {
+    const currentSemester = student.current_semester || selectedBatch?.current_semester || null;
+    setFreezeTarget(student);
+    setFreezeSemester(currentSemester);
+  }, [selectedBatch]);
+
+  const handleFreezeStudent = useCallback(async () => {
+    if (!freezeTarget || !freezeSemester) return;
+    setActionLoading(true);
+    try {
+      const res = await studentService.freezeStudent(freezeTarget.student_id, freezeSemester);
+      toast.success(res.data?.message || 'Student frozen successfully');
+      setFreezeTarget(null);
+      setFreezeSemester(null);
+      fetchStudents(currentPage);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to freeze student');
+    } finally {
+      setActionLoading(false);
+    }
+  }, [currentPage, fetchStudents, freezeSemester, freezeTarget]);
+
+  const handleUnfreezeStudent = useCallback(async (student: Student, targetBatchId?: string) => {
+    setActionLoading(true);
+    try {
+      const res = await studentService.unfreezeStudent(student.student_id, targetBatchId);
+      const assignedName = res.data?.assigned_batch?.batch_name || res.data?.assigned_batch?.name;
+      toast.success(res.data?.message || `Student rejoined${assignedName ? ` ${assignedName}` : ''}`);
+      setUnfreezeTarget(null);
+      setUnfreezeCandidates([]);
+      fetchStudents(currentPage);
+      fetchProgramsAndBatches();
+    } catch (err: any) {
+      const data = err.response?.data || {};
+      const candidates = data.candidate_batches || data.active_batches || [];
+      if ((err.response?.status === 409 || candidates.length > 0) && candidates.length > 0) {
+        setUnfreezeTarget(student);
+        setUnfreezeCandidates(candidates);
+      } else {
+        toast.error(data.error || 'Failed to unfreeze student');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }, [currentPage, fetchProgramsAndBatches, fetchStudents]);
 
   const filteredStudents = useMemo(() => {
     if (!selectedBatchId || !Array.isArray(students)) return [];
@@ -370,6 +443,12 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                         <div className="ml-4 min-w-0 flex-1">
                           <div className="text-sm font-medium text-gray-900 truncate">{student.name || student.full_name}</div>
                           <div className="text-sm text-gray-500 truncate">ID: {student.registration_number || student.custom_id || student.student_id}</div>
+                          {student.is_frozen && (
+                            <div className="mt-1 inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                              Frozen - Sem {student.frozen_at_semester || student.current_semester || 'N/A'}
+                              {student.frozen_date ? ` (since ${formatFreezeDate(student.frozen_date)})` : ''}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -392,9 +471,12 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                     <td className="px-4 py-4">
                       <div className="text-sm text-gray-900">Semester: {student.current_semester || selectedBatch?.current_semester || 'N/A'}</div>
                       <div className="text-sm text-gray-500">Status: {student.promotion_status || 'Active'}</div>
+                      {student.is_frozen && student.original_batch_name && (
+                        <div className="text-xs text-sky-600">Original: {student.original_batch_name}</div>
+                      )}
                     </td>
                     <td className="px-4 py-4 text-sm font-medium">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => {
                             setViewingStudent(student);
@@ -422,6 +504,25 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
                           </svg>
                           <span className="text-xs font-medium">Edit</span>
                         </button>
+                        {student.is_frozen ? (
+                          <button
+                            onClick={() => handleUnfreezeStudent(student)}
+                            disabled={actionLoading}
+                            className="inline-flex items-center px-2.5 py-1.5 bg-sky-50 text-sky-700 rounded-md hover:bg-sky-100 transition-colors duration-200 border border-sky-200 disabled:opacity-50"
+                            title="Unfreeze and assign this student to a matching active batch"
+                          >
+                            <span className="text-xs font-medium">Unfreeze / Rejoin</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openFreezeDialog(student)}
+                            disabled={!student.is_freezable || actionLoading}
+                            className="inline-flex items-center px-2.5 py-1.5 bg-cyan-50 text-cyan-700 rounded-md hover:bg-cyan-100 transition-colors duration-200 border border-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={student.is_freezable ? 'Freeze student' : 'Final marks not yet submitted for this semester - freeze unavailable until then.'}
+                          >
+                            <span className="text-xs font-medium">Freeze</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDeleteStudent(student.student_id)}
                           className="inline-flex items-center px-2.5 py-1.5 bg-red-50 text-red-700 rounded-md hover:bg-red-100 transition-colors duration-200 border border-red-200"
@@ -513,6 +614,94 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
             fetchStudents();
           }}
         />
+      )}
+
+      {freezeTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Freeze Student</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                Move <span className="font-semibold text-gray-900">{freezeTarget.name || freezeTarget.full_name}</span> into frozen status.
+              </p>
+              <div className="space-y-2">
+                {[freezeTarget.current_semester || selectedBatch?.current_semester, (freezeTarget.current_semester || selectedBatch?.current_semester || 0) - 1]
+                  .filter((value, index, values): value is number => Boolean(value && value > 0 && values.indexOf(value) === index))
+                  .map(semester => (
+                    <label key={semester} className="flex items-center gap-3 rounded-md border border-gray-200 p-3 text-sm text-gray-700">
+                      <input
+                        type="radio"
+                        name="freeze_semester"
+                        checked={freezeSemester === semester}
+                        onChange={() => setFreezeSemester(semester)}
+                        className="h-4 w-4 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      <span>Freeze at Semester {semester}</span>
+                    </label>
+                  ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setFreezeTarget(null);
+                  setFreezeSemester(null);
+                }}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleFreezeStudent}
+                disabled={!freezeSemester || actionLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-cyan-600 rounded-md hover:bg-cyan-700 disabled:opacity-50"
+              >
+                Freeze
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unfreezeTarget && unfreezeCandidates.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Choose Rejoin Batch</h3>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-gray-600">
+                Select the active batch for <span className="font-semibold text-gray-900">{unfreezeTarget.name || unfreezeTarget.full_name}</span>.
+              </p>
+              {unfreezeCandidates.map(batch => (
+                <button
+                  key={batch.id}
+                  onClick={() => handleUnfreezeStudent(unfreezeTarget, batch.id)}
+                  disabled={actionLoading}
+                  className="w-full rounded-md border border-gray-200 px-4 py-3 text-left hover:border-sky-300 hover:bg-sky-50 disabled:opacity-50"
+                >
+                  <div className="text-sm font-semibold text-gray-900">{batch.batch_name || batch.name}</div>
+                  <div className="text-xs text-gray-500">Semester {batch.current_semester}</div>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end px-6 py-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setUnfreezeTarget(null);
+                  setUnfreezeCandidates([]);
+                }}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showStudentProfile && viewingStudent && (

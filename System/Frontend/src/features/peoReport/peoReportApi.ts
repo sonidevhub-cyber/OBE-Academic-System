@@ -38,7 +38,7 @@ export async function downloadPEOReportPDF(
     );
 
     const blob = response.data as Blob;
-    downloadBlobAsFile(blob, `peo-report-${programId}-${year}.pdf`);
+    downloadBlobAsFile(blob, `po-report-${programId}-${year}.pdf`);
     return blob;
   } catch (error: any) {
     const responseData = error?.response?.data;
@@ -52,7 +52,7 @@ export async function downloadPEOReportPDF(
       }
     }
 
-    throw new Error(error?.response?.data?.error || error?.message || 'Failed to download PEO report PDF');
+    throw new Error(error?.response?.data?.error || error?.message || 'Failed to download PO report PDF');
   }
 }
 

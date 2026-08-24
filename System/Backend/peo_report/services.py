@@ -142,6 +142,10 @@ def _get_latest_hod_signature(cqi_records: list[PEOCQIRecord]) -> tuple[str | No
     return approved_by, approved_date.isoformat() if approved_date else None
 
 
+def _format_peo_code(peo: PEO) -> str:
+    return f"PO-{peo.order_number}" if peo.order_number else str(peo.id)
+
+
 def _build_alumni_employment_stats(batch: Batch, cycle: AlumniSurveyCycle | None) -> dict[str, Any]:
     if cycle is None:
         return {
@@ -210,6 +214,48 @@ def _build_alumni_employment_stats(batch: Batch, cycle: AlumniSurveyCycle | None
         "employmentDistribution": employment_distribution,
         "topEmployers": top_employers,
     }
+
+
+def _build_employer_comments(cycle: EmployerSurveyCycle | None) -> list[dict[str, Any]]:
+    if cycle is None:
+        return []
+
+    responses = (
+        EmployerSurveyResponse.objects.filter(
+            cycle=cycle,
+            submitted_at__isnull=False,
+            additional_feedback__isnull=False,
+        )
+        .exclude(additional_feedback="")
+        .select_related("alumni_student")
+        .order_by("-submitted_at")
+    )
+
+    comments: list[dict[str, Any]] = []
+    for response in responses:
+        comment_text = (response.additional_feedback or "").strip()
+        if not comment_text:
+            continue
+
+        comments.append(
+            {
+                "id": str(response.id),
+                "peoId": None,
+                "peoCode": None,
+                "peoTitle": None,
+                "questionText": "Overall optional employer comment",
+                "comment": comment_text,
+                "employerIdentifier": (
+                    response.employer_contact_name
+                    or response.employer_organization
+                    or response.employer_email
+                ),
+                "employerOrganization": response.employer_organization,
+                "employeeName": response.employee_name_at_org,
+                "submittedAt": response.submitted_at.isoformat() if response.submitted_at else None,
+            }
+        )
+    return comments
 
 
 def resolve_peo_report_context(program_id: str, year: int, batch_id: str | None = None) -> dict[str, Any]:
@@ -285,9 +331,11 @@ def _build_alumni_indirect(
                     "percentage": None,
                     "label": "Not Assessed",
                     "source": "Alumni Survey",
+                    "responseCount": 0,
                 })
                 continue
             pct = round((float(avg) / 5.0) * 100.0, 2)
+            response_count = q_answers.values("submission_id").distinct().count()
             per_q_pcts.append(Decimal(str(pct)))
             question_rows.append({
                 "questionText": q.question_text,
@@ -295,6 +343,7 @@ def _build_alumni_indirect(
                 "percentage": pct,
                 "label": _question_label(pct),
                 "source": "Alumni Survey",
+                "responseCount": response_count,
             })
 
         if per_q_pcts:
@@ -329,10 +378,12 @@ def _build_alumni_indirect(
                 "label": "Not Assessed",
                 "source": "Alumni Survey",
                 "legacy": True,
+                "responseCount": 0,
             })
             continue
 
         percentage = round((float(avg_score) / 5.0) * 100.0, 2)
+        response_count = question_responses.values("student_id").distinct().count()
         question_rows.append({
             "questionText": question.question_text,
             "avgScore": round(float(avg_score), 2),
@@ -340,6 +391,7 @@ def _build_alumni_indirect(
             "label": _question_label(percentage),
             "source": "Alumni Survey",
             "legacy": True,
+            "responseCount": response_count,
         })
 
     overall_avg = responses.aggregate(avg=Avg("score"))["avg"]
@@ -388,9 +440,11 @@ def _build_employer_indirect(
                 "percentage": None,
                 "label": "Not Assessed",
                 "source": "Employer Survey",
+                "responseCount": 0,
             })
             continue
         pct = round((float(avg) / 5.0) * 100.0, 2)
+        response_count = q_answers.values("response_id").distinct().count()
         per_q_pcts.append(Decimal(str(pct)))
         question_rows.append({
             "questionText": q.question_text,
@@ -398,6 +452,7 @@ def _build_employer_indirect(
             "percentage": pct,
             "label": _question_label(pct),
             "source": "Employer Survey",
+            "responseCount": response_count,
         })
 
     if not per_q_pcts:
@@ -506,9 +561,11 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
     peos = context["peos"]
     cqi_records = context["cqi_records"]
     cqi_by_peo = {str(record.peo_id): record for record in cqi_records}
+    hod_approved_by, hod_approved_date = _get_latest_hod_signature(cqi_records)
 
     matrix: list[dict[str, Any]] = []
     chart_data: list[dict[str, Any]] = []
+    cqi_sections: list[dict[str, Any]] = []
     triggered_count = 0
     total_alumni_responses = 0
     total_employer_responses = 0
@@ -537,9 +594,14 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
             triggered_count += 1
 
         cqi_record = cqi_by_peo.get(str(peo.id))
+        cqi_status = None
+        if cqi_record:
+            cqi_status = "Closed" if cqi_record.status in {"APPROVED", "CLOSED_IMPLEMENTED"} or cqi_record.is_locked else "Open"
+
         matrix.append(
             {
                 "peoId": str(peo.id),
+                "peoCode": _format_peo_code(peo),
                 "description": peo.description or peo.title or "",
                 "mappedQuestions": mapped_questions or [row["questionText"] for row in per_question_rows],
                 "directPercentage": direct_percentage,
@@ -552,14 +614,34 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
                 "cqiRecordId": str(cqi_record.id) if cqi_record else None,
                 "cqiStatus": cqi_record.status if cqi_record else None,
                 "cqiIsLocked": cqi_record.is_locked if cqi_record else False,
+                "rootCause": cqi_record.root_cause if cqi_record else None,
+                "remedialPlan": cqi_record.remedial_plan if cqi_record else None,
             }
         )
+
+        if status == "CQI Triggered" or cqi_record:
+            cqi_sections.append(
+                {
+                    "peoId": _format_peo_code(peo),
+                    "peoUuid": str(peo.id),
+                    "rootCause": cqi_record.root_cause if cqi_record else None,
+                    "remedialPlan": cqi_record.remedial_plan if cqi_record else None,
+                    "cqiStatus": cqi_status or "Open",
+                    "hodApprovedBy": cqi_record.submitted_by.full_name if cqi_record and cqi_record.submitted_by else None,
+                    "hodApprovedDate": (
+                        (cqi_record.updated_at or cqi_record.created_at).isoformat()
+                        if cqi_record and (cqi_record.updated_at or cqi_record.created_at)
+                        else None
+                    ),
+                    "cqiPending": not bool(cqi_record and (cqi_record.root_cause or cqi_record.remedial_plan)),
+                }
+            )
 
         chart_data.append(
             {
                 "peoId": str(peo.id),
                 "target": target_percentage,
-                "achieved": combined_percentage if combined_percentage is not None else 0.0,
+                "achieved": combined_percentage,
             }
         )
 
@@ -581,6 +663,7 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
             "totalEmployerSurveyResponses": total_employer_responses,
         },
         "employmentStats": _build_alumni_employment_stats(batch, cycle),
+        "employerComments": _build_employer_comments(employer_cycle),
         "indirectWeightConfig": {
             "alumniWeight": _to_float(weight_cfg.alumni_weight) or 50.0,
             "employerWeight": _to_float(weight_cfg.employer_weight) or 50.0,
@@ -598,4 +681,10 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
             }
             for row in matrix
         ],
+        "cqiSections": cqi_sections,
+        "signatures": {
+            "generatedBy": "System",
+            "hodApprovedBy": hod_approved_by,
+            "hodApprovedDate": hod_approved_date,
+        },
     }

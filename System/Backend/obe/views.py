@@ -1149,13 +1149,19 @@ class BatchGAReportView(APIView):
 
     def _get_readiness_for_cumulative_cohort(self, batch: Batch):
         # Only consider courses where semester number <= batch's current semester
+        from django.db.models import Q
         sessions = CourseSession.objects.filter(
             batch=batch,
             is_active=True,
             semester__number__lte=batch.current_semester,
         )
         courses_total = sessions.count()
-        courses_assessment_done = sessions.filter(assessment_status='ASSESSMENT_DONE').count()
+        done_filter = (
+            Q(assessment_status='ASSESSMENT_DONE')
+            | Q(final_submitted=True)
+            | Q(assessment_done=True)
+        )
+        courses_assessment_done = sessions.filter(done_filter).count()
 
         if courses_total == 0:
             return {
@@ -1168,7 +1174,7 @@ class BatchGAReportView(APIView):
         missing = []
         if courses_assessment_done < courses_total:
             # Identify missing courses by code for readability
-            missing_qs = sessions.exclude(assessment_status='ASSESSMENT_DONE')
+            missing_qs = sessions.exclude(done_filter)
             missing = list(missing_qs.values_list('course__code', flat=True).distinct())
 
         return {
@@ -1211,6 +1217,9 @@ class BatchGAReportView(APIView):
                 return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
             print("student_obj found:", student_obj)
         elif scope == 'all_students':
+            # Cohort roster comes from course-session score linkage through
+            # get_students_for_batch, not live student.batch, so frozen/rejoined
+            # students remain visible in the batch where their marks were earned.
             student_objs = list(get_students_for_batch(batch))
             print("student_objs count:", len(student_objs))
 
@@ -1251,7 +1260,9 @@ class BatchGAReportView(APIView):
                     'registration_number': student_obj.registration_number,
                     'ga_scores': student_ga_scores,
                     'is_dropped': not user.is_active,
-                    'is_frozen': False
+                    'is_frozen': student_obj.is_frozen,
+                    'frozen_at_semester': student_obj.frozen_at_semester,
+                    'frozen_date': student_obj.frozen_date,
                 })
             
             # Calculate cohort-level summary for footer
@@ -1559,7 +1570,7 @@ class CourseCLOReportView(APIView):
             print(f"DEBUG: Assessment - {a.id}, {a.title}")
         
         # Pre-fetch all relevant data FIRST (like CLOService does)
-        students = list(Student.objects.filter(user__batch=session.batch))
+        students = list(get_students_for_batch(session.batch))
         questions = list(
             Question.objects.filter(assessment__in=assessments)
             .select_related('assessment', 'clo')

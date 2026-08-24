@@ -1180,7 +1180,11 @@ class EmployerSurveyPublicView(APIView):
 
     def post(self, request, token):
         try:
-            result = submit_employer_survey_by_token(str(token), request.data.get('answers', []))
+            result = submit_employer_survey_by_token(
+                str(token),
+                request.data.get('answers', []),
+                request.data.get('additional_feedback'),
+            )
             return Response(result, status=status.HTTP_201_CREATED)
         except LookupError as exc:
             return Response({'message': str(exc)}, status=status.HTTP_404_NOT_FOUND)

@@ -28,6 +28,9 @@ class StudentSerializer(serializers.ModelSerializer):
     promotion_status = serializers.CharField(source='user.promotion_status', read_only=True)
     batch_start_year = serializers.IntegerField(source='user.batch.start_year', read_only=True, allow_null=True)
     batch_end_year = serializers.IntegerField(source='user.batch.end_year', read_only=True, allow_null=True)
+    original_batch_id = serializers.UUIDField(source='original_batch.id', read_only=True, allow_null=True)
+    original_batch_name = serializers.CharField(source='original_batch.name', read_only=True, allow_null=True)
+    is_freezable = serializers.SerializerMethodField()
     courses = serializers.SerializerMethodField()
 
     class Meta:
@@ -38,15 +41,53 @@ class StudentSerializer(serializers.ModelSerializer):
             'gender', 'blood_group', 'guardian_name', 'guardian_contact', 'address',
             'user_email', 'full_name', 'role', 'batch_id', 'batch_name', 'program_id', 
             'program_name', 'program_code', 'current_semester', 'batch_current_semester',
-            'promotion_status', 'batch_start_year', 'batch_end_year', 'image', 'courses'
+            'promotion_status', 'batch_start_year', 'batch_end_year', 'image',
+            'is_frozen', 'is_freezable', 'frozen_at_semester', 'frozen_date',
+            'original_batch', 'original_batch_id', 'original_batch_name', 'courses'
         ]
-        read_only_fields = ['student_id', 'name']
+        read_only_fields = [
+            'student_id', 'name', 'is_frozen', 'frozen_at_semester',
+            'frozen_date', 'original_batch'
+        ]
+
+    def get_is_freezable(self, obj):
+        user = getattr(obj, 'user', None)
+        batch = obj.batch or getattr(user, 'batch', None)
+        current_semester = getattr(user, 'current_semester', None)
+        if not batch or not current_semester:
+            return False
+
+        from assessments.models import Assessment
+        from obe.models import CourseSession
+
+        sessions = CourseSession.objects.filter(
+            batch=batch,
+            semester__number=current_semester,
+            is_active=True,
+        ).select_related('course', 'semester')
+        sessions = list(sessions)
+        if not sessions:
+            return False
+
+        return all(
+            Assessment.objects.filter(
+                course=session.course,
+                batch=batch,
+                semester=session.semester,
+                assessment_type='final',
+                course_retake__isnull=True,
+                is_finalized=True,
+                is_locked=True,
+            ).exists()
+            for session in sessions
+        )
 
     def get_courses(self, obj):
-        if not obj.user or not obj.user.batch or not obj.user.batch.curriculum_version:
+        batch = obj.batch or (obj.user.batch if obj.user else None)
+        if not batch or not batch.curriculum_version:
             return []
         
-        version = obj.user.batch.curriculum_version
+        version = batch.curriculum_version
         # Get ALL courses from the curriculum version, not just current semester
         courses = version.version_courses.all()
         
@@ -96,6 +137,7 @@ class StudentSerializer(serializers.ModelSerializer):
             user=user,
             name=full_name,
             custom_id=registration_number, # Ensure Student custom_id matches Reg Num
+            batch=batch,
             **validated_data
         )
         
@@ -131,6 +173,7 @@ class StudentSerializer(serializers.ModelSerializer):
             
         if batch:
             user.batch = batch
+            instance.batch = batch
             user_updated = True
             
         if user_updated:
@@ -144,3 +187,4 @@ class StudentSerializer(serializers.ModelSerializer):
             user.save(update_fields=['custom_id'])
 
         return super().update(instance, validated_data)
+

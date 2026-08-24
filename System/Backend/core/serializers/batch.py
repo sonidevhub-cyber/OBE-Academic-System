@@ -64,8 +64,16 @@ class BatchCreateSerializer(serializers.ModelSerializer):
 
 
 from core.models.program import Program
+from core.models.department import Department
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = ['id', 'name', 'code']
 
 class ProgramSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
+
     class Meta:
         model = Program
         fields = "__all__"
@@ -191,20 +199,362 @@ class BatchListSerializer(serializers.ModelSerializer):
         return round((responses / total) * 100, 2)
 
 
-class BatchFrameworkSnapshotSerializer(serializers.ModelSerializer):
-    program_id = serializers.CharField(source='program.id', read_only=True)
-    program_name = serializers.CharField(source='program.name', read_only=True)
+class BatchFrameworkSnapshotSerializer(serializers.Serializer):
+    """Read-only serializer transforming stored batch JSON snapshots into the flat
+    format consumed by the frontend.
 
-    class Meta:
-        model = Batch
-        fields = [
-            'id',
-            'custom_id',
-            'name',
-            'program_id',
-            'program_name',
-            'created_at',
-            'peo_snapshot',
-            'vision_mission_snapshot',
+    Storage shape (Batch.peo_snapshot / ga_snapshot / vision_mission_snapshot):
+      nested dicts with metadata keys like "program_id", "captured_*_count",
+      "peos"/"gas"/"vision"/"mission" sub-collections.
+
+    Response shape matches the frontend FrameworkSnapshotResponse interface:
+      { batch_id, batch_name, program_id, program_name, snapshot_locked_date,
+        is_locked, peo_snapshot: [...], ga_snapshot: [...],
+        vision_mission_snapshot: [...] }
+    """
+
+    batch_id = serializers.CharField()
+    batch_name = serializers.CharField()
+    program_id = serializers.CharField()
+    program_name = serializers.CharField()
+    program = serializers.CharField()
+    status = serializers.CharField()
+    snapshot_locked_date = serializers.DateTimeField(allow_null=True)
+    is_locked = serializers.BooleanField()
+    peo_snapshot = serializers.ListField()
+    ga_snapshot = serializers.ListField()
+    vision_mission_snapshot = serializers.ListField()
+    ga_peo_mappings = serializers.ListField()
+    po_keyword_mappings = serializers.ListField()
+    vision_mission_mappings = serializers.ListField()
+
+    def _text_value(self, value):
+        if isinstance(value, dict):
+            return value.get("text") or value.get("label") or value.get("name") or ""
+        return value or ""
+
+    def _mapping_text(self, mapping, *keys):
+        for key in keys:
+            value = self._text_value(mapping.get(key))
+            if value:
+                return value
+        return None
+
+    def to_representation(self, batch):
+        stored_peo = batch.peo_snapshot or {}
+        stored_ga = batch.ga_snapshot or {}
+        stored_vm = batch.vision_mission_snapshot or {}
+
+        raw_peos = stored_peo.get("peos", []) if isinstance(stored_peo, dict) else []
+        peo_snapshot = [
+            {
+                "id": str(po.get("id")),
+                "order_number": int(po.get("order_number", 0)),
+                "title": po.get("title") or None,
+                "description": po.get("description", ""),
+                "kpi_threshold": float(po.get("kpi_threshold") or 0),
+                "is_active": bool(po.get("is_active", True)),
+                "ga_mappings": po.get("ga_mappings", []) or [],
+                "keyword_mappings": po.get("keyword_mappings", []) or [],
+            }
+            for po in raw_peos
         ]
-        read_only_fields = fields
+
+        raw_gas = stored_ga.get("gas", []) if isinstance(stored_ga, dict) else []
+        ga_snapshot = [
+            {
+                "id": str(ga.get("id")),
+                "order_number": int(ga.get("order_number", 0)),
+                "code": ga.get("code") or f"GA-{ga.get('order_number', 0)}",
+                "title": ga.get("title", ""),
+                "description": ga.get("description", ""),
+                "kpi_threshold": float(ga.get("kpi_threshold") or 0),
+                "is_active": bool(ga.get("is_active", True)),
+            }
+            for ga in raw_gas
+        ]
+
+        if not ga_snapshot and raw_peos:
+            ga_ids = {
+                str(mapping.get("ga_id"))
+                for po in raw_peos
+                for mapping in (po.get("ga_mappings", []) or [])
+                if mapping.get("ga_id")
+            }
+            live_ga_by_id = {}
+            if ga_ids:
+                try:
+                    from obe.models import GA
+
+                    live_ga_by_id = {
+                        str(ga.id): ga
+                        for ga in GA.objects.filter(id__in=ga_ids, program=batch.program, is_active=True)
+                    }
+                except Exception:
+                    live_ga_by_id = {}
+
+            seen_ga_ids = set()
+            for po in raw_peos:
+                for mapping in po.get("ga_mappings", []) or []:
+                    ga_id = str(mapping.get("ga_id") or "")
+                    if not ga_id or ga_id in seen_ga_ids:
+                        continue
+                    seen_ga_ids.add(ga_id)
+                    live_ga = live_ga_by_id.get(ga_id)
+                    raw_code = mapping.get("ga_code") or ""
+                    order_number = getattr(live_ga, "order_number", None)
+                    if order_number is None and raw_code.upper().startswith("GA-"):
+                        try:
+                            order_number = int(raw_code.split("-", 1)[1])
+                        except (TypeError, ValueError, IndexError):
+                            order_number = 0
+                    ga_snapshot.append({
+                        "id": ga_id,
+                        "order_number": int(order_number or 0),
+                        "code": raw_code or f"GA-{order_number or ''}".strip(),
+                        "title": getattr(live_ga, "title", "") if live_ga else "",
+                        "description": getattr(live_ga, "description", "") if live_ga else "",
+                        "kpi_threshold": float(getattr(live_ga, "kpi_threshold", 0) or 0),
+                        "is_active": True,
+                    })
+
+        vision = stored_vm.get("vision", {}) if isinstance(stored_vm, dict) else {}
+        mission = stored_vm.get("mission", {}) if isinstance(stored_vm, dict) else {}
+        vision_mission_snapshot = []
+        if vision:
+            vision_mission_snapshot.append({
+                "id": vision.get("id"),
+                "statement_type": "VISION",
+                "statement": vision.get("vision_text", ""),
+                "keywords": vision.get("keywords", []) or [],
+            })
+        if mission:
+            vision_mission_snapshot.append({
+                "id": mission.get("id"),
+                "statement_type": "MISSION",
+                "statement": mission.get("mission_text", ""),
+                "keywords": mission.get("keywords", []) or [],
+            })
+
+        peo_by_id = {po.get("id"): po for po in peo_snapshot}
+        ga_by_id = {ga.get("id"): ga for ga in ga_snapshot}
+        ga_peo_mappings = []
+        po_keyword_mappings = []
+        for po in peo_snapshot:
+            po_label = f"PO-{po.get('order_number', 0)}"
+            for mapping in po.get("ga_mappings", []) or []:
+                ga = ga_by_id.get(str(mapping.get("ga_id")))
+                ga_peo_mappings.append({
+                    "id": mapping.get("mapping_id"),
+                    "po_id": po.get("id"),
+                    "po_code": po_label,
+                    "po_title": po.get("title"),
+                    "ga_id": mapping.get("ga_id"),
+                    "ga_code": mapping.get("ga_code") or (ga.get("code") if ga else ""),
+                    "ga_title": ga.get("title") if ga else "",
+                    "weight": mapping.get("weight"),
+                })
+            for mapping in po.get("keyword_mappings", []) or []:
+                po_keyword_mappings.append({
+                    "id": mapping.get("mapping_id"),
+                    "po_id": mapping.get("peo_id") or po.get("id"),
+                    "po_code": po_label,
+                    "po_title": po.get("title"),
+                    "mission_keyword": self._mapping_text(mapping, "mission_keyword", "mission_keyword_text"),
+                    "vision_keyword": self._mapping_text(mapping, "vision_keyword", "vision_keyword_text"),
+                })
+
+        raw_vision_mission_mappings = stored_vm.get("vision_mission_mappings", []) if isinstance(stored_vm, dict) else []
+        if not raw_vision_mission_mappings:
+            vision_keyword_ids = [
+                keyword.get("id")
+                for keyword in (vision.get("keywords", []) or [])
+                if isinstance(keyword, dict) and keyword.get("id")
+            ]
+            mission_keyword_ids = [
+                keyword.get("id")
+                for keyword in (mission.get("keywords", []) or [])
+                if isinstance(keyword, dict) and keyword.get("id")
+            ]
+            if vision_keyword_ids and mission_keyword_ids:
+                try:
+                    from obe.models import VisionMissionMapping
+
+                    raw_vision_mission_mappings = [
+                        {
+                            "mapping_id": str(mapping.id),
+                            "mission_keyword_id": str(mapping.mission_keyword_id),
+                            "mission_keyword": mapping.mission_keyword.text,
+                            "vision_keyword_id": str(mapping.vision_keyword_id),
+                            "vision_keyword": mapping.vision_keyword.text,
+                        }
+                        for mapping in VisionMissionMapping.objects.filter(
+                            mission_keyword_id__in=mission_keyword_ids,
+                            vision_keyword_id__in=vision_keyword_ids,
+                            is_active=True,
+                        ).select_related("mission_keyword", "vision_keyword")
+                    ]
+                except Exception:
+                    raw_vision_mission_mappings = []
+        vision_mission_mappings = [
+            {
+                "mapping_id": mapping.get("mapping_id") or mapping.get("id"),
+                "mission_keyword_id": mapping.get("mission_keyword_id") or mapping.get("mission_keyword"),
+                "mission_keyword": self._mapping_text(mapping, "mission_keyword_text", "mission_keyword"),
+                "vision_keyword_id": mapping.get("vision_keyword_id") or mapping.get("vision_keyword"),
+                "vision_keyword": self._mapping_text(mapping, "vision_keyword_text", "vision_keyword"),
+            }
+            for mapping in raw_vision_mission_mappings
+        ]
+
+        has_data = bool(peo_snapshot or ga_snapshot or vision_mission_snapshot)
+
+        return {
+            "batch_id": str(batch.id),
+            "batch_name": batch.name,
+            "program_id": str(batch.program_id),
+            "program_name": getattr(batch.program, "name", ""),
+            "program": getattr(batch.program, "name", ""),
+            "status": batch.status,
+            "snapshot_locked_date": batch.created_at,
+            "is_locked": has_data,
+            "peo_snapshot": peo_snapshot,
+            "ga_snapshot": ga_snapshot,
+            "vision_mission_snapshot": vision_mission_snapshot,
+            "ga_peo_mappings": ga_peo_mappings,
+            "po_keyword_mappings": po_keyword_mappings,
+            "vision_mission_mappings": vision_mission_mappings,
+        }
+
+
+class DossierListSerializer(serializers.Serializer):
+    """Lightweight batch listing for the HOD Batch Dossier Vault UI."""
+
+    id = serializers.CharField()
+    name = serializers.CharField()
+    program_id = serializers.CharField()
+    program_name = serializers.CharField()
+    start_year = serializers.IntegerField()
+    end_year = serializers.IntegerField()
+    status = serializers.CharField()
+    is_active = serializers.BooleanField()
+    current_semester = serializers.IntegerField(allow_null=True)
+    has_snapshot = serializers.BooleanField()
+    snapshot_locked_date = serializers.DateTimeField(allow_null=True)
+
+    def to_representation(self, batch):
+        stored_peo = batch.peo_snapshot or {}
+        stored_ga = batch.ga_snapshot or {}
+        stored_vm = batch.vision_mission_snapshot or {}
+        has_peo = bool(stored_peo.get("peos")) if isinstance(stored_peo, dict) else bool(stored_peo)
+        has_ga = bool(stored_ga.get("gas")) if isinstance(stored_ga, dict) else bool(stored_ga)
+        has_vm = bool(stored_vm)
+        return {
+            "id": str(batch.id),
+            "name": batch.name,
+            "program_id": str(batch.program_id),
+            "program_name": getattr(batch.program, "name", ""),
+            "start_year": batch.start_year,
+            "end_year": batch.end_year,
+            "status": batch.status,
+            "is_active": bool(batch.is_active),
+            "current_semester": batch.current_semester,
+            "has_snapshot": has_peo or has_ga or has_vm,
+            "snapshot_locked_date": batch.created_at if (has_peo or has_ga or has_vm) else None,
+        }
+
+
+class BatchStructureSerializer(BatchFrameworkSnapshotSerializer):
+    """Shared read-only batch structure response for HOD and Coordinator views."""
+
+    courses = serializers.ListField()
+
+    def _get_courses(self, batch):
+        from collections import defaultdict
+
+        from django.db.models import Prefetch
+
+        from obe.models import CLO, CLOGAMapping, CourseSession
+
+        semester_number = self.context.get("semester")
+        sessions = (
+            CourseSession.objects
+            .filter(batch=batch, is_active=True)
+            .select_related("course", "semester")
+            .order_by("semester__number", "course__code", "course__name")
+        )
+        if semester_number is not None:
+            sessions = sessions.filter(semester__number=semester_number)
+
+        sessions = list(sessions)
+        course_ids = [session.course_id for session in sessions if session.course_id]
+        version_id = getattr(batch, "curriculum_version_id", None)
+
+        clos = CLO.objects.filter(
+            course_id__in=course_ids,
+            is_active=True,
+        ).order_by("course_id", "order_number")
+        if version_id:
+            clos = clos.filter(curriculum_version_id=version_id)
+        else:
+            clos = clos.filter(curriculum_version__isnull=True)
+
+        mapping_qs = (
+            CLOGAMapping.objects
+            .filter(is_active=True)
+            .select_related("ga")
+            .order_by("ga__order_number")
+        )
+        clos = clos.prefetch_related(Prefetch("ga_mappings", queryset=mapping_qs))
+
+        clos_by_course = defaultdict(list)
+        for clo in clos:
+            clos_by_course[str(clo.course_id)].append(clo)
+
+        course_rows = []
+        seen_courses = set()
+        for session in sessions:
+            course = session.course
+            if not course or str(course.id) in seen_courses:
+                continue
+            seen_courses.add(str(course.id))
+            course_rows.append({
+                "course_id": str(course.id),
+                "course_name": course.name,
+                "course_code": course.code,
+                "semester_number": getattr(session.semester, "number", None),
+                "clos": [
+                    {
+                        "clo_id": str(clo.id),
+                        "clo_number": f"CLO-{clo.order_number}",
+                        "title": clo.title or clo.description or "",
+                        "mapped_gas": [
+                            {
+                                "ga_id": str(mapping.ga_id),
+                                "ga_title": getattr(mapping.ga, "title", ""),
+                                "ga_code": getattr(mapping.ga, "code", None) or f"GA-{getattr(mapping.ga, 'order_number', '')}",
+                            }
+                            for mapping in clo.ga_mappings.all()
+                            if mapping.ga_id
+                        ],
+                    }
+                    for clo in clos_by_course.get(str(course.id), [])
+                ],
+            })
+
+        return course_rows
+
+    def to_representation(self, batch):
+        data = super().to_representation(batch)
+        return {
+            "batch_id": data["batch_id"],
+            "batch_name": data["batch_name"],
+            "snapshot_locked_date": data["snapshot_locked_date"],
+            "ga_peo_mappings": data["ga_peo_mappings"],
+            "ga_snapshot": data["ga_snapshot"],
+            "peo_snapshot": data["peo_snapshot"],
+            "vision_mission_snapshot": data["vision_mission_snapshot"],
+            "po_keyword_mappings": data["po_keyword_mappings"],
+            "vision_mission_mappings": data["vision_mission_mappings"],
+            "courses": self._get_courses(batch),
+        }

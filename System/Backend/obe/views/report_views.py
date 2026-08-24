@@ -9,7 +9,7 @@ from curriculum.models import CurriculumVersion
 from students.models import Student
 from assessments.models import Assessment, Question, StudentQuestionMark, CQI
 from ..models import CourseSession, CLO, GACQIRecord, PEOCQIRecord, VisionMissionCQI, VisionMissionCQIRecord
-from ..services import get_teacher_ga_context
+from ..services import get_teacher_ga_context, get_students_for_batch
 
 
 class TeacherGAContextView(APIView):
@@ -206,7 +206,7 @@ class CourseCLOReportView(APIView):
             print(f"DEBUG: Assessment - {a.id}, {a.title}")
         
         # Pre-fetch all relevant data FIRST (like CLOService does)
-        students = list(Student.objects.filter(user__batch=session.batch))
+        students = list(get_students_for_batch(session.batch))
         questions = list(
             Question.objects.filter(assessment__in=assessments)
             .select_related('assessment', 'clo')

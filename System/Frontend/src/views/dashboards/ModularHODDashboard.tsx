@@ -48,7 +48,9 @@ import {
   FileSpreadsheet,
   GraduationCap,
   MessageSquare,
+  Archive,
 } from 'lucide-react';
+import HODBatchStructureView from '../modules/hod/HODBatchStructureView';
 
 type TabId =
   | 'dashboard'
@@ -74,7 +76,8 @@ type TabId =
   | 'alumni-feedback'
   | 'peo-cqi'
   | 'vision-mission-cqi'
-  | 'cqi-closing-advisory';
+  | 'cqi-closing-advisory'
+  | 'batch-dossier';
 
 interface GaSeriesItem {
   label: string;
@@ -199,6 +202,7 @@ const ModularHODDashboard: React.FC = () => {
 
   const mainItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'batch-dossier', label: 'Batch Structure', icon: Archive },
     { id: 'notice', label: 'Notice Board', icon: Bell },
     { id: 'result-editing', label: 'Result lock', icon: Settings },
   ];
@@ -581,6 +585,9 @@ const ModularHODDashboard: React.FC = () => {
 
       case 'result-editing':
         return <EnableResultEditing />;
+
+      case 'batch-dossier':
+        return <HODBatchStructureView />;
 
       default:
         return <div>Content for {activeTab}</div>;

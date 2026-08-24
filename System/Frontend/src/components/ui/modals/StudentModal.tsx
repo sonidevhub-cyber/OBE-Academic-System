@@ -311,7 +311,13 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     } catch (error: any) {
       console.error('Error submitting form:', error);
       console.error('Error response:', error.response?.data);
-      setError(error.response?.data?.message || error.response?.data?.error || 'Failed to save student');
+      const responseData = error.response?.data;
+      const fieldErrors = responseData && typeof responseData === 'object'
+        ? Object.entries(responseData)
+            .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(', ') : String(messages)}`)
+            .join(' ')
+        : '';
+      setError(responseData?.message || responseData?.error || fieldErrors || 'Failed to save student');
     } finally {
       setIsLoading(false);
     }

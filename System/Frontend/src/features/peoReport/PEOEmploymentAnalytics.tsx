@@ -167,8 +167,23 @@ const PEOEmploymentAnalytics: React.FC<PEOEmploymentAnalyticsProps> = ({ stats }
               No employer data available yet.
             </div>
           ) : (
-            <div className="h-[320px]">
-              <Bar data={barData} options={barOptions} />
+            <div className="space-y-4">
+              <div className="h-[260px]">
+                <Bar data={barData} options={barOptions} />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {stats.topEmployers.map((item) => (
+                  <div
+                    key={item.name}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700"
+                  >
+                    <span className="min-w-0 truncate">{item.name}</span>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-black text-slate-900">
+                      {item.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

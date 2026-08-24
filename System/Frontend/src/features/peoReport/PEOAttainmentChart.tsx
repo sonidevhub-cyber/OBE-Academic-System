@@ -21,7 +21,7 @@ interface PEOAttainmentChartProps {
 
 const PEOAttainmentChart = forwardRef<ChartJS<'bar'> | undefined, PEOAttainmentChartProps>(
   ({ chartData }, ref) => {
-    const peoLabels = chartData.map((_, index) => `PEO ${index + 1}`);
+    const peoLabels = chartData.map((_, index) => `PO ${index + 1}`);
 
     const data: ChartData<'bar'> = {
       labels: peoLabels,
@@ -58,7 +58,7 @@ const PEOAttainmentChart = forwardRef<ChartJS<'bar'> | undefined, PEOAttainmentC
         },
         title: {
           display: true,
-          text: 'PEO Attainment vs Target',
+          text: 'PO Attainment vs Target',
         },
       },
       scales: {

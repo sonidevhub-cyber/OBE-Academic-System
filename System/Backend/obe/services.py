@@ -55,18 +55,34 @@ def get_students_for_batch(batch: Batch):
     """
     Return students that should count toward a batch report.
 
-    Retake students can remain attached to their original user.batch / student.batch
-    while still participating in a retake for the target batch, so we include them
-    via the retake relation too.
+    Cohort reports are anchored to the batch where course-session assessment
+    data was recorded, not the student's current/live batch. This preserves a
+    frozen student's pre-rejoin work in the original cohort after their live
+    batch changes. If no course-session scores exist yet, fall back to current
+    membership so in-progress rosters still render before marks are entered.
     """
+    scored_student_ids = StudentCLOScore.objects.filter(
+        course_session__batch=batch,
+        course_session__is_active=True,
+        is_active=True,
+    ).values_list('student_id', flat=True).distinct()
+
+    if scored_student_ids.exists():
+        return (
+            Student.objects.filter(student_id__in=scored_student_ids, user__is_active=True)
+            .select_related('user', 'batch', 'original_batch')
+            .distinct()
+        )
+
     return (
         Student.objects.filter(
             Q(user__batch=batch)
             | Q(batch=batch)
+            | Q(original_batch=batch, is_frozen=True)
             | Q(retakes__current_batch=batch, retakes__is_active=True),
             user__is_active=True,
         )
-        .select_related('user')
+        .select_related('user', 'batch', 'original_batch')
         .distinct()
     )
 
@@ -715,7 +731,13 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
             session for session in course_sessions
             if str(session.course_id) in allowed_course_ids
         ]
-    course_sessions = [session for session in course_sessions if session.semester_id and session.semester.number <= batch.current_semester]
+    course_sessions = [
+        session for session in course_sessions
+        if (
+            session.semester_id
+            and session.semester.number <= batch.current_semester
+        )
+    ]
 
     # Fetch all relevant mappings in one query and group by course session
     session_ids = [cs.id for cs in course_sessions]
@@ -758,9 +780,8 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
             student_clo_score = scores_by_key.get(key)
             
             if student_clo_score:
-                contribution = student_clo_score.attainment * mapping.weight
-                total_attainment += contribution
-                total_weight += mapping.weight
+                total_attainment += Decimal(str(student_clo_score.attainment)) * Decimal(str(mapping.weight))
+                total_weight += Decimal(str(mapping.weight))
 
     if total_weight == 0:
         return None
@@ -1318,7 +1339,7 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
 
     gas = GA.objects.filter(program=batch.program, is_active=True)
     reports = []
-    total_eligible_students = Student.objects.filter(batch=batch).count()
+    total_eligible_students = get_students_for_batch(batch).count()
     target_curriculum_version = batch.curriculum_version
 
     course_sessions = get_effective_course_sessions(
@@ -1504,7 +1525,9 @@ def calculate_exit_survey_ga_score(ga, batch):
     """
     responses = ExitSurveyResponse.objects.filter(
         question__ga=ga,
-        student__batch=batch,
+        # Exit survey is a cohort-level source; anchor it to the survey cycle's
+        # batch rather than the student's current/live batch after rejoin.
+        cycle__batch=batch,
         question__is_active=True
     )
     if not responses.exists():
@@ -1515,7 +1538,7 @@ def calculate_exit_survey_ga_score(ga, batch):
     
     from django.contrib.auth import get_user_model
     User = get_user_model()
-    total_eligible = User.objects.filter(batch=batch, role='student', is_active=True).count()
+    total_eligible = get_students_for_batch(batch).count()
     respondent_count = responses.values('student').distinct().count()
     coverage_percent = round((Decimal(str(respondent_count)) / Decimal(str(total_eligible))) * 100, 2) if total_eligible > 0 else Decimal('0')
     
@@ -1880,7 +1903,11 @@ def dispatch_employer_survey_emails(employer_cycle_id: str, request=None, fronte
     }
 
 
-def submit_employer_survey_by_token(response_token: str, answers_payload: list[dict]):
+def submit_employer_survey_by_token(
+    response_token: str,
+    answers_payload: list[dict],
+    additional_feedback: str | None = None,
+):
     """
     Public (non-auth) submission path for Employer Survey.
 
@@ -1974,7 +2001,8 @@ def submit_employer_survey_by_token(response_token: str, answers_payload: list[d
         resp.submitted_at = timezone.now()
         resp.token_used_at = timezone.now()
         resp.is_active = False
-        resp.save(update_fields=["submitted_at", "token_used_at", "is_active", "updated_at"])
+        resp.additional_feedback = str(additional_feedback or "").strip() or None
+        resp.save(update_fields=["submitted_at", "token_used_at", "is_active", "additional_feedback", "updated_at"])
 
     return {
         "response_id": str(resp.id),

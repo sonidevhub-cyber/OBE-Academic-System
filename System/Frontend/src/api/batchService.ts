@@ -34,6 +34,7 @@ export interface BatchCreateData {
 export interface BatchFlat {
     id: string;
     name: string;
+    program?: any;
     program_name: string;
     program_id: string;
     start_year?: number;
@@ -43,6 +44,96 @@ export interface BatchFlat {
     student_count?: number;
     status?: 'active' | 'graduated';
     has_curriculum?: boolean;
+    curriculum_version_id?: string | number | null;
+    curriculum_version_no?: string | null;
+}
+
+export interface BatchStructureGA {
+    id: string;
+    order_number?: number;
+    code?: string;
+    title: string;
+    description?: string;
+    kpi_threshold?: number;
+    is_active?: boolean;
+}
+
+export interface BatchStructurePEO {
+    id: string;
+    order_number?: number;
+    title?: string | null;
+    description: string;
+    kpi_threshold?: number;
+    is_active?: boolean;
+    ga_mappings?: Array<{
+        ga_id?: string;
+        ga_code?: string;
+        weight?: number | string;
+    }>;
+    keyword_mappings?: BatchStructurePOKeywordMapping[];
+}
+
+export interface BatchStructureVisionMission {
+    id?: string;
+    statement_type: 'VISION' | 'MISSION' | string;
+    statement: string;
+    keywords?: Array<{ id?: string; text?: string } | string>;
+}
+
+export interface BatchStructureCourse {
+    course_id: string;
+    course_name: string;
+    course_code?: string;
+    semester_number?: number | null;
+    clos: Array<{
+        clo_id: string;
+        clo_number: string;
+        title: string;
+        mapped_gas: Array<{
+            ga_id: string;
+            ga_title: string;
+            ga_code?: string;
+        }>;
+    }>;
+}
+
+export interface BatchStructureResponse {
+    batch_id: string;
+    batch_name: string;
+    snapshot_locked_date: string | null;
+    ga_snapshot: BatchStructureGA[];
+    peo_snapshot: BatchStructurePEO[];
+    vision_mission_snapshot: BatchStructureVisionMission[];
+    ga_peo_mappings?: Array<{
+        id?: string | null;
+        po_id?: string | null;
+        po_code: string;
+        po_title?: string | null;
+        ga_id?: string | null;
+        ga_code: string;
+        ga_title?: string | null;
+        weight?: string | number | null;
+    }>;
+    po_keyword_mappings?: BatchStructurePOKeywordMapping[];
+    vision_mission_mappings?: Array<{
+        mapping_id?: string | null;
+        mission_keyword_id?: string | null;
+        mission_keyword?: string | null;
+        vision_keyword_id?: string | null;
+        vision_keyword?: string | null;
+    }>;
+    courses: BatchStructureCourse[];
+}
+
+export interface BatchStructurePOKeywordMapping {
+    id?: string | null;
+    mapping_id?: string | null;
+    po_id?: string | null;
+    peo_id?: string | null;
+    po_code?: string;
+    po_title?: string | null;
+    mission_keyword?: string | null;
+    vision_keyword?: string | null;
 }
 
 const batchService = {
@@ -69,8 +160,13 @@ const batchService = {
     deleteBatch: (programId: string, batchId: string) => 
         api.delete<{ success: boolean }>(`programs/${programId}/batches/${batchId}/delete/`),
 
-    getAllBatches: () => 
-        api.get<BatchFlat[]>('batches/all/'),
+    getAllBatches: (params?: { alumni_feedback?: 'all' | string; program?: string }) => 
+        api.get<BatchFlat[]>('batches/all/', { params }),
+
+    getBatchStructure: (batchId: string, semester?: number | string) =>
+        api.get<BatchStructureResponse>(`batches/${batchId}/structure/`, {
+            params: semester ? { semester } : undefined,
+        }),
 };
 
 export default batchService;

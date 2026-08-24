@@ -655,9 +655,7 @@ const AlumniSurvey: React.FC = () => {
                             </span>
                           );
                         }
-                        const peoLabel = question.peo_title
-                          ? `PEO ${(question as any).peo_order_number ? `${(question as any).peo_order_number} · ` : ''}${question.peo_title}`
-                          : 'PEO';
+                        const peoLabel = question.peo_title || 'Program Outcome';
                         return (
                           <span className="bg-[#F7C948]/10 text-[#F7C948] px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] border border-[#F7C948]/20 flex items-center gap-2">
                             <Award className="w-3 h-3" />

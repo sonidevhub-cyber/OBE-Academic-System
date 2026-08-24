@@ -129,9 +129,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
               {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
             
-            <div className="mt-6 text-center">
-              <button type="button" className="text-blue-600 hover:text-blue-800 text-sm font-medium">Forgot Password?</button>
-            </div>
           </form>
         </div>
       </div>

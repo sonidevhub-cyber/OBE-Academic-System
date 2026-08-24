@@ -14,6 +14,7 @@ def populate_batch_framework_snapshot(batch):
     calls it before the insert, so the snapshot is written atomically with the row.
     """
     from .models import (
+        GA,
         GAPEOMapping,
         Mission,
         MissionKeyword,
@@ -32,6 +33,11 @@ def populate_batch_framework_snapshot(batch):
         .order_by("order_number")
     )
     peo_ids = [peo.id for peo in peos]
+
+    gas = list(
+        GA.objects.filter(program=program, is_active=True)
+        .order_by("order_number")
+    )
 
     ga_mappings_by_peo = {}
     for mapping in (
@@ -72,10 +78,28 @@ def populate_batch_framework_snapshot(batch):
                 "title": peo.title,
                 "description": peo.description,
                 "kpi_threshold": _decimal(peo.kpi_threshold),
+                "is_active": bool(getattr(peo, "is_active", True)),
                 "ga_mappings": ga_mappings_by_peo.get(str(peo.id), []),
                 "keyword_mappings": keyword_mappings_by_peo.get(str(peo.id), []),
             }
             for peo in peos
+        ],
+    }
+
+    batch.ga_snapshot = {
+        "program_id": str(program.id),
+        "captured_ga_count": len(gas),
+        "gas": [
+            {
+                "id": str(ga.id),
+                "code": f"GA-{ga.order_number}",
+                "order_number": ga.order_number,
+                "title": ga.title,
+                "description": ga.description,
+                "kpi_threshold": _decimal(ga.kpi_threshold),
+                "is_active": bool(getattr(ga, "is_active", True)),
+            }
+            for ga in gas
         ],
     }
 

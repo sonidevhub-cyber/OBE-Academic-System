@@ -4,6 +4,7 @@ import { Save, BookOpen, User, Calendar, CheckCircle, XCircle, ChevronRight, Gra
 import { coordinatorService } from '../../../api/coordinatorService';
 import { useAllocations } from '../../../context/AllocationContext';
 import { toast } from 'react-hot-toast';
+import BatchFrameworkBanner from '../../../components/obe/BatchFrameworkBanner';
 
 const CourseAllocationBulkModule: React.FC = () => {
   const { fetchAllocations } = useAllocations();
@@ -413,6 +414,12 @@ const CourseAllocationBulkModule: React.FC = () => {
 
         </div>
       </div>
+
+      {/* Framework Snapshot Banner */}
+      <BatchFrameworkBanner
+        batchId={selectedBatch?.id || null}
+        batchName={selectedBatch?.name || null}
+      />
 
       {selectedBatch && selectedSemester && (
         <motion.div

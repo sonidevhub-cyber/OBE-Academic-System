@@ -65,6 +65,15 @@ class Batch(models.Model):
     )
     peo_snapshot = models.JSONField(default=dict, blank=True)
     vision_mission_snapshot = models.JSONField(default=dict, blank=True)
+    ga_snapshot = models.JSONField(default=dict, blank=True)
+    coordinator = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='coordinated_batches',
+        help_text='Program Coordinator responsible for this batch.',
+    )
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding

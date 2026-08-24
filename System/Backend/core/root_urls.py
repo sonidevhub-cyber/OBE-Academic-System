@@ -4,7 +4,7 @@ from django.urls import include, path
 # This project has a `core/urls/` package containing auth/user/program/etc.
 # Do NOT import from `core.urls` as a module.
 
-from core.views.batch import AllBatchesView
+from core.views.batch import AllBatchesView, BatchDossierListView
 from core.views.promotion import PendingTransfersView, EligibleBatchesView, TransferStudentView, FailFrozenStudentView
 from core.views.user import UserListCreateView
 
@@ -19,6 +19,7 @@ urlpatterns = [
 
     # FIX required endpoints expected by frontend (mount directly to exact paths)
     path('batches/all/', AllBatchesView.as_view()),
+    path('batches/dossier-list/', BatchDossierListView.as_view()),
     path('students/pending-transfers/', PendingTransfersView.as_view()),
     path('students/<uuid:pk>/eligible-batches/', EligibleBatchesView.as_view()),
     path('students/<uuid:pk>/transfer/', TransferStudentView.as_view()),

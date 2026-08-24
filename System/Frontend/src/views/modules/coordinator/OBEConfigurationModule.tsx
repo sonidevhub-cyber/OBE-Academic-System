@@ -37,8 +37,10 @@ import obeService, {
 import peoService, { GAPEOMatrixWithWeight } from '../../../api/peoService';
 import academicStructureService, { Program, Course } from '../../../api/academicStructureService';
 import { curriculumService, CurriculumVersion, CurriculumCourse } from '../../../api/curriculumService';
+import batchService, { BatchFlat, BatchStructureGA } from '../../../api/batchService';
 import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
+import CoordinatorBatchStructurePanel from './CoordinatorBatchStructurePanel';
 
 export type OBEMappingSubTabId = 'vision-mission' | 'peo' | 'ga' | 'vision-mission-map' | 'po-keywords' | 'ga-peo' | 'clo-pi';
 
@@ -84,6 +86,8 @@ const coerceWeight = (weight: number | string | null | undefined): number => {
 
 const roundToTwo = (value: number): number => Math.round(value * 100) / 100;
 
+const toId = (value: unknown) => (value === null || value === undefined ? '' : String(value));
+
 const splitEvenlyWithRounding = (ids: string[], total: number) => {
   const result = new Map<string, number>();
   if (ids.length === 0) return result;
@@ -117,6 +121,10 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [clos, setClos] = useState<any[]>([]);
+  const [batches, setBatches] = useState<BatchFlat[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+  const [selectedSemester, setSelectedSemester] = useState<number | ''>('');
+  const [batchStructureGas, setBatchStructureGas] = useState<BatchStructureGA[]>([]);
 
   // Vision & Mission State
   const [vision, setVision] = useState('');
@@ -212,6 +220,55 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     });
     return totals;
   }, [gaPeoMatrix]);
+
+  const selectedBatch = useMemo(
+    () => batches.find(batch => batch.id === selectedBatchId) || null,
+    [batches, selectedBatchId],
+  );
+
+  const availableSemesters = useMemo(() => {
+    const maxSemester = selectedBatch?.current_semester || selectedProgram?.total_semesters || 8;
+    return Array.from({ length: Math.max(1, Number(maxSemester) || 1) }, (_, index) => index + 1);
+  }, [selectedBatch, selectedProgram]);
+
+  const cloMatrixGas = useMemo(() => {
+    return batchStructureGas.length > 0 ? batchStructureGas : (cloPiMatrix?.gas || []);
+  }, [batchStructureGas, cloPiMatrix]);
+
+  const validBatchGaIds = useMemo(() => {
+    return new Set(batchStructureGas.map(ga => String(ga.id)));
+  }, [batchStructureGas]);
+
+  const versionOptions = useMemo(() => {
+    const map = new Map<string, CurriculumVersion>();
+    versions.forEach(version => map.set(toId(version.id), version));
+    if (selectedBatch?.curriculum_version_id) {
+      const batchVersionId = toId(selectedBatch.curriculum_version_id);
+      if (!map.has(batchVersionId)) {
+        map.set(batchVersionId, {
+          id: batchVersionId,
+          program: toId(selectedProgram?.id || selectedBatch.program_id || selectedBatch.program?.id),
+          program_name: selectedProgram?.name || selectedBatch.program_name || selectedBatch.program?.name || '',
+          curriculum_mode: 'complete',
+          current_semester: selectedBatch.current_semester || null,
+          version_no: selectedBatch.curriculum_version_no || `v${batchVersionId}`,
+          status: 'draft',
+          cloned_from: null,
+          cloned_from_version_no: null,
+          created_by: 0,
+          created_by_name: '',
+          activated_by: null,
+          activated_at: null,
+          created_at: '',
+          updated_at: '',
+          is_active: true,
+          total_courses: 0,
+          is_editable: true,
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [selectedBatch, selectedProgram, versions]);
 
   const isGaPeoMatrixValid = useMemo(() => {
     if (!gaPeoMatrix || gaPeoMatrix.gas.length === 0) return false;
@@ -353,10 +410,20 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
 
   const fetchInitialData = useCallback(async () => {
     try {
-      const res = await academicStructureService.getPrograms();
+      const [programRes, batchRes] = await Promise.all([
+        academicStructureService.getPrograms(),
+        batchService.getAllBatches(),
+      ]);
+      const res = programRes;
       setPrograms(res.data);
       if (res.data.length > 0) {
         setSelectedProgram(res.data[0]);
+      }
+      const batchList = Array.isArray(batchRes.data) ? batchRes.data : [];
+      setBatches(batchList);
+      if (batchList.length > 0) {
+        setSelectedBatchId(batchList[0].id);
+        setSelectedSemester(batchList[0].current_semester || 1);
       }
     } catch (error) {
       toast.error('Failed to load programs');
@@ -373,6 +440,39 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       loadVersions(selectedProgram.id);
     }
   }, [selectedProgram]);
+
+  useEffect(() => {
+    if (!selectedBatch || selectedSemester) return;
+    setSelectedSemester(selectedBatch.current_semester || 1);
+  }, [selectedBatch, selectedSemester]);
+
+  useEffect(() => {
+    if (!selectedBatch) return;
+
+    const batchProgramId = toId(selectedBatch.program_id || selectedBatch.program?.id);
+    if (batchProgramId && toId(selectedProgram?.id) !== batchProgramId) {
+      const nextProgram = programs.find(program => toId(program.id) === batchProgramId);
+      if (nextProgram) {
+        setSelectedProgram(nextProgram);
+      }
+    }
+
+    if (selectedBatch.curriculum_version_id) {
+      const batchVersionId = toId(selectedBatch.curriculum_version_id);
+      if (toId(selectedVersion?.id) !== batchVersionId) {
+        const matchedVersion = versionOptions.find(version => toId(version.id) === batchVersionId);
+        if (matchedVersion) {
+          setSelectedVersion(matchedVersion);
+        }
+      }
+    }
+  }, [programs, selectedBatch, selectedProgram, selectedVersion, versionOptions]);
+
+  useEffect(() => {
+    if (selectedCourse?.semester_number) {
+      setSelectedSemester(selectedCourse.semester_number);
+    }
+  }, [selectedCourse]);
 
   useEffect(() => {
     if (isHOD && selectedDepartmentId) {
@@ -541,8 +641,16 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       const versionData = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
       setVersions(versionData);
       if (versionData.length > 0) {
-        setSelectedVersion(versionData[0]);
-      } else {
+        const batchVersionId = toId(selectedBatch?.curriculum_version_id);
+        const matchedVersion = batchVersionId
+          ? versionData.find((version: CurriculumVersion) => toId(version.id) === batchVersionId)
+          : null;
+        setSelectedVersion(current => {
+          if (matchedVersion) return matchedVersion;
+          if (current && versionData.some((version: CurriculumVersion) => toId(version.id) === toId(current.id))) return current;
+          return versionData[0];
+        });
+      } else if (!selectedBatch?.curriculum_version_id) {
         setSelectedVersion(null);
       }
     } catch (error) {
@@ -1284,11 +1392,13 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
           toast.success('GA-PO mappings saved');
           loadGaPeoMatrix();
         } else {
-          const mappings = cloPiMatrix!.mappings.map((m: any) => ({
-            clo_id: (m.clo || m.clo_id)!,
-            ga_id: (m.ga || m.ga_id)!,
-            weight: m.weight || 3
-          }));
+          const mappings = cloPiMatrix!.mappings
+            .filter((m: any) => validBatchGaIds.size === 0 || validBatchGaIds.has(String(m.ga || m.ga_id)))
+            .map((m: any) => ({
+              clo_id: (m.clo || m.clo_id)!,
+              ga_id: (m.ga || m.ga_id)!,
+              weight: m.weight || 3
+            }));
           await obeService.saveCLOGAMappings(selectedCourse!.id, selectedVersion!.id, mappings);
           toast.success('CLO-GA mappings saved');
           loadCloGaMatrix();
@@ -1551,14 +1661,49 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
         {!isHOD && activeSubTab === 'clo-pi' && (
           <>
             <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Curriculum Version (Draft)</label>
-              <select 
-                value={selectedVersion?.id || ''} 
-                onChange={(e) => setSelectedVersion(versions.find(v => v.id === e.target.value) || null)}
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Batch</label>
+              <select
+                value={selectedBatchId}
+                onChange={(e) => {
+                  const nextBatch = batches.find(batch => batch.id === e.target.value) || null;
+                  setSelectedBatchId(e.target.value);
+                  setSelectedSemester(nextBatch?.current_semester || 1);
+                  setBatchStructureGas([]);
+                }}
                 className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
               >
-                {versions.length === 0 && <option value="">No Draft Versions</option>}
-                {versions.map(v => <option key={v.id} value={v.id}>{v.version_no}</option>)}
+                <option value="">Select Batch</option>
+                {batches
+                  .filter(batch => !selectedProgram || String(batch.program_id || batch.program?.id || '') === String(selectedProgram.id))
+                  .map(batch => (
+                    <option key={batch.id} value={batch.id}>
+                      {batch.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Semester</label>
+              <select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value ? Number(e.target.value) : '')}
+                className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">All</option>
+                {availableSemesters.map(semester => (
+                  <option key={semester} value={semester}>Semester {semester}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Curriculum Version</label>
+              <select 
+                value={selectedVersion?.id || ''} 
+                onChange={(e) => setSelectedVersion(versionOptions.find(v => toId(v.id) === e.target.value) || null)}
+                className="bg-gray-50 border-none rounded-xl px-4 py-2.5 font-semibold text-gray-700 focus:ring-2 focus:ring-indigo-500"
+              >
+                {versionOptions.length === 0 && <option value="">No Curriculum Version</option>}
+                {versionOptions.map(v => <option key={v.id} value={v.id}>{v.version_no}</option>)}
               </select>
             </div>
             <div>
@@ -2096,6 +2241,11 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
 
           {activeSubTab === 'clo-pi' && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <CoordinatorBatchStructurePanel
+              batchId={selectedBatchId}
+              semester={selectedSemester || undefined}
+              onGasChange={setBatchStructureGas}
+            />
             {!selectedCourse ? (
               <div className="bg-white p-12 text-center rounded-[40px] border-2 border-dashed border-gray-100 shadow-xl shadow-gray-50/50">
                 <BookOpen className="w-16 h-16 text-gray-200 mx-auto mb-6" />
@@ -2171,12 +2321,12 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
                         <thead>
                           <tr className="bg-gray-50">
                             <th className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest border-b border-r border-gray-100 w-48 sticky left-0 bg-gray-50 z-10">CLOs \ GAs</th>
-                            {cloPiMatrix.gas.map((ga: any) => (
+                            {cloMatrixGas.map((ga: any) => (
                               <th 
                                 key={ga.id}
                                 className="p-6 text-xs font-black text-gray-400 uppercase tracking-widest text-center border-b border-r border-gray-100 bg-indigo-50/50"
                               >
-                                GA-{ga.order_number}: {ga.title}
+                                {ga.code || `GA-${ga.order_number || ''}`.trim()}: {ga.title}
                               </th>
                             ))}
                           </tr>
@@ -2190,7 +2340,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
                                   <span className="text-[10px] text-gray-400 font-bold uppercase">{clo.bloom_level}</span>
                                 </div>
                               </td>
-                              {cloPiMatrix.gas.map((ga: any) => {
+                              {cloMatrixGas.map((ga: any) => {
                                 const isSelected = cloPiMatrix.mappings.some((m: any) => 
                                   (m.clo === clo.id || m.clo_id === clo.id) && (m.ga === ga.id || m.ga_id === ga.id)
                                 );
