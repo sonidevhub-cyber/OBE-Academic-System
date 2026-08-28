@@ -47,6 +47,14 @@ const sortGAs = <T extends { order_number?: number; code?: string; id?: string }
     return String(a.code || a.id || '').localeCompare(String(b.code || b.id || ''));
   });
 
+const sortMappedGAs = <T extends { ga_code?: string; ga_id?: string; order_number?: number }>(gas: T[]) =>
+  [...gas].sort((a, b) => {
+    const aNum = Number(a.order_number ?? parseInt(String(a.ga_code || '').replace(/\D/g, ''), 10));
+    const bNum = Number(b.order_number ?? parseInt(String(b.ga_code || '').replace(/\D/g, ''), 10));
+    if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+    return String(a.ga_code || a.ga_id || '').localeCompare(String(b.ga_code || b.ga_id || ''));
+  });
+
 const downloadBatchStructurePdf = (structure: BatchStructureResponse, semester: string) => {
   const pdf = new jsPDF('landscape', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -106,7 +114,7 @@ const downloadBatchStructurePdf = (structure: BatchStructureResponse, semester: 
           course.semester_number || '-',
           `${course.course_code || ''} ${course.course_name || '-'}`.trim(),
           `${clo.clo_number || 'CLO'} — ${clo.title || '-'}`,
-          (clo.mapped_gas || []).map(ga => ga.ga_code ? `${ga.ga_code} — ${ga.ga_title || ''}` : ga.ga_title).join(', ') || '-',
+          sortMappedGAs(clo.mapped_gas || []).map(ga => ga.ga_code ? `${ga.ga_code} — ${ga.ga_title || ''}` : ga.ga_title).join(', ') || '-',
         ]);
       }),
       styles: { fontSize: 8, cellPadding: 3, valign: 'top' },
@@ -187,7 +195,7 @@ const CoordinatorBatchStructureView: React.FC = () => {
       return;
     }
     if (!filteredBatches.some(batch => batch.id === selectedBatchId)) {
-      setSelectedBatchId(filteredBatches[0].id);
+      setSelectedBatchId('');
     }
   }, [filteredBatches, selectedBatchId]);
 
@@ -384,7 +392,7 @@ const CoordinatorBatchStructureView: React.FC = () => {
                         <div className="font-black text-indigo-700">{clo.clo_number}</div>
                         <div className="text-sm font-semibold leading-6 text-gray-700">{clo.title || 'Untitled CLO'}</div>
                         <div className="flex flex-wrap gap-2">
-                          {(clo.mapped_gas || []).length > 0 ? clo.mapped_gas.map(ga => (
+                          {(clo.mapped_gas || []).length > 0 ? sortMappedGAs(clo.mapped_gas || []).map(ga => (
                             <span
                               key={`${clo.clo_id}-${ga.ga_id}`}
                               className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700"

@@ -8,7 +8,7 @@ from django.db import transaction, models
 from decimal import Decimal
 from core.models import Batch, Semester, Program
 from students.models import Student
-from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score, CourseFeedbackGAScore
+from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score, CourseFeedbackGAScore, GAReport, GAMasterCache, StudentGAEntry
 from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
 from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions, calculate_weighted_ga_score
 from django.utils import timezone
@@ -853,24 +853,173 @@ class BatchGAReportView(APIView):
         readiness = self._get_readiness_for_cumulative_cohort(batch)
         is_program_end_ready = batch.is_program_end_ready
         
-        # Indirect source tables: only refresh feedback if contributors are stale.
-        # Heavy FeedbackService/exit-survey refresh is skipped whenever cached
-        # GAReport rows are valid (per-GA stale check still runs inside
-        # calculate_weighted_ga_score).
+        # --- FAST: Bulk stale contributor check across all GAs in 1 query ---
+        # Replaces per-GA N queries (ga_report_has_stale_contributors) with a single EXISTS check.
         from ..services import ga_report_has_stale_contributors
         gas = GA.objects.filter(program=batch.program, is_active=True).order_by('order_number')
-        any_stale = any(
-            ga_report_has_stale_contributors(batch, ga, require_assessment_done=True)
-            for ga in gas
-        )
-        if any_stale:
+        gas_ids = list(gas.values_list('id', flat=True))
+
+        from ..reporting import get_batch_ga_sessions
+        all_sessions = get_batch_ga_sessions(batch, require_assessment_done=True)
+        all_session_ids = [s.id for s in all_sessions]
+
+        any_stale_direct = False
+        if all_session_ids and gas_ids:
+            any_stale_direct = CourseGAScore.objects.filter(
+                course_session_id__in=all_session_ids,
+                ga_id__in=gas_ids,
+                is_active=True,
+                is_stale=True,
+            ).exists()
+
+        # Also check if any GAReport / GAMasterCache row is flagged needs_recalculation.
+        any_report_flag_stale = GAReport.objects.filter(
+            batch=batch, ga_id__in=gas_ids, needs_recalculation=True
+        ).exists() or GAMasterCache.objects.filter(
+            batch=batch, needs_recalculation=True
+        ).exists()
+
+        any_stale = any_stale_direct or any_report_flag_stale
+
+        # FeedbackService refreshes INDIRECT scores (course feedback).
+        # Only run the heavy indirect refresh pipeline when reports are explicitly flagged
+        # stale, to avoid wasting cycles when *only* direct (CourseGAScore) rows changed.
+        if any_report_flag_stale or not all_session_ids:
             from feedback.views import FeedbackService
             from ..services import calculate_exit_survey_ga_score
             FeedbackService.calculate(batch)
             for ga in gas:
                 calculate_exit_survey_ga_score(ga, batch)
+        elif any_stale_direct:
+            # Only direct scores changed; exit survey coverage might still need
+            # refresh for the footer, so run per-GA exit survey only.
+            from ..services import calculate_exit_survey_ga_score
+            for ga in gas:
+                calculate_exit_survey_ga_score(ga, batch)
         
         if scope == 'all_students':
+            # ================================================================
+            # FAST PATH: Use pre-compiled GAMasterCache (StudentGAEntry rows)
+            # whenever the cache is valid. Avoids O(students × GAs × sessions)
+            # recalculation from raw StudentCLOScore rows on every request.
+            # ================================================================
+            student_ids = [s.student_id for s in student_objs]
+            fast_cache_usable = False
+            master_cache = (
+                GAMasterCache.objects
+                .filter(batch=batch, is_active=True, is_fully_compiled=True, needs_recalculation=False)
+                .order_by('-last_updated')
+                .first()
+            )
+            if (
+                master_cache
+                and not any_stale_direct
+                and not any_report_flag_stale
+                and student_ids
+            ):
+                # Verify coverage: every active GA has entries for every student in roster.
+                expected_rows = len(student_ids) * len(gas_ids)
+                if expected_rows > 0:
+                    entry_count = StudentGAEntry.objects.filter(
+                        master_cache=master_cache,
+                        student_id__in=student_ids,
+                        ga_id__in=gas_ids,
+                        is_active=True,
+                    ).count()
+                    if entry_count == expected_rows:
+                        fast_cache_usable = True
+
+            if fast_cache_usable and master_cache:
+                # Bulk fetch all StudentGAEntry rows and group by (student_id, ga_id)
+                entries_qs = StudentGAEntry.objects.filter(
+                    master_cache=master_cache,
+                    student_id__in=student_ids,
+                    ga_id__in=gas_ids,
+                    is_active=True,
+                ).select_related('ga')
+                entries_by_student_ga = {}
+                for entry in entries_qs:
+                    entries_by_student_ga[(entry.student_id, entry.ga_id)] = entry
+
+                # Build kpi threshold map for quick comparison
+                kpi_by_ga_id = {ga.id: float(ga.kpi_threshold) for ga in gas}
+
+                student_reports = []
+                visible_by_ga = {ga_id: [] for ga_id in gas_ids}
+                for student_obj in student_objs:
+                    user = student_obj.user
+                    student_ga_scores = []
+                    for ga in gas:
+                        entry = entries_by_student_ga.get((student_obj.student_id, ga.id))
+                        ga_attainment = None
+                        if entry is not None:
+                            ga_attainment = round(Decimal(str(entry.ga_score)), 2)
+                        is_below = False
+                        if ga_attainment is not None:
+                            is_below = float(ga_attainment) < kpi_by_ga_id[ga.id]
+                        ga_attainment_float = float(ga_attainment) if ga_attainment is not None else None
+                        if ga_attainment_float is not None:
+                            visible_by_ga[ga.id].append(ga_attainment_float)
+                        student_ga_scores.append({
+                            'ga_id': str(ga.id),
+                            'ga_code': f'GA-{ga.order_number}',
+                            'direct_score': ga_attainment_float,
+                            'is_below_threshold': is_below,
+                        })
+                    student_reports.append({
+                        'id': str(user.id),
+                        'name': user.full_name,
+                        'registration_number': student_obj.registration_number,
+                        'ga_scores': student_ga_scores,
+                        'is_dropped': not user.is_active,
+                        'is_frozen': student_obj.is_frozen,
+                        'frozen_at_semester': student_obj.frozen_at_semester,
+                        'frozen_date': student_obj.frozen_date,
+                    })
+
+                # Cohort summary footer (same algorithm as slow path, using visible_by_ga)
+                cohort_summary = []
+                from ..services import calculate_weighted_ga_score
+                for ga in gas:
+                    weighted_result = calculate_weighted_ga_score(ga, batch)
+                    indirect_attainment = weighted_result['indirect_score']
+                    visible_scores = visible_by_ga.get(ga.id, [])
+                    direct_attainment = None
+                    if visible_scores:
+                        direct_attainment = round(
+                            sum(Decimal(str(score)) for score in visible_scores) / Decimal(len(visible_scores)),
+                            2,
+                        )
+                    final_score = None
+                    if direct_attainment is not None and indirect_attainment is not None:
+                        final_score = round((direct_attainment * Decimal('0.8')) + (Decimal(str(indirect_attainment)) * Decimal('0.2')), 2)
+                    elif direct_attainment is not None:
+                        final_score = direct_attainment
+                    elif indirect_attainment is not None:
+                        final_score = Decimal(str(indirect_attainment))
+                    cohort_summary.append({
+                        'ga_id': str(ga.id),
+                        'ga_code': f'GA-{ga.order_number}',
+                        'ga_title': ga.title,
+                        'ga_kpi_threshold': float(ga.kpi_threshold),
+                        'direct_attainment': float(direct_attainment) if direct_attainment is not None else None,
+                        'indirect_attainment': float(indirect_attainment) if indirect_attainment is not None else None,
+                        'final_attainment': float(final_score) if final_score is not None else None,
+                        'status': 'NOT_ASSESSED' if final_score is None else (
+                            'ACHIEVED' if float(final_score) >= float(ga.kpi_threshold) else 'BELOW_TARGET'
+                        )
+                    })
+
+                return Response({
+                    'is_program_end_ready': is_program_end_ready,
+                    'gas': [{'ga_id': str(ga.id), 'ga_code': f'GA-{ga.order_number}', 'ga_title': ga.title, 'ga_kpi_threshold': float(ga.kpi_threshold)} for ga in gas],
+                    'students': student_reports,
+                    'cohort_summary': cohort_summary
+                })
+
+            # ================================================================
+            # SLOW FALLBACK: recalculate from scratch when cache is stale/invalid
+            # ================================================================
             # Build student-level data
             student_reports = []
             
@@ -909,7 +1058,6 @@ class BatchGAReportView(APIView):
                 mappings_by_course_ga[key].append(mapping)
                 
             # Get all student CLO scores
-            student_ids = [s.student_id for s in student_objs]
             student_clo_scores = StudentCLOScore.objects.filter(
                 student_id__in=student_ids,
                 course_session_id__in=session_ids,

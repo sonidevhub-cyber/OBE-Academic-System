@@ -35,6 +35,14 @@ const sortGAs = <T extends { order_number?: number; code?: string; id?: string }
     return String(a.code || a.id || '').localeCompare(String(b.code || b.id || ''));
   });
 
+const sortMappedGAs = <T extends { ga_code?: string; ga_id?: string; order_number?: number }>(gas: T[]) =>
+  [...gas].sort((a, b) => {
+    const aNum = Number(a.order_number ?? parseInt(String(a.ga_code || '').replace(/\D/g, ''), 10));
+    const bNum = Number(b.order_number ?? parseInt(String(b.ga_code || '').replace(/\D/g, ''), 10));
+    if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+    return String(a.ga_code || a.ga_id || '').localeCompare(String(b.ga_code || b.ga_id || ''));
+  });
+
 const downloadBatchStructurePdf = (structure: BatchStructureResponse, gaById: Map<string, BatchStructureGA>) => {
   const pdf = new jsPDF('landscape', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -102,7 +110,7 @@ const downloadBatchStructurePdf = (structure: BatchStructureResponse, gaById: Ma
       peoLabel(peo),
       peo.title || 'Program Outcome',
       peo.description || '-',
-      (peo.ga_mappings || []).map(mapping => {
+      sortMappedGAs(peo.ga_mappings || []).map(mapping => {
         const ga = mapping.ga_id ? gaById.get(String(mapping.ga_id)) : undefined;
         return ga ? `${gaLabel(ga)} - ${ga.title}` : mapping.ga_code || 'GA';
       }).join(', ') || '-',
@@ -152,7 +160,7 @@ const downloadBatchStructurePdf = (structure: BatchStructureResponse, gaById: Ma
           course.semester_number || '-',
           course.course_name || '-',
           `${clo.clo_number || 'CLO'} - ${clo.title || '-'}`,
-          (clo.mapped_gas || []).map(ga => ga.ga_code ? `${ga.ga_code} - ${ga.ga_title}` : ga.ga_title).join(', ') || '-',
+          sortMappedGAs(clo.mapped_gas || []).map(ga => ga.ga_code ? `${ga.ga_code} - ${ga.ga_title}` : ga.ga_title).join(', ') || '-',
         ]);
       }),
       styles: { fontSize: 8, cellPadding: 3, valign: 'top' },
@@ -221,7 +229,7 @@ const HODBatchStructureView: React.FC = () => {
       return;
     }
     if (!filteredBatches.some(batch => batch.id === selectedBatchId)) {
-      setSelectedBatchId(filteredBatches[0].id);
+      setSelectedBatchId('');
     }
   }, [filteredBatches, selectedBatchId]);
 
@@ -448,7 +456,7 @@ const HODBatchStructureView: React.FC = () => {
                         <td className="px-4 py-4 text-sm font-semibold leading-6 text-gray-700">{peo.description}</td>
                         <td className="px-4 py-4">
                           <div className="flex flex-wrap gap-2">
-                            {(peo.ga_mappings || []).length > 0 ? peo.ga_mappings?.map((mapping, index) => {
+                            {(peo.ga_mappings || []).length > 0 ? sortMappedGAs(peo.ga_mappings || [])?.map((mapping, index) => {
                               const ga = mapping.ga_id ? gaById.get(String(mapping.ga_id)) : undefined;
                               return (
                                 <span key={`${peo.id}-${mapping.ga_id || index}`} className="rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1 text-xs font-black text-indigo-700">

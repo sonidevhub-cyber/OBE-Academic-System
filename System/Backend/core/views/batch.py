@@ -155,7 +155,7 @@ class AllBatchesView(generics.ListAPIView):
         )
 
     def get_queryset(self):
-        queryset = Batch.objects.filter(is_active=True).select_related('program')
+        queryset = Batch.objects.filter(is_active=True).select_related('program', 'program__department')
         alumni_feedback = self.request.query_params.get('alumni_feedback')
         if alumni_feedback and alumni_feedback.lower() in ['1', 'true', 'yes']:
             queryset = queryset.filter(
