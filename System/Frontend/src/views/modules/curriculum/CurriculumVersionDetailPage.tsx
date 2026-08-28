@@ -1255,7 +1255,8 @@ const CurriculumVersionDetailPage: React.FC<
             selectedCourseForObe.course
           ),
           String(version.id),
-          mappingsList
+          mappingsList,
+          activeBatch?.id
         );
 
         toast.success(
@@ -1334,10 +1335,27 @@ const CurriculumVersionDetailPage: React.FC<
       try {
         setSubmitting(true);
 
+        // Finalized Progressive curriculum edits are batch-specific.
+        // The backend requires batch_id so it knows which assigned batch
+        // is being edited. Never reference an undeclared batchId here;
+        // activeBatch is the selected batch context for this version.
+        const cloPayload =
+          version.status !== 'draft' && activeBatchMode === 'progressive'
+            ? {
+                ...cloFormData,
+                batch_id: activeBatch?.id,
+              }
+            : { ...cloFormData };
+
+        if (version.status !== 'draft' && activeBatchMode === 'progressive' && !activeBatch?.id) {
+          toast.error('Please select a batch before editing CLOs.');
+          return;
+        }
+
         if (editingClo) {
           await obeService.updateCLO(
             editingClo.id,
-            cloFormData
+            cloPayload
           );
 
           toast.success(
@@ -1347,7 +1365,7 @@ const CurriculumVersionDetailPage: React.FC<
           await obeService.createCLO(
             selectedCourseForObe.course,
             version.id,
-            cloFormData
+            cloPayload
           );
 
           toast.success(

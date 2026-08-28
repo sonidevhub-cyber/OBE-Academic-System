@@ -927,10 +927,27 @@ class OBEService {
     return response.data;
   }
 
-  async saveCLOGAMappings(courseId: string, versionId: string, mappings: any[]): Promise<any> {
-    const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clo-ga-matrix/`, { mappings });
-    return response.data;
+  async saveCLOGAMappings(
+  courseId: string,
+  versionId: string,
+  mappings: any[],
+  batchId?: string
+): Promise<any> {
+  const payload: any = {
+    mappings,
+  };
+
+  if (batchId) {
+    payload.batch_id = String(batchId);
   }
+
+  const response = await api.post(
+    `/obe/courses/${courseId}/versions/${versionId}/clo-ga-matrix/`,
+    payload
+  );
+
+  return response.data;
+}
 
   async bulkCreateCLOGAMappings(data: { mappings: Array<{ clo: number; ga: number; weightage: number }> }) {
     const response = await api.post('/obe/clo-ga-mappings/bulk_create/', { mappings: data.mappings });
@@ -942,55 +959,173 @@ class OBEService {
     return response.data;
   }
 
-  // --- CLO Management ---
-  async getCLOs(courseId: string, id: string | number): Promise<any[]> {
-    if (typeof id === 'number') {
-      // versionId
-      const response = await api.get(`/obe/courses/${courseId}/versions/${id}/clos/`);
-      return response.data;
-    } else {
-      // batchId
-      const response = await api.get(`/obe/courses/${courseId}/batches/${id}/clos/`);
-      return response.data;
-    }
-  }
+// --- CLO Management ---
 
-  async createCLO(courseId: string, id: string | number, data: any): Promise<any>;
-  async createCLO(data: any): Promise<any>;
-  async createCLO(courseIdOrData: any, maybeId?: any, maybeData?: any): Promise<any> {
-    if (typeof courseIdOrData === 'string' && maybeId) {
-      if (typeof maybeId === 'number') {
-        // versionId
-        const response = await api.post(`/obe/courses/${courseIdOrData}/versions/${maybeId}/clos/`, maybeData);
-        return response.data;
-      } else {
-        // batchId
-        const response = await api.post(`/obe/courses/${courseIdOrData}/batches/${maybeId}/clos/`, maybeData);
-        return response.data;
-      }
-    } else {
-      // Legacy call: (data)
-      const response = await api.post('/obe/clos/', courseIdOrData);
-      return response.data;
-    }
-  }
+async getCLOs(
+  courseId: string,
+  id: string | number,
+  batchId?: string
+): Promise<any[]> {
+  if (typeof id === 'number') {
+    // Curriculum Version
+    const params = batchId ? { batch_id: batchId } : undefined;
 
-  async updateCLO(id: any, data: any): Promise<any> {
-    const response = await api.patch(`/obe/clos/${id}/`, data);
+    const response = await api.get(
+      `/obe/courses/${courseId}/versions/${id}/clos/`,
+      { params }
+    );
+
     return response.data;
   }
 
-  async deleteCLO(id: any): Promise<any> {
-    const response = await api.delete(`/obe/clos/${id}/`);
+  // Batch
+  const response = await api.get(
+    `/obe/courses/${courseId}/batches/${id}/clos/`
+  );
+
+  return response.data;
+}
+
+
+// Create CLO - Version based
+async createCLO(
+  courseId: string,
+  versionId: number,
+  data: any,
+  batchId?: string
+): Promise<any>;
+
+// Create CLO - Batch based
+async createCLO(
+  courseId: string,
+  batchId: string,
+  data: any
+): Promise<any>;
+
+// Legacy
+async createCLO(data: any): Promise<any>;
+
+
+async createCLO(
+  courseIdOrData: any,
+  idOrData?: any,
+  dataOrUndefined?: any,
+  batchId?: string
+): Promise<any> {
+
+  // =========================================================
+  // LEGACY CALL
+  // createCLO(data)
+  // =========================================================
+  if (
+    typeof courseIdOrData !== 'string' &&
+    idOrData === undefined
+  ) {
+    const response = await api.post(
+      '/obe/clos/',
+      courseIdOrData
+    );
+
     return response.data;
   }
 
-  async copyCLOs(courseId: string, versionId: number, sourceVersionId: number) {
-    const response = await api.post(`/obe/courses/${courseId}/versions/${versionId}/clos/copy/`, {
-      source_version_id: sourceVersionId
-    });
+
+  // =========================================================
+  // NEW CALL
+  // createCLO(courseId, id, data, batchId?)
+  // =========================================================
+
+  const courseId = courseIdOrData;
+  const id = idOrData;
+  const data = dataOrUndefined;
+
+
+  // ---------------------------------------------------------
+  // VERSION BASED
+  // createCLO(courseId, versionId, data, batchId)
+  // ---------------------------------------------------------
+  if (typeof id === 'number') {
+
+    const payload = {
+      ...data,
+      ...(batchId ? { batch_id: batchId } : {}),
+    };
+
+    const response = await api.post(
+      `/obe/courses/${courseId}/versions/${id}/clos/`,
+      payload
+    );
+
     return response.data;
   }
+
+
+  // ---------------------------------------------------------
+  // BATCH BASED
+  // createCLO(courseId, batchId, data)
+  // ---------------------------------------------------------
+  if (typeof id === 'string') {
+
+    const response = await api.post(
+      `/obe/courses/${courseId}/batches/${id}/clos/`,
+      data
+    );
+
+    return response.data;
+  }
+
+
+  throw new Error('Invalid parameters passed to createCLO');
+}
+
+
+async updateCLO(
+  id: any,
+  data: any,
+  batchId?: string
+): Promise<any> {
+
+  const payload = {
+    ...data,
+    ...(batchId ? { batch_id: batchId } : {}),
+  };
+
+  const response = await api.patch(
+    `/obe/clos/${id}/`,
+    payload
+  );
+
+  return response.data;
+}
+
+
+async deleteCLO(id: any): Promise<any> {
+  const response = await api.delete(`/obe/clos/${id}/`);
+  return response.data;
+}
+
+
+async copyCLOs(
+  courseId: string,
+  versionId: number,
+  sourceVersionId: number,
+  batchId?: string
+) {
+  const payload: Record<string, any> = {
+    source_version_id: sourceVersionId,
+  };
+
+  if (batchId) {
+    payload.batch_id = batchId;
+  }
+
+  const response = await api.post(
+    `/obe/courses/${courseId}/versions/${versionId}/clos/copy/`,
+    payload
+  );
+
+  return response.data;
+}
 
   // --- PEO Methods ---
   async getPEOs(programId: string): Promise<PEO[]> {
