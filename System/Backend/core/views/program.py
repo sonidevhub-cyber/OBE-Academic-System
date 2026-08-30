@@ -24,14 +24,17 @@ class ProgramListCreateView(generics.ListCreateAPIView):
         queryset = Program.objects.all().filter(is_active=True)
         
         if user.is_authenticated and user.role != 'SAC':
-            # Coordinators only see their assigned programs
             is_coord = user.role == 'coordinator' or user.secondary_role == 'coordinator'
+            is_hod = user.role == 'hod' or user.secondary_role == 'hod'
             if is_coord:
                 queryset = queryset.filter(coordinators=user)
-            else:
-                # Other roles might need different logic, but for now just return empty if not SAC/Coord
-                # unless they are just viewing.
-                pass
+            elif is_hod:
+                from core.permissions import _get_user_department
+                dept = _get_user_department(user)
+                if dept is not None:
+                    queryset = queryset.filter(department=dept)
+                else:
+                    queryset = queryset.none()
                 
         return queryset
 

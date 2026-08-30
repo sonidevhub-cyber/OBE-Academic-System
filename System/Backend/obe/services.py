@@ -1659,7 +1659,7 @@ def calculate_peo_report(peo, batch=None, peo_snapshot=None):
     
     return {
         'peo_id': str(peo_snapshot.get('id') if peo_snapshot else peo.id),
-        'peo_code': peo_snapshot.get('code') if peo_snapshot else f'PEO-{peo.order_number}',
+        'peo_code': peo_snapshot.get('code') if peo_snapshot else f'PO-{peo.order_number}',
         'peo_title': peo_snapshot.get('title') if peo_snapshot else peo.title,
         'peo_description': peo_snapshot.get('description') if peo_snapshot else peo.description,
         'final_score': float(final_score) if final_score is not None else None,

@@ -93,7 +93,6 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
               const teacherRole = teacher.role || teacher.user?.role;
               return (
                 teacherRole === 'instructor' ||
-                teacherRole === 'tvf' ||
                 teacherRole === 'Teacher'
               );
             })

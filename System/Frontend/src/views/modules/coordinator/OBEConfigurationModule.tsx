@@ -30,7 +30,6 @@ import obeService, {
   MissionResponse,
   VisionKeyword,
   MissionKeyword,
-  VisionMissionMappingResponse,
   POKeywordMappingResponse,
   VisionMissionCQIReviewRecord,
 } from '../../../api/obeService';
@@ -42,7 +41,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { toast } from 'react-toastify';
 import CoordinatorBatchStructurePanel from './CoordinatorBatchStructurePanel';
 
-export type OBEMappingSubTabId = 'vision-mission' | 'peo' | 'ga' | 'vision-mission-map' | 'po-keywords' | 'ga-peo' | 'clo-pi';
+export type OBEMappingSubTabId = 'vision-mission' | 'peo' | 'ga' | 'po-keywords' | 'ga-peo' | 'clo-pi';
 
 interface OBEConfigurationModuleProps {
   initialSubTab?: OBEMappingSubTabId;
@@ -75,9 +74,9 @@ const normalizeOptions = (options?: string[] | null) =>
     .filter(Boolean);
 
 const getDraftOptions = (draft: SurveyQuestionDraft) =>
-  normalizeOptions(draft.custom_options).length > 0
-    ? normalizeOptions(draft.custom_options)
-    : [...DEFAULT_SURVEY_OPTIONS];
+  draft.question_type === 'RATING_SCALE'
+    ? [...DEFAULT_SURVEY_OPTIONS]
+    : normalizeOptions(draft.custom_options);
 
 const coerceWeight = (weight: number | string | null | undefined): number => {
   const num = Number(weight);
@@ -141,7 +140,6 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     vision: '',
     mission: '',
   });
-  const [visionMissionData, setVisionMissionData] = useState<VisionMissionMappingResponse | null>(null);
   const [poKeywordData, setPoKeywordData] = useState<POKeywordMappingResponse | null>(null);
   const [isSavingVision, setIsSavingVision] = useState(false);
   const [showVisionMissionHistory, setShowVisionMissionHistory] = useState(false);
@@ -288,10 +286,15 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     return question.peo?.id || null;
   };
 
-  const activeSurveyQuestions = useMemo(
-    () => surveyQuestions.filter(question => question.is_active),
-    [surveyQuestions]
-  );
+  const activeSurveyQuestions = useMemo(() => {
+    const seen = new Set<string>();
+    return surveyQuestions.filter(question => {
+      if (!question.is_active) return false;
+      if (!question.id || seen.has(question.id)) return false;
+      seen.add(question.id);
+      return true;
+    });
+  }, [surveyQuestions]);
 
   const selectedDepartmentId = useMemo(() => {
     const program = selectedProgram as any;
@@ -562,8 +565,16 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   };
 
   const buildDraftsForPEO = (peoId: string, survey_type: SurveyType): SurveyQuestionDraft[] => {
+    const seen = new Set<string>();
     return surveyQuestions
-      .filter((q) => q.survey_type === survey_type && (q.peo_id === peoId || (q.peo && (q.peo === peoId || (typeof q.peo === 'object' && (q.peo as any).id === peoId)))))
+      .filter((q) => {
+        if (q.survey_type !== survey_type) return false;
+        const qPeoId = q.peo_id ?? (typeof q.peo === 'object' ? (q.peo as any)?.id : q.peo);
+        if (qPeoId !== peoId) return false;
+        if (!q.id || seen.has(q.id)) return false;
+        seen.add(q.id);
+        return true;
+      })
       .map((q) => ({
         _tempId: makeTempId(),
         id: q.id,
@@ -725,16 +736,6 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     }
   };
 
-  const loadVisionMissionMappings = async () => {
-    if (!selectedDepartmentId) return;
-    try {
-      const data = await obeService.getVisionMissionMappings(selectedDepartmentId);
-      setVisionMissionData(data);
-    } catch (error: any) {
-      toast.error(getApiMessage(error, 'Failed to load Vision-Mission mappings'));
-    }
-  };
-
   const loadPOKeywordMappings = async () => {
     if (!selectedProgram?.id) return;
     try {
@@ -845,9 +846,8 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       setRevisionModal(null);
       setRevisionJustification('');
       await loadVisionMissionData();
-      if (activeSubTab === 'vision-mission-map') await loadVisionMissionMappings();
       if (activeSubTab === 'po-keywords') await loadPOKeywordMappings();
-      toast.success(`${statementType === 'VISION' ? 'Vision' : 'Mission'} revised. Review keywords and refresh mappings for the new statement.`);
+      toast.success(`${statementType === 'VISION' ? 'Vision' : 'Mission'} revised. Review keywords and refresh PO mappings for the new statement.`);
     } catch (error: any) {
       toast.error(getApiMessage(error, `Failed to revise ${revisionModal.type} statement`));
     } finally {
@@ -1245,77 +1245,34 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   useEffect(() => {
     if (activeSubTab === 'ga-peo' && selectedProgram) loadGaPeoMatrix();
     if (activeSubTab === 'clo-pi' && selectedCourse && selectedVersion) loadCloGaMatrix();
-    if (activeSubTab === 'vision-mission-map' && selectedDepartmentId) loadVisionMissionMappings();
     if (activeSubTab === 'po-keywords' && selectedProgram) loadPOKeywordMappings();
   }, [activeSubTab, selectedProgram, selectedCourse, selectedVersion, selectedDepartmentId]);
 
-  const toggleVisionMissionMapping = (missionKeywordId: string, visionKeywordId: string) => {
-    setVisionMissionData(prev => {
-      if (!prev) return prev;
-      const exists = prev.mappings.some(m =>
-        m.mission_keyword === missionKeywordId && m.vision_keyword === visionKeywordId
-      );
-      return {
-        ...prev,
-        mappings: exists
-          ? prev.mappings.filter(m => !(m.mission_keyword === missionKeywordId && m.vision_keyword === visionKeywordId))
-          : [
-              ...prev.mappings,
-              {
-                id: `${missionKeywordId}-${visionKeywordId}`,
-                mission_keyword: missionKeywordId,
-                mission_keyword_text: '',
-                vision_keyword: visionKeywordId,
-                vision_keyword_text: '',
-                is_active: true,
-                created_at: '',
-              },
-            ],
-      };
-    });
-  };
-
-  const handleSaveVisionMissionMappings = async () => {
-    if (!selectedDepartmentId || !visionMissionData) return;
-    try {
-      await obeService.saveVisionMissionMappings(
-        selectedDepartmentId,
-        visionMissionData.mappings.map(m => ({
-          mission_keyword_id: m.mission_keyword,
-          vision_keyword_id: m.vision_keyword,
-        }))
-      );
-      toast.success('Vision-Mission mappings saved');
-      loadVisionMissionMappings();
-    } catch (error: any) {
-      toast.error(getApiMessage(error, 'Failed to save Vision-Mission mappings'));
-    }
-  };
-
-  const togglePOKeywordMapping = (peoId: string, keywordId: string) => {
+  const togglePOKeywordMapping = (peoId: string, keywordId: string, keywordType: 'mission' | 'vision') => {
     setPoKeywordData(prev => {
       if (!prev) return prev;
+      const keywordField = keywordType === 'mission' ? 'mission_keyword' : 'vision_keyword';
       const exists = prev.mappings.some(m =>
         m.peo === peoId
-        && m.mission_keyword === keywordId
+        && m[keywordField] === keywordId
       );
       return {
         ...prev,
         mappings: exists
           ? prev.mappings.filter(m => !(
               m.peo === peoId
-              && m.mission_keyword === keywordId
+              && m[keywordField] === keywordId
             ))
           : [
               ...prev.mappings,
               {
-                id: `${peoId}-mission-${keywordId}`,
+                id: `${peoId}-${keywordType}-${keywordId}`,
                 peo: peoId,
                 peo_order_number: prev.peos.find(p => p.id === peoId)?.order_number || 0,
                 peo_title: prev.peos.find(p => p.id === peoId)?.title || null,
-                mission_keyword: keywordId,
+                mission_keyword: keywordType === 'mission' ? keywordId : null,
                 mission_keyword_text: null,
-                vision_keyword: null,
+                vision_keyword: keywordType === 'vision' ? keywordId : null,
                 vision_keyword_text: null,
                 is_active: true,
                 created_at: '',
@@ -1331,11 +1288,11 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       await obeService.savePOKeywordMappings(
         selectedProgram.id,
         poKeywordData.mappings
-          .filter(m => m.mission_keyword)
+          .filter(m => m.mission_keyword || m.vision_keyword)
           .map(m => ({
             peo_id: m.peo,
-            mission_keyword_id: m.mission_keyword,
-            vision_keyword_id: null,
+            mission_keyword_id: m.mission_keyword || null,
+            vision_keyword_id: m.vision_keyword || null,
           }))
       );
       toast.success('PO keyword mappings saved');
@@ -1477,7 +1434,9 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
         question_type,
         custom_options: question_type === 'TEXT'
           ? []
-          : currentOptions.length > 0 ? currentOptions : [...DEFAULT_SURVEY_OPTIONS],
+          : question_type === 'SINGLE_SELECT'
+            ? (d.question_type === 'SINGLE_SELECT' && currentOptions.length > 0 ? currentOptions : [''])
+            : [...DEFAULT_SURVEY_OPTIONS],
         _dirty: true,
       };
     }));
@@ -1503,7 +1462,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   ) => {
     setter(prev => prev.map(d => (
       d._tempId === tempId
-        ? { ...d, custom_options: [...getDraftOptions(d), ''], _dirty: true }
+        ? { ...d, custom_options: [...(d.custom_options || []), ''], _dirty: true }
         : d
     )));
   };
@@ -1549,7 +1508,9 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     surveyType: SurveyType,
   ) => {
     const isAlumni = surveyType === 'ALUMNI';
-    const options = getDraftOptions(draft);
+    const options = draft.question_type === 'SINGLE_SELECT'
+      ? (draft.custom_options || [])
+      : getDraftOptions(draft);
     const focusRing = isAlumni ? 'focus:ring-indigo-500' : 'focus:ring-emerald-500';
     return (
       <div className="space-y-3">
@@ -1587,10 +1548,20 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
           ))}
         </div>
 
-        {draft.question_type !== 'TEXT' && (
+        {draft.question_type === 'RATING_SCALE' && (
+          <div className="rounded-2xl bg-gray-50 border border-gray-100 p-3">
+            <p className="text-[11px] font-black uppercase tracking-wider text-gray-400 mb-2">Rating Options</p>
+            <div className="flex flex-wrap gap-2">
+              {getDraftOptions(draft).map((option, i) => (
+                <span key={i} className="rounded-full bg-white border border-gray-200 px-3 py-1 text-xs font-bold text-gray-600">{option}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {draft.question_type === 'SINGLE_SELECT' && (
           <div className="rounded-2xl bg-gray-50 border border-gray-100 p-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-black uppercase tracking-wider text-gray-400">Answer Options</p>
+              <p className="text-[11px] font-black uppercase tracking-wider text-gray-400">Custom Options</p>
               <button
                 type="button"
                 disabled={draft.is_locked}
@@ -1635,8 +1606,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       { id: 'vision-mission', label: 'Vision & Mission', icon: Target },
       { id: 'peo', label: 'PO Setup', icon: Award },
       { id: 'ga', label: 'GA Setup', icon: Info },
-      { id: 'vision-mission-map', label: 'Vision-Mission Mapping', icon: LayoutGrid },
-      { id: 'po-keywords', label: 'PO Mission Mapping', icon: LayoutGrid },
+      { id: 'po-keywords', label: 'PO Keyword Mapping', icon: LayoutGrid },
       { id: 'ga-peo', label: 'GA-PO Mapping', icon: LayoutGrid },
     ] : [
       { id: 'clo-pi', label: 'CLO-GA Mapping', icon: BookOpen },
@@ -1945,7 +1915,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h3 className="text-xl font-black text-gray-900">
-                    {activeSubTab === 'peo' ? 'Program Outcomes (POs)' : 'Graduate Attributes (GAs)'}
+                    {activeSubTab === 'peo' ? 'PO Setup' : 'Graduate Attributes (GAs)'}
                   </h3>
                   <p className="text-gray-400 text-sm mt-1">
                     Manage the {activeSubTab === 'peo' ? 'POs' : 'GAs'} defined for this program.
@@ -2044,76 +2014,12 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
             </div>
           )}
 
-          {activeSubTab === 'vision-mission-map' && (
-            <div className="p-8">
-              <div className="flex justify-between items-center mb-8">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900">Mission to Vision Keyword Mapping</h3>
-                  <p className="text-gray-400 text-sm mt-1">Manually connect approved Mission keywords with relevant Vision keywords.</p>
-                </div>
-                {isHOD && (
-                  <button
-                    onClick={handleSaveVisionMissionMappings}
-                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all"
-                  >
-                    <Save size={18} />
-                    Save Mappings
-                  </button>
-                )}
-              </div>
-
-              {visionMissionData && visionMissionData.mission_keywords.length > 0 && visionMissionData.vision_keywords.length > 0 ? (
-                <div className="overflow-x-auto rounded-3xl border border-gray-100">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="p-5 border-b border-gray-100 font-black text-gray-400 uppercase text-xs tracking-widest w-64">Mission Keyword</th>
-                        {visionMissionData.vision_keywords.map(keyword => (
-                          <th key={keyword.id} className="p-5 border-b border-gray-100 text-center text-xs font-black uppercase text-indigo-700 min-w-[150px]">
-                            {keyword.text}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visionMissionData.mission_keywords.map(missionKeyword => (
-                        <tr key={missionKeyword.id} className="hover:bg-indigo-50/30">
-                          <td className="p-5 border-b border-gray-50 font-bold text-gray-900">{missionKeyword.text}</td>
-                          {visionMissionData.vision_keywords.map(visionKeyword => {
-                            const active = visionMissionData.mappings.some(m =>
-                              m.mission_keyword === missionKeyword.id && m.vision_keyword === visionKeyword.id
-                            );
-                            return (
-                              <td key={visionKeyword.id} className={`p-5 border-b border-gray-50 text-center ${active ? 'bg-indigo-50/40' : ''}`}>
-                                <button
-                                  onClick={() => isHOD && toggleVisionMissionMapping(missionKeyword.id, visionKeyword.id)}
-                                  disabled={!isHOD}
-                                  className={`w-11 h-11 rounded-2xl flex items-center justify-center mx-auto transition-all ${
-                                    active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-300 hover:bg-gray-200'
-                                  } ${!isHOD ? 'cursor-not-allowed opacity-60' : ''}`}
-                                >
-                                  {active ? <Check size={18} /> : <Plus size={18} />}
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-12 text-center text-gray-400 italic">Save Vision and Mission keywords before mapping.</div>
-              )}
-            </div>
-          )}
-
           {activeSubTab === 'po-keywords' && (
             <div className="p-8">
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h3 className="text-xl font-black text-gray-900">PO Mission Mapping</h3>
-                  <p className="text-gray-400 text-sm mt-1">Map each PO to approved Mission keywords.</p>
+                  <h3 className="text-xl font-black text-gray-900">PO Keyword Mapping</h3>
+                  <p className="text-gray-400 text-sm mt-1">Map each PO directly to approved Mission and Vision keywords.</p>
                 </div>
                 {isHOD && (
                   <button
@@ -2134,7 +2040,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
                         <h4 className="font-black text-gray-900">PO-{po.order_number}: {po.title}</h4>
                         <p className="mt-1 text-sm text-gray-500">{po.description}</p>
                       </div>
-                      <div>
+                      <div className="grid gap-4 lg:grid-cols-2">
                         <div>
                           <h5 className="mb-2 text-xs font-black uppercase tracking-widest text-emerald-600">Mission Keywords</h5>
                           <div className="flex flex-wrap gap-2 rounded-2xl bg-white p-3 border border-gray-100">
@@ -2145,10 +2051,32 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
                               return (
                                 <button
                                   key={keyword.id}
-                                  onClick={() => isHOD && togglePOKeywordMapping(po.id, keyword.id)}
+                                  onClick={() => isHOD && togglePOKeywordMapping(po.id, keyword.id, 'mission')}
                                   disabled={!isHOD}
                                   className={`rounded-full px-3 py-1.5 text-xs font-bold ${
                                     active ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  } ${!isHOD ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                >
+                                  {keyword.text}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div>
+                          <h5 className="mb-2 text-xs font-black uppercase tracking-widest text-indigo-600">Vision Keywords</h5>
+                          <div className="flex flex-wrap gap-2 rounded-2xl bg-white p-3 border border-gray-100">
+                            {poKeywordData.vision_keywords.length === 0 ? (
+                              <span className="text-xs font-semibold text-gray-400">No Vision keywords saved.</span>
+                            ) : poKeywordData.vision_keywords.map(keyword => {
+                              const active = poKeywordData.mappings.some(m => m.peo === po.id && m.vision_keyword === keyword.id);
+                              return (
+                                <button
+                                  key={keyword.id}
+                                  onClick={() => isHOD && togglePOKeywordMapping(po.id, keyword.id, 'vision')}
+                                  disabled={!isHOD}
+                                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                                    active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                   } ${!isHOD ? 'opacity-60 cursor-not-allowed' : ''}`}
                                 >
                                   {keyword.text}
@@ -2384,7 +2312,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
           >
             <div className="p-10">
               <h3 className="text-2xl font-black text-gray-900 mb-2">
-                {editingItem ? 'Edit' : 'Add'} {modalType.toUpperCase()}
+                {editingItem ? 'Edit' : 'Add'} {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
               </h3>
               <p className="text-gray-400 text-sm mb-8">Fill in the details for the {modalType === 'clo' ? 'course learning outcome' : 'program objective'}.</p>
               
@@ -2633,7 +2561,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
                     type="submit"
                     className="flex-1 bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
                   >
-                    Save {modalType.toUpperCase()}
+                    Save {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
                   </button>
                 </div>
               </form>

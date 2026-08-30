@@ -21,7 +21,7 @@ from .models import (
     PEOCQISubmissionHistory,
     SurveyQuestion,
     Vision, Mission, VisionKeyword, MissionKeyword,
-    VisionMissionMapping, PEOKeywordMapping,
+    PEOKeywordMapping,
     VisionMissionCQIRecord,
 )
 from django.core.exceptions import ValidationError
@@ -240,7 +240,7 @@ class PEOCQIRecordSerializer(serializers.ModelSerializer):
     )
 
     def get_peo_code(self, obj):
-        return f'PEO-{obj.peo.order_number}'
+        return f'PO-{obj.peo.order_number}'
         
     def get_contributing_gas(self, obj):
         mappings = GAPEOMapping.objects.filter(
@@ -550,20 +550,6 @@ class MissionKeywordSerializer(serializers.ModelSerializer):
         model = MissionKeyword
         fields = ['id', 'mission', 'text', 'is_active', 'created_at']
         read_only_fields = ['id', 'created_at']
-
-
-class VisionMissionMappingSerializer(serializers.ModelSerializer):
-    mission_keyword_text = serializers.CharField(source='mission_keyword.text', read_only=True)
-    vision_keyword_text = serializers.CharField(source='vision_keyword.text', read_only=True)
-
-    class Meta:
-        model = VisionMissionMapping
-        fields = [
-            'id', 'mission_keyword', 'mission_keyword_text',
-            'vision_keyword', 'vision_keyword_text',
-            'is_active', 'created_at'
-        ]
-        read_only_fields = ['id', 'mission_keyword_text', 'vision_keyword_text', 'created_at']
 
 
 class PEOKeywordMappingSerializer(serializers.ModelSerializer):

@@ -22,7 +22,6 @@ def populate_batch_framework_snapshot(batch):
         PEOKeywordMapping,
         Vision,
         VisionKeyword,
-        VisionMissionMapping,
     )
 
     program = batch.program
@@ -73,7 +72,7 @@ def populate_batch_framework_snapshot(batch):
         "peos": [
             {
                 "id": str(peo.id),
-                "code": f"PEO-{peo.order_number}",
+                "code": f"PO-{peo.order_number}",
                 "order_number": peo.order_number,
                 "title": peo.title,
                 "description": peo.description,
@@ -120,23 +119,6 @@ def populate_batch_framework_snapshot(batch):
         if mission else []
     )
 
-    vm_mappings = []
-    if vision_keywords and mission_keywords:
-        vm_mappings = [
-            {
-                "mapping_id": str(mapping.id),
-                "mission_keyword_id": str(mapping.mission_keyword_id),
-                "mission_keyword": mapping.mission_keyword.text,
-                "vision_keyword_id": str(mapping.vision_keyword_id),
-                "vision_keyword": mapping.vision_keyword.text,
-            }
-            for mapping in VisionMissionMapping.objects.filter(
-                mission_keyword_id__in=[keyword.id for keyword in mission_keywords],
-                vision_keyword_id__in=[keyword.id for keyword in vision_keywords],
-                is_active=True,
-            ).select_related("mission_keyword", "vision_keyword")
-        ]
-
     batch.vision_mission_snapshot = {
         "program_id": str(program.id),
         "department_id": str(department.id) if department else None,
@@ -160,7 +142,6 @@ def populate_batch_framework_snapshot(batch):
                 for keyword in mission_keywords
             ],
         },
-        "vision_mission_mappings": vm_mappings,
         "peo_keyword_mappings": [
             mapping
             for mappings in keyword_mappings_by_peo.values()

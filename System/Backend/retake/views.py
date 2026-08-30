@@ -521,7 +521,7 @@ class BulkRetakeAssignmentView(APIView):
                     {"detail": "Teacher not found or inactive."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            if getattr(teacher, "role", None) not in {"instructor", "Teacher", "tvf"}:
+            if getattr(teacher, "role", None) not in {"instructor", "Teacher"}:
                 return Response(
                     {"detail": "Selected teacher must have role Instructor or Visiting Faculty."},
                     status=status.HTTP_400_BAD_REQUEST,

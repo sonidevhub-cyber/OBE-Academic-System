@@ -87,7 +87,7 @@ class CourseRetakeCreateSerializer(serializers.ModelSerializer):
         if value is None:
             return value
 
-        if getattr(value, "role", None) not in {"instructor", "Teacher", "tvf"}:
+        if getattr(value, "role", None) not in {"instructor", "Teacher"}:
             raise serializers.ValidationError("Retake teacher must have role Teacher.")
 
         return value

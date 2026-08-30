@@ -294,7 +294,11 @@ const StudentManagement: React.FC<StudentManagementProps> = ({ activeTab }) => {
       );
     }
     
-    return filtered;
+    return [...filtered].sort((a, b) => {
+      const nameA = (a.name || a.full_name || '').trim().toLowerCase();
+      const nameB = (b.name || b.full_name || '').trim().toLowerCase();
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
   }, [students, searchTerm, selectedProgramId, selectedBatchId]);
 
   return (

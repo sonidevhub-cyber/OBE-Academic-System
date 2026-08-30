@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from django.core.exceptions import ValidationError
@@ -27,6 +27,27 @@ from .services import (
 )
 
 from core.responses import api_response
+from core.permissions import IsSAC
+
+
+# ============================================================
+# Permission class for curriculum management
+# ============================================================
+class CanManageCurriculum(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        
+        user_role = (getattr(request.user, 'role', '') or '').lower()
+        secondary_role = (getattr(request.user, 'secondary_role', '') or '').lower()
+        active_role = (getattr(request.user, 'active_role', '') or '').lower()
+        
+        # SAC, Coordinator, and HOD can manage curriculum
+        return (
+            user_role in ['sac', 'coordinator', 'hod'] or 
+            secondary_role in ['coordinator', 'hod'] or
+            active_role in ['coordinator', 'hod']
+        )
 
 
 # ============================================================
@@ -42,9 +63,10 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
 
     serializer_class = CurriculumVersionSerializer
 
-    permission_classes = [
-        IsAuthenticated
-    ]
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'clone']:
+            return [permissions.IsAuthenticated(), CanManageCurriculum()]
+        return [permissions.IsAuthenticated()]
 
     # ========================================================
     # QUERYSET

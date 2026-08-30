@@ -17,7 +17,7 @@ const AssignedRetakesPanel: React.FC<AssignedRetakesPanelProps> = ({ onOpenResul
   const [retakes, setRetakes] = useState<CourseRetake[]>([]);
 
   const role = currentUser?.effective_role || currentUser?.active_role || currentUser?.role;
-  const isInstructor = ['instructor', 'tvf', 'Teacher'].includes(String(role));
+  const isInstructor = ['instructor', 'Teacher'].includes(String(role));
 
   const retakeGroups = useMemo<RetakeAssessmentGroup[]>(() => {
     const grouped = new Map<string, RetakeAssessmentGroup>();

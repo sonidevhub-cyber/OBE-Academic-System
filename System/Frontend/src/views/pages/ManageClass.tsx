@@ -457,7 +457,7 @@ const handleTypeChange = (value: string) => {
   useEffect(() => {
     if (!batchId) return;
 
-    api.get(`students/?batch=${batchId}`)
+    api.get(`students/?batch=${batchId}&page_size=500`)
       .then(res => {
         const data = res.data;
         let studentList = [];
@@ -482,7 +482,14 @@ const handleTypeChange = (value: string) => {
             })
           : studentList;
 
-        setStudents(filteredStudents);
+        // Sort students by registration number (increasing order)
+        const sortedStudents = [...filteredStudents].sort((a: any, b: any) => {
+          const regA = a.registration_number || a.custom_id || '';
+          const regB = b.registration_number || b.custom_id || '';
+          return regA.localeCompare(regB);
+        });
+
+        setStudents(sortedStudents);
       })
       .catch(() => setStudents([]));
   }, [batchId, retakeStudentId, retakeStudentIds]);

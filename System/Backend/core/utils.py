@@ -21,7 +21,6 @@ def get_role_prefix(role):
         'SAC': 'sac',
         'student': 'stu',
         'instructor': 'ins',
-        'tvf': 'tvf',
         'hod': 'hod',
         'coordinator': 'cod',
         'alumni': 'alm'

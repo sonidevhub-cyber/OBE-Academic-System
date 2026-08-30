@@ -30,6 +30,7 @@ class StudentSerializer(serializers.ModelSerializer):
     batch_end_year = serializers.IntegerField(source='user.batch.end_year', read_only=True, allow_null=True)
     original_batch_id = serializers.UUIDField(source='original_batch.id', read_only=True, allow_null=True)
     original_batch_name = serializers.CharField(source='original_batch.name', read_only=True, allow_null=True)
+    department_name = serializers.SerializerMethodField()
     is_freezable = serializers.SerializerMethodField()
     courses = serializers.SerializerMethodField()
 
@@ -37,7 +38,7 @@ class StudentSerializer(serializers.ModelSerializer):
         model = Student
         fields = [
             'student_id', 'custom_id', 'first_name', 'last_name', 'email', 'password', 'batch',
-            'registration_number', 'name', 'department', 'phone', 'date_of_birth',
+            'middle_name', 'registration_number', 'name', 'department', 'department_name', 'phone', 'date_of_birth',
             'gender', 'blood_group', 'guardian_name', 'guardian_contact', 'address',
             'user_email', 'full_name', 'role', 'batch_id', 'batch_name', 'program_id', 
             'program_name', 'program_code', 'current_semester', 'batch_current_semester',
@@ -82,6 +83,11 @@ class StudentSerializer(serializers.ModelSerializer):
             for session in sessions
         )
 
+    def get_department_name(self, obj):
+        if obj.department:
+            return getattr(obj.department, 'name', None)
+        return None
+
     def get_courses(self, obj):
         batch = obj.batch or (obj.user.batch if obj.user else None)
         if not batch or not batch.curriculum_version:
@@ -99,6 +105,26 @@ class StudentSerializer(serializers.ModelSerializer):
             'semester_no': vc.semester_no
         } for vc in courses]
 
+    def _split_full_name(self, full_name):
+        parts = (full_name or '').split()
+        if not parts:
+            return '', ''
+        return parts[0], ' '.join(parts[1:])
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        first_name, fallback_last_name = self._split_full_name(getattr(instance.user, 'full_name', '') or instance.name)
+        middle_name = getattr(instance, 'middle_name', '') or ''
+        last_name = fallback_last_name
+        if middle_name and fallback_last_name.startswith(middle_name):
+            last_name = fallback_last_name[len(middle_name):].strip()
+
+        data['first_name'] = first_name
+        data['middle_name'] = middle_name
+        data['last_name'] = last_name
+        data['email'] = getattr(instance.user, 'email', '') or ''
+        return data
+
     def validate_email(self, value):
         user_id = self.instance.user.id if self.instance else None
         if User.objects.exclude(id=user_id).filter(email=value).exists():
@@ -115,12 +141,13 @@ class StudentSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         first_name = validated_data.pop('first_name', '')
         last_name = validated_data.pop('last_name', '')
+        middle_name = validated_data.get('middle_name', '')
         email = validated_data.pop('email')
         password = validated_data.pop('password')
         batch = validated_data.pop('batch', None)
         registration_number = validated_data.get('registration_number')
         
-        full_name = f"{first_name} {last_name}".strip()
+        full_name = ' '.join(part for part in [first_name, middle_name, last_name] if part).strip()
         
         # Create CustomUser
         user = User.objects.create_user(
@@ -147,6 +174,7 @@ class StudentSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         first_name = validated_data.pop('first_name', None)
         last_name = validated_data.pop('last_name', None)
+        middle_name = validated_data.get('middle_name', None)
         email = validated_data.pop('email', None)
         password = validated_data.pop('password', None)
         batch = validated_data.pop('batch', None)
@@ -155,11 +183,14 @@ class StudentSerializer(serializers.ModelSerializer):
         user = instance.user
         user_updated = False
         
-        if first_name is not None or last_name is not None:
+        if first_name is not None or middle_name is not None or last_name is not None:
             # Reconstruct full name if either name part is provided
             current_first = first_name if first_name is not None else user.full_name.split(' ')[0]
-            current_last = last_name if last_name is not None else ' '.join(user.full_name.split(' ')[1:])
-            user.full_name = f"{current_first} {current_last}".strip()
+            current_middle = middle_name if middle_name is not None else instance.middle_name
+            current_last = last_name if last_name is not None else self._split_full_name(user.full_name)[1]
+            if current_middle and current_last.startswith(current_middle):
+                current_last = current_last[len(current_middle):].strip()
+            user.full_name = ' '.join(part for part in [current_first, current_middle, current_last] if part).strip()
             instance.name = user.full_name
             user_updated = True
             

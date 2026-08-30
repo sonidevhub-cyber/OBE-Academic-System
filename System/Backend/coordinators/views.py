@@ -25,9 +25,9 @@ class IsCoordinator(permissions.BasePermission):
         secondary_role = (getattr(request.user, 'secondary_role', '') or '').lower()
         active_role = (getattr(request.user, 'active_role', '') or '').lower()
         
-        # SAC (Super Admin) and HOD/Coordinator are allowed
+        # Only HOD and Coordinator are allowed (not SAC)
         return (
-            user_role in ['sac', 'coordinator', 'hod'] or 
+            user_role in ['coordinator', 'hod'] or 
             secondary_role in ['coordinator', 'hod'] or
             active_role in ['coordinator', 'hod']
         )
@@ -46,11 +46,21 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         
         # Global Rule: Coordinator aur HOD sirf apne programs ka data access kar sakte hain
-        if user.role.lower() in ['coordinator', 'hod']:
+        if user.role.lower() in ['coordinator'] or getattr(user, 'secondary_role', '').lower() == 'coordinator':
             queryset = queryset.filter(curriculum_version__program__in=user.programs.all())
+        elif user.role.lower() == 'hod' or getattr(user, 'secondary_role', '').lower() == 'hod':
+            from core.permissions import _get_user_department
+            dept = _get_user_department(user)
+            if dept is not None:
+                queryset = queryset.filter(curriculum_version__program__department=dept)
+            else:
+                queryset = queryset.none()
         # Instructors can see only their own allocations
         elif user.role.lower() in ['instructor', 'teacher']:
             queryset = queryset.filter(teacher=user)
+        # SAC users cannot access coordinator allocations
+        else:
+            queryset = queryset.none()
         
         # Filters
         version_id = self.request.query_params.get('version')

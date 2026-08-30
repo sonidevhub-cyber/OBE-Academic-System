@@ -123,28 +123,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      void loadReport(false);
-    }, 30000);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void loadReport(false);
-      }
-    };
-
-    const handleFocus = () => {
-      void loadReport(false);
-    };
-
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    // Auto-refresh removed - user can manually refresh using the refresh button
   }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
   const buildExportRows = () => {
@@ -667,7 +646,11 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {report.students.map((student: CLOMasterCompilationStudent) => (
+                {[...(report.students || [])]
+                  .sort((a: CLOMasterCompilationStudent, b: CLOMasterCompilationStudent) => 
+                    (a.reg_no || '').localeCompare(b.reg_no || '')
+                  )
+                  .map((student: CLOMasterCompilationStudent) => (
                   <React.Fragment key={student.sr_no}>
                     <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-0 bg-gray-50 z-10">

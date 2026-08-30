@@ -513,10 +513,14 @@ const CourseAllocationBulkModule: React.FC = () => {
                                 typeof inst.user === 'string'
                                   ? inst.user
                                   : inst.user?.id || '';
-
+                              const label = [
+                                inst.name,
+                                inst.designation,
+                                inst.employment_type === 'VISITING' ? '(TVF)' : inst.employment_type === 'INTERNEE' ? '(Internee)' : null,
+                              ].filter(Boolean).join(' - ');
                               return (
                               <option key={inst.id} value={instructorUserId}>
-                                {inst.name}
+                                {label}
                               </option>
                               );
                             })}

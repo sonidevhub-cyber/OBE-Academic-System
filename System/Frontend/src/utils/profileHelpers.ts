@@ -31,7 +31,6 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Administrator',
   super_admin: 'Super Admin',
   staff: 'Staff',
-  tvf: 'Visiting Faculty',
 };
 
 export const getEffectiveRole = (profile: ProfileLike, fallback = 'user'): string => {

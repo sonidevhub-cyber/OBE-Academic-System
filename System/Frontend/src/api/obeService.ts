@@ -1384,19 +1384,6 @@ async copyCLOs(
     return response.data;
   }
 
-  async getVisionMissionMappings(departmentId: string): Promise<VisionMissionMappingResponse> {
-    const response = await api.get(`/obe/departments/${departmentId}/vision-mission-mappings/`);
-    return response.data;
-  }
-
-  async saveVisionMissionMappings(
-    departmentId: string,
-    mappings: Array<{ mission_keyword_id: string; vision_keyword_id: string }>
-  ): Promise<VisionMissionMapping[]> {
-    const response = await api.post(`/obe/departments/${departmentId}/vision-mission-mappings/`, { mappings });
-    return response.data;
-  }
-
   async getPOKeywordMappings(programId: string): Promise<POKeywordMappingResponse> {
     const response = await api.get(`/obe/programs/${programId}/po-keyword-mappings/`);
     return response.data;
@@ -1633,12 +1620,19 @@ export interface FrameworkSnapshotResponse {
   program_name: string;
   snapshot_locked_date: string | null;
   is_locked: boolean;
+  snapshot_empty_fields?: FrameworkSnapshotEmptyFields;
   peo_snapshot: PEOSnapshotItem[];
   ga_snapshot: GASnapshotItem[];
   vision_mission_snapshot: VisionMissionSnapshotItem[];
   ga_peo_mappings?: GAPEOSnapshotMapping[];
   po_keyword_mappings?: POKeywordSnapshotMapping[];
   vision_mission_mappings?: VisionMissionSnapshotMapping[];
+}
+
+export interface FrameworkSnapshotEmptyFields {
+  ga: boolean;
+  peo: boolean;
+  vision_mission: boolean;
 }
 
 export interface GAPEOSnapshotMapping {
@@ -1723,22 +1717,6 @@ export interface MissionResponse {
   keywords?: MissionKeyword[];
   created_at?: string;
   updated_at?: string;
-}
-
-export interface VisionMissionMapping {
-  id: string;
-  mission_keyword: string;
-  mission_keyword_text: string;
-  vision_keyword: string;
-  vision_keyword_text: string;
-  is_active: boolean;
-  created_at: string;
-}
-
-export interface VisionMissionMappingResponse {
-  vision_keywords: VisionKeyword[];
-  mission_keywords: MissionKeyword[];
-  mappings: VisionMissionMapping[];
 }
 
 export interface POKeywordMapping {

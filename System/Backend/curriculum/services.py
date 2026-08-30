@@ -157,15 +157,10 @@ def branch_version_if_needed(version, batch, user):
         )
 
         # ----------------------------------------------------
-        # Copy teacher allocations belonging
-        # to this batch
+        # Note: Teacher allocations are NOT cloned automatically.
+        # Allocations must be created through the dedicated
+        # Course Allocation UI by coordinators.
         # ----------------------------------------------------
-
-        clone_allocations_for_version(
-            source_version=version,
-            new_version=new_version,
-            target_batch=batch,
-        )
 
         return new_version
 

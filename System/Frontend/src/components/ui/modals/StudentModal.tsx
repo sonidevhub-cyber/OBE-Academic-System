@@ -21,6 +21,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
   const [formData, setFormData] = useState({
     first_name: '',
+    middle_name: '',
     last_name: '',
     email: '',
     password: '',
@@ -36,6 +37,14 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
     blood_group: '',
     phone: '',
   });
+
+  const splitName = (value: string = '') => {
+    const parts = value.trim().split(/\s+/).filter(Boolean);
+    return {
+      first_name: parts[0] || '',
+      last_name: parts.slice(1).join(' '),
+    };
+  };
 
   // Fetch batches and programs
   useEffect(() => {
@@ -65,11 +74,13 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           try {
             const response = await studentService.getStudentById(studentId);
             const student = response.data;
+            const fallbackName = splitName(student.full_name || student.name || '');
 
             setFormData({
-              first_name: student.first_name || '',
-              last_name: student.last_name || '',
-              email: student.email || '',
+              first_name: student.first_name || fallbackName.first_name,
+              middle_name: student.middle_name || '',
+              last_name: student.last_name || fallbackName.last_name,
+              email: student.email || student.user_email || '',
               password: '',
               registration_number: student.registration_number || '',
               role: student.role || 'student',
@@ -99,6 +110,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         // Reset form for new user
         setFormData({
           first_name: '',
+          middle_name: '',
           last_name: '',
           email: '',
           password: '',
@@ -157,11 +169,6 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         setIsLoading(false);
         return;
       }
-      if (!formData.last_name.trim()) {
-        setError('Last name is required.');
-        setIsLoading(false);
-        return;
-      }
       if (!formData.email.trim()) {
         setError('Email is required.');
         setIsLoading(false);
@@ -178,7 +185,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         return;
       }
       if (!formData.registration_number.trim()) {
-        setError('Registration/Employee ID is required.');
+        setError('Registration number is required.');
         setIsLoading(false);
         return;
       }
@@ -207,6 +214,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         
         // Add all form fields
         dataToSend.append('first_name', formData.first_name);
+        dataToSend.append('middle_name', formData.middle_name);
         dataToSend.append('last_name', formData.last_name);
         dataToSend.append('email', formData.email);
         dataToSend.append('phone', formData.phone);
@@ -237,6 +245,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
         // Use regular JSON data when no image is being uploaded
         dataToSend = {
           first_name: formData.first_name,
+          middle_name: formData.middle_name,
           last_name: formData.last_name,
           email: formData.email,
           phone: formData.phone,
@@ -264,6 +273,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
           // First update user data without image
           const userDataWithoutImage = {
             first_name: formData.first_name,
+            middle_name: formData.middle_name,
             last_name: formData.last_name,
             email: formData.email,
             phone: formData.phone,
@@ -401,14 +411,27 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
                   </div>
 
                   <div>
+                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="middle_name">
+                      Middle Name
+                    </label>
+                    <input
+                      id="middle_name"
+                      name="middle_name"
+                      type="text"
+                      value={formData.middle_name}
+                      onChange={handleChange}
+                      className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="last_name">
-                      Last Name *
+                      Last Name
                     </label>
                     <input
                       id="last_name"
                       name="last_name"
                       type="text"
-                      required
                       value={formData.last_name}
                       onChange={handleChange}
                       className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -447,7 +470,7 @@ const StudentModal: React.FC<StudentModalProps> = ({ isOpen, onClose, studentId,
 
                   <div>
                     <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="registration_number">
-                      Registration/Employee ID *
+                      Registration Number *
                     </label>
                     <input
                       id="registration_number"

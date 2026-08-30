@@ -8,7 +8,7 @@ from core.models import Batch
 from ..models import (
     Vision, Mission,
     VisionKeyword, MissionKeyword,
-    VisionMissionMapping, PEOKeywordMapping,
+    PEOKeywordMapping,
     PEO, VisionMissionCQI,
     VisionMissionCQIRecord,
 )
@@ -16,7 +16,7 @@ from ..services import calculate_all_peo_reports
 from ..serializers import (
     VisionSerializer, MissionSerializer,
     VisionKeywordSerializer, MissionKeywordSerializer,
-    VisionMissionMappingSerializer, PEOKeywordMappingSerializer,
+    PEOKeywordMappingSerializer,
     VisionMissionCQIRecordSerializer,
 )
 from django.utils import timezone as django_timezone
@@ -95,34 +95,18 @@ def _calculate_vm_keyword_score(keyword_type, keyword, batch):
         if row.get('final_score') is not None
     }
 
-    if keyword_type == 'MISSION':
-        mappings = list(
-            PEOKeywordMapping.objects.filter(
-                mission_keyword=keyword,
-                peo__program=batch.program,
-                peo__is_active=True,
-                is_active=True,
-            ).select_related('peo')
-        )
-        mapped_peos = [mapping.peo for mapping in mappings]
-        scores = [peo_score_by_id[str(peo.id)] for peo in mapped_peos if str(peo.id) in peo_score_by_id]
-        return (sum(scores) / Decimal(len(scores))) if scores else None
-
-    mission = Mission.objects.filter(department=batch.program.department, is_active=True).order_by('-created_at').first()
-    vm_mappings = list(
-        VisionMissionMapping.objects.filter(
-            vision_keyword=keyword,
-            mission_keyword__mission=mission,
-            mission_keyword__is_active=True,
+    lookup = {'mission_keyword': keyword} if keyword_type == 'MISSION' else {'vision_keyword': keyword}
+    mappings = list(
+        PEOKeywordMapping.objects.filter(
+            peo__program=batch.program,
+            peo__is_active=True,
             is_active=True,
-        ).select_related('mission_keyword')
-    ) if mission else []
-    mission_scores = []
-    for mission_keyword in [mapping.mission_keyword for mapping in vm_mappings]:
-        score = _calculate_vm_keyword_score('MISSION', mission_keyword, batch)
-        if score is not None:
-            mission_scores.append(score)
-    return (sum(mission_scores) / Decimal(len(mission_scores))) if mission_scores else None
+            **lookup,
+        ).select_related('peo')
+    )
+    mapped_peos = [mapping.peo for mapping in mappings]
+    scores = [peo_score_by_id[str(peo.id)] for peo in mapped_peos if str(peo.id) in peo_score_by_id]
+    return (sum(scores) / Decimal(len(scores))) if scores else None
 
 
 STOP_WORDS = {
@@ -553,108 +537,6 @@ class MissionKeywordListView(APIView):
         return Response({'success': True, 'deactivated_count': deactivated_count})
 
 
-class VisionMissionMappingView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, department_id):
-        if not _can_access_department(request.user, department_id):
-            return Response(
-                {'error': 'You are not authorized to view mappings for this department.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        vision = Vision.objects.filter(
-            department_id=department_id, is_active=True
-        ).order_by('-created_at').first()
-        mission = Mission.objects.filter(
-            department_id=department_id, is_active=True
-        ).order_by('-created_at').first()
-        vision_keywords = []
-        mission_keywords = []
-        mappings = []
-        if vision:
-            vision_keywords = VisionKeyword.objects.filter(vision=vision, is_active=True).order_by('text')
-        if mission:
-            mission_keywords = MissionKeyword.objects.filter(mission=mission, is_active=True).order_by('text')
-        if vision_keywords and mission_keywords:
-            mappings = VisionMissionMapping.objects.filter(
-                mission_keyword__mission=mission,
-                vision_keyword__vision=vision,
-                is_active=True,
-            )
-        return Response({
-            'vision_keywords': VisionKeywordSerializer(vision_keywords, many=True).data,
-            'mission_keywords': MissionKeywordSerializer(mission_keywords, many=True).data,
-            'mappings': VisionMissionMappingSerializer(mappings, many=True).data,
-        })
-
-    @transaction.atomic
-    def post(self, request, department_id):
-        if not _is_hod(request.user):
-            return Response(
-                {'error': 'You are not authorized to manage Vision-Mission mappings. Only HODs can update mappings.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        if not _can_access_department(request.user, department_id):
-            return Response(
-                {'error': 'You are not authorized to manage mappings for this department.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        mappings_data = request.data.get('mappings', []) or []
-        if not isinstance(mappings_data, list):
-            return Response(
-                {'error': '"mappings" must be a list of objects with mission_keyword_id and vision_keyword_id.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        vision = Vision.objects.filter(
-            department_id=department_id, is_active=True
-        ).order_by('-created_at').first()
-        mission = Mission.objects.filter(
-            department_id=department_id, is_active=True
-        ).order_by('-created_at').first()
-        if not vision or not mission:
-            return Response(
-                {'error': 'Active Vision and Mission statements are required before creating mappings.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        valid_vk_ids = {
-            str(item_id)
-            for item_id in VisionKeyword.objects.filter(vision=vision, is_active=True).values_list('id', flat=True)
-        }
-        valid_mk_ids = {
-            str(item_id)
-            for item_id in MissionKeyword.objects.filter(mission=mission, is_active=True).values_list('id', flat=True)
-        }
-        VisionMissionMapping.objects.filter(
-            mission_keyword__mission=mission,
-            vision_keyword__vision=vision,
-        ).update(is_active=False)
-        created = []
-        seen_pairs = set()
-        for m in mappings_data:
-            mk_id = m.get('mission_keyword_id') or m.get('mission_keyword')
-            vk_id = m.get('vision_keyword_id') or m.get('vision_keyword')
-            if not mk_id or not vk_id:
-                continue
-            mk_id_uuid = str(mk_id)
-            vk_id_uuid = str(vk_id)
-            if mk_id_uuid not in valid_mk_ids or vk_id_uuid not in valid_vk_ids:
-                continue
-            pair_key = (str(mk_id_uuid), str(vk_id_uuid))
-            if pair_key in seen_pairs:
-                continue
-            seen_pairs.add(pair_key)
-            mapping, _ = VisionMissionMapping.objects.update_or_create(
-                mission_keyword_id=mk_id_uuid,
-                vision_keyword_id=vk_id_uuid,
-                defaults={'is_active': True},
-            )
-            created.append(mapping)
-        return Response(
-            VisionMissionMappingSerializer(created, many=True).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
 class ProgramPEOKeywordMappingView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -666,7 +548,7 @@ class ProgramPEOKeywordMappingView(APIView):
             return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
         if not _can_access_department(request.user, program.department_id):
             return Response(
-                {'error': 'You are not authorized to view PEO-keyword mappings for this program.'},
+                {'error': 'You are not authorized to view PO-keyword mappings for this program.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         peos = PEO.objects.filter(program_id=program_id, is_active=True).order_by('order_number')
@@ -700,7 +582,7 @@ class ProgramPEOKeywordMappingView(APIView):
     def post(self, request, program_id):
         if not _is_hod(request.user):
             return Response(
-                {'error': 'You are not authorized to manage PEO-keyword mappings. Only HODs can update mappings.'},
+                {'error': 'You are not authorized to manage PO-keyword mappings. Only HODs can update mappings.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         from core.models.program import Program
@@ -755,17 +637,27 @@ class ProgramPEOKeywordMappingView(APIView):
             vk_id_safe = vk_id if vk_id in valid_vk_ids else None
             if not mk_id_safe and not vk_id_safe:
                 continue
-            key = (peo_id_safe, str(mk_id_safe or ''), str(vk_id_safe or ''))
-            if key in seen:
-                continue
-            seen.add(key)
-            mapping, _ = PEOKeywordMapping.objects.update_or_create(
-                peo_id=peo_id_safe,
-                mission_keyword_id=mk_id_safe,
-                vision_keyword_id=vk_id_safe,
-                defaults={'is_active': True},
-            )
-            created.append(mapping)
+            for field_name, keyword_id in (('mission_keyword_id', mk_id_safe), ('vision_keyword_id', vk_id_safe)):
+                if not keyword_id:
+                    continue
+                key = (peo_id_safe, field_name, keyword_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                defaults = {'is_active': True}
+                if field_name == 'mission_keyword_id':
+                    mapping, _ = PEOKeywordMapping.objects.update_or_create(
+                        peo_id=peo_id_safe,
+                        mission_keyword_id=keyword_id,
+                        defaults={**defaults, 'vision_keyword_id': None},
+                    )
+                else:
+                    mapping, _ = PEOKeywordMapping.objects.update_or_create(
+                        peo_id=peo_id_safe,
+                        vision_keyword_id=keyword_id,
+                        defaults={**defaults, 'mission_keyword_id': None},
+                    )
+                created.append(mapping)
         return Response(
             PEOKeywordMappingSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
@@ -817,7 +709,6 @@ class BatchVisionMissionAnalyticsView(APIView):
             for row in peo_reports
             if row.get('final_score') is not None
         }
-
         cqi_records = VisionMissionCQI.objects.filter(batch=batch, is_active=True)
         cqi_by_mission = {str(record.mission_keyword_id): record for record in cqi_records if record.mission_keyword_id}
         cqi_by_vision = {str(record.vision_keyword_id): record for record in cqi_records if record.vision_keyword_id}
@@ -834,6 +725,21 @@ class BatchVisionMissionAnalyticsView(APIView):
                 for mapping in mappings
                 if peo_snapshot_by_id.get(mapping.get('peo_id'))
             ]
+            if not mapped_peos:
+                live_mappings = PEOKeywordMapping.objects.filter(
+                    mission_keyword_id=keyword.get('id'),
+                    peo__program=batch.program,
+                    peo__is_active=True,
+                    is_active=True,
+                ).select_related('peo')
+                mapped_peos = [
+                    {
+                        'id': str(mapping.peo_id),
+                        'code': f"PO-{mapping.peo.order_number}",
+                        'kpi_threshold': str(mapping.peo.kpi_threshold),
+                    }
+                    for mapping in live_mappings
+                ]
             scores = [peo_score_by_id[peo['id']] for peo in mapped_peos if peo.get('id') in peo_score_by_id]
             score = (sum(scores) / Decimal(len(scores))) if scores else None
             target = _target_from_peo_snapshots(mapped_peos)
@@ -865,39 +771,33 @@ class BatchVisionMissionAnalyticsView(APIView):
 
         vision_rows = []
         for keyword in vision_keywords:
-            vm_mappings = [
-                mapping for mapping in vm_snapshot.get('vision_mission_mappings', [])
+            mappings = [
+                mapping for mapping in vm_snapshot.get('peo_keyword_mappings', [])
                 if mapping.get('vision_keyword_id') == keyword.get('id')
             ]
-            mapped_mission_keywords = [
-                {
-                    'id': mapping.get('mission_keyword_id'),
-                    'text': mapping.get('mission_keyword'),
-                }
-                for mapping in vm_mappings
+            mapped_peos = [
+                peo_snapshot_by_id.get(mapping.get('peo_id'))
+                for mapping in mappings
+                if peo_snapshot_by_id.get(mapping.get('peo_id'))
             ]
-            scores = [
-                mission_score_by_id[str(mission_keyword.get('id'))]
-                for mission_keyword in mapped_mission_keywords
-                if str(mission_keyword.get('id')) in mission_score_by_id
-            ]
-            score = (sum(scores) / Decimal(len(scores))) if scores else None
-            target = Decimal('60.00')
-            mapped_peo_targets = []
-            for mission_keyword in mapped_mission_keywords:
+            if not mapped_peos:
+                live_mappings = PEOKeywordMapping.objects.filter(
+                    vision_keyword_id=keyword.get('id'),
+                    peo__program=batch.program,
+                    peo__is_active=True,
+                    is_active=True,
+                ).select_related('peo')
                 mapped_peos = [
-                    peo_snapshot_by_id.get(mapping.get('peo_id'))
-                    for mapping in vm_snapshot.get('peo_keyword_mappings', [])
-                    if mapping.get('mission_keyword_id') == mission_keyword.get('id')
-                    and peo_snapshot_by_id.get(mapping.get('peo_id'))
+                    {
+                        'id': str(mapping.peo_id),
+                        'code': f"PO-{mapping.peo.order_number}",
+                        'kpi_threshold': str(mapping.peo.kpi_threshold),
+                    }
+                    for mapping in live_mappings
                 ]
-                mapped_peo_targets.extend(
-                    Decimal(str(peo.get('kpi_threshold')))
-                    for peo in mapped_peos
-                    if peo.get('kpi_threshold') is not None
-                )
-            if mapped_peo_targets:
-                target = sum(mapped_peo_targets) / Decimal(len(mapped_peo_targets))
+            scores = [peo_score_by_id[peo['id']] for peo in mapped_peos if peo.get('id') in peo_score_by_id]
+            score = (sum(scores) / Decimal(len(scores))) if scores else None
+            target = _target_from_peo_snapshots(mapped_peos)
 
             row_status = _status(score, target)
             cqi = cqi_by_vision.get(str(keyword.get('id')))
@@ -918,8 +818,8 @@ class BatchVisionMissionAnalyticsView(APIView):
                 'action_taken_description': cqi.action_taken_description if cqi else None,
                 'resulting_attainment': _to_float(cqi.resulting_attainment) if cqi else None,
                 'closed_at': cqi.closed_at.isoformat() if cqi and cqi.closed_at else None,
-                'mapped_count': len(mapped_mission_keywords),
-                'mapped_items': [mission_keyword.get('text') for mission_keyword in mapped_mission_keywords],
+                'mapped_count': len(mapped_peos),
+                'mapped_items': [peo.get('code') for peo in mapped_peos],
             })
 
         return Response({

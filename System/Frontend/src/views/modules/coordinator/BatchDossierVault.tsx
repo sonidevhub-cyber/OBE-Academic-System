@@ -30,7 +30,6 @@ import type {
   PEOSnapshotItem,
   POKeywordSnapshotMapping,
   VisionMissionSnapshotItem,
-  VisionMissionSnapshotMapping,
 } from '../../../api/obeService';
 
 interface BatchDossierVaultProps {
@@ -185,17 +184,6 @@ const downloadSnapshotPdf = (
     (snapshot.po_keyword_mappings || []).map((mapping) => [
       mapping.po_code || '',
       mapping.po_title || '',
-      mapping.mission_keyword || '',
-      mapping.vision_keyword || '',
-    ]),
-    y,
-  );
-
-  addPdfTable(
-    pdf,
-    'Vision-Mission Keyword Mappings',
-    ['Mission Keyword', 'Vision Keyword'],
-    (snapshot.vision_mission_mappings || []).map((mapping) => [
       mapping.mission_keyword || '',
       mapping.vision_keyword || '',
     ]),
@@ -610,7 +598,6 @@ const SnapshotPanel: React.FC<{
         <GAPEOMappingTable mappings={snapshot.ga_peo_mappings ?? []} />
         <VisionMissionSnapshotTable items={snapshot.vision_mission_snapshot ?? []} />
         <POKeywordMappingTable mappings={snapshot.po_keyword_mappings ?? []} />
-        <VisionMissionMappingTable mappings={snapshot.vision_mission_mappings ?? []} />
       </div>
     ) : (
       <div className="m-6 rounded-2xl border border-dashed border-gray-200 bg-gray-50/50 p-8 text-center text-xs font-semibold text-gray-400">
@@ -727,18 +714,6 @@ const POKeywordMappingTable: React.FC<{ mappings: POKeywordSnapshotMapping[] }> 
     rows={mappings.map((mapping) => [
       mapping.po_code || '',
       mapping.po_title || '',
-      mapping.mission_keyword || '',
-      mapping.vision_keyword || '',
-    ])}
-  />
-);
-
-const VisionMissionMappingTable: React.FC<{ mappings: VisionMissionSnapshotMapping[] }> = ({ mappings }) => (
-  <DossierTable
-    title={<SectionTitle icon={<Link2 size={15} />} title="Vision-Mission Mapping Snapshot" helper={`${mappings.length} keyword links`} colorClass="bg-teal-600" />}
-    headers={['Mission Keyword', 'Vision Keyword']}
-    emptyText="No Vision-Mission keyword mappings captured in this snapshot."
-    rows={mappings.map((mapping) => [
       mapping.mission_keyword || '',
       mapping.vision_keyword || '',
     ])}

@@ -15,6 +15,7 @@ class Student(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='student_profile')
     registration_number = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=255)
+    middle_name = models.CharField(max_length=100, blank=True, default='')
     department = models.ForeignKey(
         "core.Department", on_delete=models.SET_NULL, null=True, blank=True
     )

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Lock, UserCircle, Save, X, Loader2, Camera } from 'lucide-react';
+import { User, Mail, Lock, UserCircle, Save, X, Loader2, Camera, Phone, Calendar, Droplet, MapPin, Users } from 'lucide-react';
 import { updateProfile } from '../../../api/profileService';
 import { toast } from 'react-toastify';
 import { getFullImageUrl } from '../../../utils/imageHelpers';
@@ -18,7 +18,15 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
     username: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    middle_name: '',
+    phone: '',
+    date_of_birth: '',
+    gender: '',
+    blood_group: '',
+    guardian_name: '',
+    guardian_contact: '',
+    address: ''
   });
   const [profilePic, setProfilePic] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -32,11 +40,46 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
         username: userData.username || '',
         email: userData.email || userData.user_email || '',
         password: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        middle_name: userData.middle_name || '',
+        phone: userData.phone || userData.contact || '',
+        date_of_birth: userData.date_of_birth ? new Date(userData.date_of_birth).toISOString().split('T')[0] : '',
+        gender: userData.gender || '',
+        blood_group: userData.blood_group || '',
+        guardian_name: userData.guardian_name || userData.father_guardian || '',
+        guardian_contact: userData.guardian_contact || '',
+        address: userData.address || ''
       });
-      setImagePreview(userData.profile_pic ? (getFullImageUrl(userData.profile_pic) || null) : null);
+      const profileImage = userData.profile_pic || userData.image;
+      setImagePreview(profileImage ? (getFullImageUrl(profileImage) || null) : null);
     }
   }, [userData]);
+
+  const isStudentProfile = ['student', 'alumni'].includes(
+    String(userData?.effective_role || userData?.active_role || userData?.role || '').toLowerCase()
+  );
+
+  const addStudentFields = (target: FormData | Record<string, any>) => {
+    const fields = {
+      email: formData.email,
+      middle_name: formData.middle_name,
+      phone: formData.phone,
+      date_of_birth: formData.date_of_birth,
+      gender: formData.gender,
+      blood_group: formData.blood_group,
+      guardian_name: formData.guardian_name,
+      guardian_contact: formData.guardian_contact,
+      address: formData.address,
+    };
+
+    Object.entries(fields).forEach(([key, value]) => {
+      if (target instanceof FormData) {
+        target.append(key, value || '');
+      } else {
+        target[key] = value || '';
+      }
+    });
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -61,6 +104,9 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
       if (profilePic) {
         const data = new FormData();
         data.append('full_name', formData.name);
+        if (isStudentProfile) {
+          addStudentFields(data);
+        }
         if (formData.password) {
           data.append('password', formData.password);
         }
@@ -73,6 +119,9 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
         const data: Record<string, any> = {
           full_name: formData.name,
         };
+        if (isStudentProfile) {
+          addStudentFields(data);
+        }
         if (formData.password) {
           data.password = formData.password;
         }
@@ -104,7 +153,7 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden border border-slate-200"
+            className="bg-white w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-[32px] shadow-2xl border border-slate-200"
           >
             <div className="bg-gradient-to-r from-indigo-600 to-purple-700 px-6 py-8 text-white relative">
               <button 
@@ -171,11 +220,10 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                         <User className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
                       </div>
-                      <input
-                        type="text"
-                        required
-                        value={formData.username}
-                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    <input
+                      type="text"
+                      value={formData.username}
+                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                         className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
                         placeholder="username"
                       />
@@ -198,6 +246,138 @@ const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onClose, us
                     </div>
                   </div>
                 </div>
+
+                {isStudentProfile && (
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 ml-1">Student Details</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Middle Name</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <User className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="text"
+                            value={formData.middle_name}
+                            onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                            placeholder="Middle name"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Phone</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Phone className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="tel"
+                            value={formData.phone}
+                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                            placeholder="Phone number"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Date of Birth</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Calendar className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="date"
+                            value={formData.date_of_birth}
+                            onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Gender</label>
+                        <select
+                          value={formData.gender}
+                          onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                        >
+                          <option value="">Select gender</option>
+                          <option value="male">Male</option>
+                          <option value="female">Female</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Blood Group</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Droplet className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="text"
+                            value={formData.blood_group}
+                            onChange={(e) => setFormData({ ...formData, blood_group: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                            placeholder="O+"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Guardian Contact</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Phone className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="text"
+                            value={formData.guardian_contact}
+                            onChange={(e) => setFormData({ ...formData, guardian_contact: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                            placeholder="Guardian contact"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Guardian Name</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Users className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <input
+                            type="text"
+                            value={formData.guardian_name}
+                            onChange={(e) => setFormData({ ...formData, guardian_name: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium"
+                            placeholder="Guardian name"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Address</label>
+                        <div className="relative group">
+                          <div className="absolute top-3 left-0 pl-4 flex items-center pointer-events-none">
+                            <MapPin className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                          </div>
+                          <textarea
+                            rows={3}
+                            value={formData.address}
+                            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                            className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-slate-900 font-medium resize-none"
+                            placeholder="Full address"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-4 border-t border-slate-100">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 ml-1">Change Password (Leave blank to keep current)</p>

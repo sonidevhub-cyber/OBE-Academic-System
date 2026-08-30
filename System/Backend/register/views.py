@@ -30,7 +30,7 @@ def _build_login_response_for_user(user):
         roles.append(user.secondary_role)
     
     # Faculty are also instructors IF they have active allocations
-    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+    if user.role in ['hod', 'coordinator'] or user.secondary_role in ['hod', 'coordinator']:
         if 'instructor' not in roles:
             from coordinators.models import TeacherAllocation
             if TeacherAllocation.objects.filter(teacher=user, is_active=True).exists():
@@ -62,7 +62,7 @@ def _build_login_response_for_user(user):
     }
 
     # Enrich with instructor data if it's a faculty member
-    if user.role in ['hod', 'coordinator', 'instructor', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+    if user.role in ['hod', 'coordinator', 'instructor'] or user.secondary_role in ['hod', 'coordinator']:
         try:
             from instructors.models import Instructor
             from instructors.serializers import InstructorSerializer
@@ -241,6 +241,16 @@ def update_profile(request):
         user.full_name = request.data.get("full_name")
         logger.info(f"Updated full_name to: {user.full_name}")
 
+    if request.data.get("email") and request.data.get("email") != user.email:
+        email = User.objects.normalize_email(request.data.get("email"))
+        if User.objects.exclude(id=user.id).filter(email=email).exists():
+            return Response({"error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        user.email = email
+        logger.info(f"Updated email to: {user.email}")
+
+    if "phone" in request.data:
+        user.phone = request.data.get("phone") or None
+
     if request.FILES.get("profile_pic"):
         user.profile_pic = request.FILES.get("profile_pic")
         logger.info("Updated profile_pic")
@@ -264,6 +274,28 @@ def update_profile(request):
         logger.info("No password field in request or password is empty")
 
     user.save()
+
+    if user.role in ["student", "alumni"]:
+        student = Student.objects.filter(user=user).first()
+        if student:
+            if request.FILES.get("profile_pic"):
+                student.image = request.FILES.get("profile_pic")
+            if request.data.get("full_name"):
+                student.name = request.data.get("full_name")
+            for field in [
+                "middle_name",
+                "phone",
+                "date_of_birth",
+                "gender",
+                "blood_group",
+                "guardian_name",
+                "guardian_contact",
+                "address",
+            ]:
+                if field in request.data:
+                    value = request.data.get(field)
+                    setattr(student, field, value or None if field != "middle_name" else value or "")
+            student.save()
     logger.info(f"User {user.id} saved successfully")
 
     new_hash_preview = None
@@ -306,7 +338,8 @@ def available_roles(request):
         })
     
     # Faculty are also instructors IF they have allocations
-    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+    # Note: tvf is already an instructor designation, so no need to add instructor role separately
+    if user.role in ['hod', 'coordinator'] or user.secondary_role in ['hod', 'coordinator']:
         from coordinators.models import TeacherAllocation
         has_allocations = TeacherAllocation.objects.filter(teacher=user, is_active=True).exists()
         
@@ -340,7 +373,7 @@ def switch_active_role(request):
     if user.secondary_role and user.secondary_role != 'none':
         allowed_roles.append(user.secondary_role)
     
-    if user.role in ['hod', 'coordinator', 'tvf'] or user.secondary_role in ['hod', 'coordinator']:
+    if user.role in ['hod', 'coordinator'] or user.secondary_role in ['hod', 'coordinator']:
         from coordinators.models import TeacherAllocation
         if TeacherAllocation.objects.filter(teacher=user, is_active=True).exists():
             if 'instructor' not in allowed_roles:

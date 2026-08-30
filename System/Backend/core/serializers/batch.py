@@ -227,6 +227,7 @@ class BatchFrameworkSnapshotSerializer(serializers.Serializer):
     ga_peo_mappings = serializers.ListField()
     po_keyword_mappings = serializers.ListField()
     vision_mission_mappings = serializers.ListField()
+    snapshot_empty_fields = serializers.DictField()
 
     def _text_value(self, value):
         if isinstance(value, dict):
@@ -239,6 +240,24 @@ class BatchFrameworkSnapshotSerializer(serializers.Serializer):
             if value:
                 return value
         return None
+
+    @staticmethod
+    def is_snapshot_empty(value, field_name):
+        if not value:
+            return True
+        if not isinstance(value, dict):
+            return False
+        if field_name == "ga":
+            return not bool(value.get("gas"))
+        if field_name == "peo":
+            return not bool(value.get("peos"))
+        if field_name == "vision_mission":
+            vision = value.get("vision") or {}
+            mission = value.get("mission") or {}
+            has_vision = bool(vision.get("vision_text") or vision.get("keywords"))
+            has_mission = bool(mission.get("mission_text") or mission.get("keywords"))
+            return not (has_vision or has_mission)
+        return not bool(value)
 
     def to_representation(self, batch):
         stored_peo = batch.peo_snapshot or {}
@@ -364,38 +383,7 @@ class BatchFrameworkSnapshotSerializer(serializers.Serializer):
                     "vision_keyword": self._mapping_text(mapping, "vision_keyword", "vision_keyword_text"),
                 })
 
-        raw_vision_mission_mappings = stored_vm.get("vision_mission_mappings", []) if isinstance(stored_vm, dict) else []
-        if not raw_vision_mission_mappings:
-            vision_keyword_ids = [
-                keyword.get("id")
-                for keyword in (vision.get("keywords", []) or [])
-                if isinstance(keyword, dict) and keyword.get("id")
-            ]
-            mission_keyword_ids = [
-                keyword.get("id")
-                for keyword in (mission.get("keywords", []) or [])
-                if isinstance(keyword, dict) and keyword.get("id")
-            ]
-            if vision_keyword_ids and mission_keyword_ids:
-                try:
-                    from obe.models import VisionMissionMapping
-
-                    raw_vision_mission_mappings = [
-                        {
-                            "mapping_id": str(mapping.id),
-                            "mission_keyword_id": str(mapping.mission_keyword_id),
-                            "mission_keyword": mapping.mission_keyword.text,
-                            "vision_keyword_id": str(mapping.vision_keyword_id),
-                            "vision_keyword": mapping.vision_keyword.text,
-                        }
-                        for mapping in VisionMissionMapping.objects.filter(
-                            mission_keyword_id__in=mission_keyword_ids,
-                            vision_keyword_id__in=vision_keyword_ids,
-                            is_active=True,
-                        ).select_related("mission_keyword", "vision_keyword")
-                    ]
-                except Exception:
-                    raw_vision_mission_mappings = []
+        raw_vision_mission_mappings = []
         vision_mission_mappings = [
             {
                 "mapping_id": mapping.get("mapping_id") or mapping.get("id"),
@@ -407,6 +395,11 @@ class BatchFrameworkSnapshotSerializer(serializers.Serializer):
             for mapping in raw_vision_mission_mappings
         ]
 
+        empty_fields = {
+            "ga": self.is_snapshot_empty(batch.ga_snapshot, "ga"),
+            "peo": self.is_snapshot_empty(batch.peo_snapshot, "peo"),
+            "vision_mission": self.is_snapshot_empty(batch.vision_mission_snapshot, "vision_mission"),
+        }
         has_data = bool(peo_snapshot or ga_snapshot or vision_mission_snapshot)
 
         return {
@@ -424,7 +417,22 @@ class BatchFrameworkSnapshotSerializer(serializers.Serializer):
             "ga_peo_mappings": ga_peo_mappings,
             "po_keyword_mappings": po_keyword_mappings,
             "vision_mission_mappings": vision_mission_mappings,
+            "snapshot_empty_fields": empty_fields,
         }
+
+
+class BatchFrameworkSnapshotCopySerializer(serializers.Serializer):
+    fields = serializers.ListField(
+        child=serializers.ChoiceField(choices=("ga", "peo", "vision_mission")),
+        allow_empty=False,
+    )
+
+    def validate_fields(self, value):
+        seen = []
+        for field in value:
+            if field not in seen:
+                seen.append(field)
+        return seen
 
 
 class DossierListSerializer(serializers.Serializer):
@@ -556,5 +564,6 @@ class BatchStructureSerializer(BatchFrameworkSnapshotSerializer):
             "vision_mission_snapshot": data["vision_mission_snapshot"],
             "po_keyword_mappings": data["po_keyword_mappings"],
             "vision_mission_mappings": data["vision_mission_mappings"],
+            "snapshot_empty_fields": data["snapshot_empty_fields"],
             "courses": self._get_courses(batch),
         }

@@ -918,7 +918,9 @@ const GAReport: React.FC = () => {
               {/* Body */}
               <tbody className="divide-y divide-gray-200">
                 {viewMode === 'student-wise' ? (
-                  (reportData.students || []).map((student, idx) => (
+                  (reportData.students || [])
+                    .sort((a, b) => (a.registration_number || '').localeCompare(b.registration_number || ''))
+                    .map((student, idx) => (
                     <tr key={student.id}>
                       <td className="px-4 py-3 text-sm font-semibold text-gray-900">{idx + 1}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{student.registration_number}</td>

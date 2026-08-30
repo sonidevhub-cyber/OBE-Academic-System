@@ -16,7 +16,7 @@ class AdminViewSet(viewsets.ViewSet):
         from django.db.models import Q
         return Response({
             "total_students": User.objects.filter(role__iexact='student', is_active=True).count(),
-            "total_instructors": User.objects.filter(Q(role__iexact='instructor') | Q(role__iexact='tvf'), is_active=True).count(),
+            "total_instructors": User.objects.filter(role__iexact='instructor', is_active=True).count(),
             "total_hods": User.objects.filter(role__iexact='hod', is_active=True).count(),
             "total_alumni": User.objects.filter(role__iexact='alumni', is_active=True).count(),
             "active_courses": 0,

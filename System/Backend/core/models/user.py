@@ -37,32 +37,31 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True) 
     full_name = models.CharField(max_length=255) 
      
-    # Primary role 
-    role = models.CharField( 
-        max_length=20, 
-        choices=[ 
-            ('SAC', 'SAC'), 
-            ('hod', 'HOD'), 
-            ('coordinator', 'Coordinator'), 
-            ('instructor', 'Instructor'), 
-            ('tvf', 'Visiting Faculty'), 
-            ('student', 'Student'), 
-            ('alumni', 'Alumni'), 
-        ] 
-    ) 
- 
-    # Secondary role — only for faculty 
-    # Allows one person to be both 
-    # HOD + Coordinator at same time 
-    secondary_role = models.CharField( 
-        max_length=20, 
-        choices=[ 
-            ('none', 'None'), 
-            ('hod', 'HOD'), 
-            ('coordinator', 'Coordinator'), 
-        ], 
-        default='none' 
-    ) 
+    # Primary role
+    role = models.CharField(
+        max_length=20,
+        choices=[
+            ('SAC', 'SAC'),
+            ('hod', 'HOD'),
+            ('coordinator', 'Coordinator'),
+            ('instructor', 'Instructor'),
+            ('student', 'Student'),
+            ('alumni', 'Alumni'),
+        ]
+    )
+
+    # Secondary role — only for faculty
+    # Allows one person to be both
+    # HOD + Coordinator at same time
+    secondary_role = models.CharField(
+        max_length=20,
+        choices=[
+            ('none', 'None'),
+            ('hod', 'HOD'),
+            ('coordinator', 'Coordinator'),
+        ],
+        default='none'
+    )
 
     # Currently active role for multi-role users
     active_role = models.CharField(
@@ -70,10 +69,10 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         null=True,
         blank=True
     )
-    # Rule: secondary_role only set when 
-    # role == 'instructor' or role == 'hod' 
-    # or role == 'coordinator' 
-    # TVF always has secondary_role = 'none' 
+    # Rule: secondary_role only set when
+    # role == 'instructor' or role == 'hod'
+    # or role == 'coordinator'
+    # Designation is stored separately in the designation field
  
     # Program assignment for coordinator 
     # ManyToMany — coordinator can handle 
@@ -151,7 +150,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             dept_code = None
             
             # Try to get department code for faculty/students
-            if self.role in ['instructor', 'hod', 'coordinator', 'tvf']:
+            if self.role in ['instructor', 'hod', 'coordinator']:
                 # For faculty, check if they have instructor profile or program assignment
                 if hasattr(self, 'instructor_profile') and self.instructor_profile.department:
                     dept_code = self.instructor_profile.department.code

@@ -1,7 +1,8 @@
-export type PrimaryRole = 
-    'SAC' | 'hod' | 'coordinator' | 
-    'instructor' | 'tvf' | 
-    'student' | 'alumni' 
+export type PrimaryRole =
+    'SAC' | 'hod' | 'coordinator' |
+    'instructor' | 'student' | 'alumni'
+    // Note: 'tvf' was previously a role but is now a designation ('Visiting Faculty')
+    // Users with designation='Visiting Faculty' have role='instructor'
  
 export type SecondaryRole = 
     'none' | 'hod' | 'coordinator' 

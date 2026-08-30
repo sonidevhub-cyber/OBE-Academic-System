@@ -1,19 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { getUsers, createUser, deactivateUser, updateUser } from '../../api/users';
-import { User, PrimaryRole, SecondaryRole, UserCreateData } from '../../types/user';
+import { User, UserCreateData } from '../../types/user';
 import { api } from '../../api/api';
 import { getFullImageUrl } from '../../utils/imageHelpers';
 
 const Users: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<string>('All');
+    const [filterRole, setFilterRole] = useState<string>('');
+    const [filterStatus, setFilterStatus] = useState<string>('');
+    const [searchTerm, setSearchTerm] = useState<string>('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
     const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+    const facultyPrimaryRoles = ['Visiting Faculty (TVF)', 'Associate Professor', 'Assistant Professor', 'Lecturer'] as const;
+    type FacultyPrimaryRole = typeof facultyPrimaryRoles[number];
+    const [selectedPrimaryRole, setSelectedPrimaryRole] = useState<FacultyPrimaryRole>('Assistant Professor');
 
-    // Form state
     const [formData, setFormData] = useState<UserCreateData>({
         full_name: '',
         email: '',
@@ -27,29 +31,30 @@ const Users: React.FC = () => {
         profile_pic: null
     });
     const [imagePreview, setImagePreview] = useState<string | null>(null);
-
     const [programs, setPrograms] = useState<any[]>([]);
 
-    const tabs = ['All', 'hod', 'coordinator', 'instructor', 'tvf'];
-    const designations = ['Assistant Professor', 'Professor', 'Associate Professor', 'Lecturer'];
+    const syncPrimaryRole = (primaryRole: FacultyPrimaryRole) => {
+        setSelectedPrimaryRole(primaryRole);
+        setFormData(prev => ({
+            ...prev,
+            role: 'instructor',
+            secondary_role: primaryRole === 'Visiting Faculty (TVF)' ? 'none' : prev.secondary_role,
+            designation: primaryRole === 'Visiting Faculty (TVF)' ? 'Visiting Faculty' : primaryRole,
+        }));
+    };
 
     useEffect(() => {
         fetchUsers();
         fetchInitialData();
-    }, [activeTab]);
+    }, []);
 
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            let data: User[] = [];
-            if (activeTab === 'All') {
-                const allUsers = await getUsers();
-                data = allUsers.filter(user => 
-                    ['hod', 'coordinator', 'instructor', 'tvf'].includes(user.role.toLowerCase())
-                );
-            } else {
-                data = await getUsers(activeTab);
-            }
+            const allUsers = await getUsers();
+            const data = allUsers.filter((user: User) =>
+                ['hod', 'coordinator', 'instructor'].includes(user.role.toLowerCase())
+            );
             setUsers(data);
         } catch (error) {
             showToast('Failed to fetch faculty members', 'error');
@@ -71,6 +76,19 @@ const Users: React.FC = () => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3000);
     };
+
+    const filteredUsers = users.filter(user => {
+        const matchRole = !filterRole ||
+            user.role === filterRole ||
+            (filterRole === 'hod' && user.secondary_role === 'hod') ||
+            (filterRole === 'coordinator' && user.secondary_role === 'coordinator');
+        const matchStatus = !filterStatus || (filterStatus === 'active' ? user.is_active : !user.is_active);
+        const matchSearch = !searchTerm ||
+            user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (user.custom_id || '').toLowerCase().includes(searchTerm.toLowerCase());
+        return matchRole && matchStatus && matchSearch;
+    });
 
     const handleToggleStatus = async (user: User) => {
         const action = user.is_active ? 'deactivate' : 'activate';
@@ -98,16 +116,24 @@ const Users: React.FC = () => {
     };
 
     const handleEdit = (user: User) => {
+        const isTVF = user.designation === 'Visiting Faculty';
+        const primaryRole = isTVF
+            ? 'Visiting Faculty (TVF)'
+            : facultyPrimaryRoles.includes((user.designation || '') as FacultyPrimaryRole)
+                ? (user.designation as FacultyPrimaryRole)
+                : 'Assistant Professor';
+
         setEditingUserId(user.id);
+        setSelectedPrimaryRole(primaryRole);
         setFormData({
             full_name: user.full_name,
             email: user.email,
-            role: user.role,
-            secondary_role: user.secondary_role,
-            designation: user.designation || 'Assistant Professor',
+            role: 'instructor',
+            secondary_role: isTVF ? 'none' : user.secondary_role,
+            designation: isTVF ? 'Visiting Faculty' : primaryRole,
             phone: user.phone || '',
             password: '',
-            programs: [], // Would need mapping if available
+            programs: [],
             batch: null,
             profile_pic: null
         });
@@ -116,6 +142,7 @@ const Users: React.FC = () => {
     };
 
     const resetForm = () => {
+        setSelectedPrimaryRole('Assistant Professor');
         setFormData({
             full_name: '',
             email: '',
@@ -134,22 +161,24 @@ const Users: React.FC = () => {
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
         if (!formData.full_name || !formData.email || (!editingUserId && !formData.password)) {
             showToast('Please fill all required fields', 'error');
             return;
         }
 
         const data = new FormData();
+        const isTVF = selectedPrimaryRole === 'Visiting Faculty (TVF)';
         data.append('full_name', formData.full_name);
         data.append('email', formData.email);
         if (formData.password) data.append('password', formData.password);
-        data.append('role', formData.role);
-        data.append('secondary_role', formData.role === 'tvf' ? 'none' : formData.secondary_role);
-        data.append('designation', formData.role === 'tvf' ? 'Visiting Faculty' : (formData.designation || ''));
+        data.append('role', 'instructor');
+        data.append('secondary_role', isTVF ? 'none' : formData.secondary_role);
+        data.append('designation', isTVF ? 'Visiting Faculty' : selectedPrimaryRole);
         data.append('phone', formData.phone || '');
-        
-        formData.programs.forEach(pId => data.append('programs', pId));
+        // Only send programs for coordinator, not HOD
+        if (formData.secondary_role === 'coordinator') {
+            formData.programs.forEach(pId => data.append('programs', pId));
+        }
         if (formData.profile_pic) data.append('profile_pic', formData.profile_pic);
 
         try {
@@ -171,8 +200,8 @@ const Users: React.FC = () => {
 
     const renderRoleBadge = (user: User) => {
         const baseStyle = "px-2 py-1 rounded-full text-xs font-medium";
-        if (user.role === 'tvf') return <span className={`${baseStyle} bg-gray-100 text-gray-800`}>TVF</span>;
-        
+        if (user.designation === 'Visiting Faculty') return <span className={`${baseStyle} bg-gray-100 text-gray-800`}>TVF</span>;
+
         const roleColors: Record<string, string> = {
             SAC: "bg-purple-100 text-purple-800",
             hod: "bg-red-100 text-red-800",
@@ -181,13 +210,13 @@ const Users: React.FC = () => {
         };
 
         return (
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
                 <span className={`${baseStyle} ${roleColors[user.role] || 'bg-gray-100 text-gray-800'}`}>
                     {user.role.toUpperCase()}
                 </span>
                 {user.secondary_role !== 'none' && (
                     <span className={`${baseStyle} ${roleColors[user.secondary_role] || 'bg-gray-100 text-gray-800'}`}>
-                        + {user.secondary_role.toUpperCase()}
+                        +{user.secondary_role.toUpperCase()}
                     </span>
                 )}
             </div>
@@ -201,7 +230,7 @@ const Users: React.FC = () => {
                     <h1 className="text-2xl font-bold text-gray-800">Faculty Management</h1>
                     <p className="text-gray-600">Manage instructors, HODs, coordinators, and visiting faculty</p>
                 </div>
-                <button 
+                <button
                     onClick={() => { resetForm(); setShowAddModal(true); }}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center"
                 >
@@ -212,21 +241,35 @@ const Users: React.FC = () => {
                 </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex space-x-2 mb-6 bg-white p-1 rounded-lg shadow-sm">
-                {tabs.map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                            activeTab === tab 
-                            ? 'bg-blue-100 text-blue-700' 
-                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                        }`}
-                    >
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </button>
-                ))}
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 mb-6">
+                <input
+                    type="text"
+                    placeholder="Search by name, email, ID..."
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[200px] bg-white"
+                />
+                <select
+                    value={filterRole}
+                    onChange={e => setFilterRole(e.target.value)}
+                    className="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                >
+                    <option value="">All Roles</option>
+                    <option value="instructor">Instructor</option>
+                    <option value="hod">HOD</option>
+                    <option value="coordinator">Coordinator</option>
+                </select>
+                <select
+                    value={filterStatus}
+                    onChange={e => setFilterStatus(e.target.value)}
+                    className="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                >
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+                <span className="self-center text-sm text-gray-500">{filteredUsers.length} result{filteredUsers.length !== 1 ? 's' : ''}</span>
             </div>
 
             {/* Table */}
@@ -246,9 +289,9 @@ const Users: React.FC = () => {
                     <tbody className="divide-y">
                         {loading ? (
                             <tr><td colSpan={7} className="px-6 py-4 text-center">Loading...</td></tr>
-                        ) : users.length === 0 ? (
+                        ) : filteredUsers.length === 0 ? (
                             <tr><td colSpan={7} className="px-6 py-4 text-center">No faculty members found</td></tr>
-                        ) : users.map(user => (
+                        ) : filteredUsers.map(user => (
                             <tr key={user.id} className="hover:bg-gray-50">
                                 <td className="px-6 py-4">
                                     <div className="flex items-center">
@@ -274,7 +317,10 @@ const Users: React.FC = () => {
                                 <td className="px-6 py-4">{renderRoleBadge(user)}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">{user.designation || '-'}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">
-                                    {user.programs_list.length > 0 ? user.programs_list.join(', ') : '-'}
+                                    {(user.role === 'hod' || user.secondary_role === 'hod')
+                                        ? <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium">Dept. Scoped</span>
+                                        : user.programs_list?.length > 0 ? user.programs_list.join(', ') : '-'
+                                    }
                                 </td>
                                 <td className="px-6 py-4">
                                     <span className={`px-2 py-1 rounded-full text-xs ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -282,14 +328,9 @@ const Users: React.FC = () => {
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 text-sm font-medium space-x-2">
-                                    <button 
-                                        onClick={() => handleEdit(user)}
-                                        className="text-blue-600 hover:text-blue-900"
-                                    >
-                                        Edit
-                                    </button>
+                                    <button onClick={() => handleEdit(user)} className="text-blue-600 hover:text-blue-900">Edit</button>
                                     {user.role !== 'SAC' && (
-                                        <button 
+                                        <button
                                             onClick={() => handleToggleStatus(user)}
                                             className={`${user.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}
                                         >
@@ -311,7 +352,7 @@ const Users: React.FC = () => {
                             <h3 className="text-lg font-bold">{showEditModal ? 'Edit Faculty Member' : 'Add New Faculty Member'}</h3>
                             <button onClick={() => { setShowAddModal(false); setShowEditModal(false); resetForm(); }} className="text-gray-400 hover:text-gray-600">✕</button>
                         </div>
-                        
+
                         <form onSubmit={handleFormSubmit} className="p-6 space-y-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* Profile Pic */}
@@ -337,58 +378,25 @@ const Users: React.FC = () => {
                                     <h4 className="font-semibold text-blue-600 text-sm uppercase tracking-wider">Personal Details</h4>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                                        <input 
-                                            type="text" 
-                                            required
-                                            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                            value={formData.full_name}
-                                            onChange={e => setFormData({...formData, full_name: e.target.value})}
-                                            placeholder="Enter full name"
-                                        />
+                                        <input type="text" required className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} placeholder="Enter full name" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Email Address *</label>
-                                        <input 
-                                            type="email" 
-                                            required
-                                            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                            value={formData.email}
-                                            onChange={e => setFormData({...formData, email: e.target.value})}
-                                            placeholder="email@example.com"
-                                        />
+                                        <input type="email" required className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="email@example.com" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                                        <input 
-                                            type="text" 
-                                            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                            value={formData.phone}
-                                            onChange={e => setFormData({...formData, phone: e.target.value})}
-                                            placeholder="+92 3xx xxxxxxx"
-                                        />
+                                        <input type="text" className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="+92 3xx xxxxxxx" />
                                     </div>
                                     {!showEditModal ? (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
-                                            <input 
-                                                type="password" 
-                                                required
-                                                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                                value={formData.password}
-                                                onChange={e => setFormData({...formData, password: e.target.value})}
-                                                placeholder="Create a password"
-                                            />
+                                            <input type="password" required className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Create a password" />
                                         </div>
                                     ) : (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Update Password</label>
-                                            <input 
-                                                type="password" 
-                                                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                                value={formData.password}
-                                                onChange={e => setFormData({...formData, password: e.target.value})}
-                                                placeholder="Leave blank to keep current"
-                                            />
+                                            <input type="password" className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Leave blank to keep current" />
                                             <p className="text-[10px] text-gray-400 mt-1 italic">Only enter if you want to change the password</p>
                                         </div>
                                     )}
@@ -399,107 +407,75 @@ const Users: React.FC = () => {
                                     <h4 className="font-semibold text-blue-600 text-sm uppercase tracking-wider">Professional Info</h4>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Primary Role *</label>
-                                        <select 
-                                            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={formData.role}
-                                            onChange={e => setFormData({...formData, role: e.target.value as PrimaryRole})}
-                                        >
-                                            <option value="instructor">Instructor</option>
-                                            <option value="hod">HOD</option>
-                                            <option value="coordinator">Coordinator</option>
-                                            <option value="tvf">Visiting Faculty (TVF)</option>
+                                        <select className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" value={selectedPrimaryRole} onChange={e => syncPrimaryRole(e.target.value as FacultyPrimaryRole)}>
+                                            {facultyPrimaryRoles.map(role => (
+                                                <option key={role} value={role}>{role}</option>
+                                            ))}
                                         </select>
                                     </div>
 
-                                    {formData.role !== 'tvf' ? (
+                                    {selectedPrimaryRole !== 'Visiting Faculty (TVF)' ? (
                                         <>
                                             <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
-                                                <select 
-                                                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                                                    value={formData.designation}
-                                                    onChange={e => setFormData({...formData, designation: e.target.value})}
-                                                >
-                                                    {designations.map(d => <option key={d} value={d}>{d}</option>)}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Roles</label>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Role</label>
                                                 <div className="flex gap-4 mt-2">
                                                     <label className="flex items-center space-x-2 cursor-pointer">
-                                                        <input 
-                                                            type="radio" 
-                                                            name="sec_role"
-                                                            checked={formData.secondary_role === 'none'} 
-                                                            onChange={() => setFormData({...formData, secondary_role: 'none'})}
-                                                        />
+                                                        <input type="radio" name="sec_role" checked={formData.secondary_role === 'none'} onChange={() => setFormData({...formData, secondary_role: 'none'})} />
                                                         <span className="text-sm">None</span>
                                                     </label>
                                                     <label className="flex items-center space-x-2 cursor-pointer">
-                                                        <input 
-                                                            type="radio" 
-                                                            name="sec_role"
-                                                            checked={formData.secondary_role === 'hod'} 
-                                                            onChange={() => setFormData({...formData, secondary_role: 'hod'})}
-                                                        />
+                                                        <input type="radio" name="sec_role" checked={formData.secondary_role === 'hod'} onChange={() => setFormData({...formData, secondary_role: 'hod', programs: []})} />
                                                         <span className="text-sm">HOD</span>
                                                     </label>
                                                     <label className="flex items-center space-x-2 cursor-pointer">
-                                                        <input 
-                                                            type="radio" 
-                                                            name="sec_role"
-                                                            checked={formData.secondary_role === 'coordinator'} 
-                                                            onChange={() => setFormData({...formData, secondary_role: 'coordinator'})}
-                                                        />
+                                                        <input type="radio" name="sec_role" checked={formData.secondary_role === 'coordinator'} onChange={() => setFormData({...formData, secondary_role: 'coordinator'})} />
                                                         <span className="text-sm">Coordinator</span>
                                                     </label>
                                                 </div>
                                             </div>
+
+                                            {formData.secondary_role === 'hod' && (
+                                                <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
+                                                    <p className="text-xs text-purple-700 font-medium">HOD is department-scoped.</p>
+                                                    <p className="text-xs text-purple-600 mt-0.5">All programs of their department are automatically accessible — no program assignment needed.</p>
+                                                </div>
+                                            )}
+
+                                            {formData.secondary_role === 'coordinator' && (
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">Assign Programs *</label>
+                                                    <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white">
+                                                        {programs.map(p => (
+                                                            <label key={p.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={formData.programs.includes(p.id)}
+                                                                    onChange={e => {
+                                                                        const newPrograms = e.target.checked
+                                                                            ? [...formData.programs, p.id]
+                                                                            : formData.programs.filter(id => id !== p.id);
+                                                                        setFormData({...formData, programs: newPrograms});
+                                                                    }}
+                                                                    className="h-4 w-4 rounded text-blue-600"
+                                                                />
+                                                                <span className="text-xs text-gray-700">{p.name}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </>
                                     ) : (
                                         <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                            <p className="text-xs text-gray-600 italic">TVF role has limited access. No additional designations or roles required.</p>
-                                        </div>
-                                    )}
-
-                                    {(formData.role === 'hod' || formData.role === 'coordinator' || formData.secondary_role === 'hod' || formData.secondary_role === 'coordinator') && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">Programs Assignment</label>
-                                            <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white">
-                                                {programs.map(p => (
-                                                    <label key={p.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            checked={formData.programs.includes(p.id)}
-                                                            onChange={e => {
-                                                                const newPrograms = e.target.checked 
-                                                                    ? [...formData.programs, p.id]
-                                                                    : formData.programs.filter(id => id !== p.id);
-                                                                setFormData({...formData, programs: newPrograms});
-                                                            }}
-                                                            className="h-4 w-4 rounded text-blue-600"
-                                                        />
-                                                        <span className="text-xs text-gray-700">{p.name}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
+                                            <p className="text-xs text-gray-600 italic">TVF role has limited access. No additional roles required.</p>
                                         </div>
                                     )}
                                 </div>
                             </div>
 
                             <div className="pt-4 border-t flex justify-end space-x-3 sticky bottom-0 bg-white">
-                                <button 
-                                    type="button"
-                                    onClick={() => { setShowAddModal(false); setShowEditModal(false); resetForm(); }}
-                                    className="px-6 py-2 text-gray-600 hover:text-gray-800 font-medium"
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    type="submit"
-                                    className="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-                                >
+                                <button type="button" onClick={() => { setShowAddModal(false); setShowEditModal(false); resetForm(); }} className="px-6 py-2 text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+                                <button type="submit" className="bg-blue-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all">
                                     {showEditModal ? 'Update Faculty' : 'Create Faculty'}
                                 </button>
                             </div>
@@ -510,9 +486,7 @@ const Users: React.FC = () => {
 
             {/* Toast */}
             {toast && (
-                <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-xl z-[100] transition-all transform translate-y-0 ${
-                    toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-                }`}>
+                <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-xl z-[100] ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
                     <div className="flex items-center space-x-2">
                         <span>{toast.type === 'success' ? '✅' : '❌'}</span>
                         <span className="font-medium">{toast.message}</span>
@@ -524,4 +498,3 @@ const Users: React.FC = () => {
 };
 
 export default Users;
-

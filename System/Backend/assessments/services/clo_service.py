@@ -697,6 +697,8 @@ class CLOService:
                     student.student_id
                 ),
                 "name": student.name,
+                "registration_number": getattr(student, 'registration_number', None) or getattr(student.user, 'custom_id', None),
+                "custom_id": getattr(student.user, 'custom_id', None),
                 "assessments": {},
                 "type_totals": {},
                 "clo_attainment": {},

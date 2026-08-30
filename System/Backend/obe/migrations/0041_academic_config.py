@@ -53,7 +53,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='academicconfig',
             constraint=models.CheckConstraint(
-                condition=models.Q(program__isnull=False) | models.Q(batch__isnull=False),
+                check=models.Q(program__isnull=False) | models.Q(batch__isnull=False),
                 name='academic_config_requires_scope',
             ),
         ),

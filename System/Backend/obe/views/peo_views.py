@@ -380,7 +380,7 @@ class GAPEOMatrixView(APIView):
         is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
         
         if not is_hod:
-            return Response({'error': 'Only HODs can update GA-PEO mappings'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can update GA-PO mappings'}, status=status.HTTP_403_FORBIDDEN)
         
         # Delete existing mappings
         GAPEOMapping.objects.filter(
@@ -477,7 +477,7 @@ class PEOAlumniSurveyQuestionListView(APIView):
         try:
             peo = PEO.objects.get(id=peo_id, is_active=True)
         except PEO.DoesNotExist:
-            return Response({'error': 'PEO not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO not found'}, status=status.HTTP_404_NOT_FOUND)
         
         has_new = SurveyQuestion.objects.filter(
             peo=peo,
@@ -1269,7 +1269,7 @@ class PEOIndirectScoreView(APIView):
             peo = PEO.objects.get(id=peo_id, is_active=True)
             batch = Batch.objects.get(id=batch_id, is_active=True)
         except (PEO.DoesNotExist, Batch.DoesNotExist):
-            return Response({'error': 'PEO or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
         
         survey_window = request.query_params.get('survey_window')
         indirect_score_data = get_peo_indirect_score(peo_id, batch_id, survey_window)
@@ -1298,7 +1298,7 @@ class PEOCQIListView(APIView):
         is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
         
         if not is_hod:
-            return Response({'error': 'Only HODs can view PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can view PO CQI records'}, status=status.HTTP_403_FORBIDDEN)
         
         # Get batch_id from query params if provided
         batch_id = request.query_params.get('batch_id')
@@ -1317,7 +1317,7 @@ class PEOCQIDetailView(APIView):
         try:
             cqi = PEOCQIRecord.objects.get(id=cqi_id)
         except PEOCQIRecord.DoesNotExist:
-            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(PEOCQIRecordSerializer(cqi).data)
     
     @transaction.atomic
@@ -1325,17 +1325,17 @@ class PEOCQIDetailView(APIView):
         try:
             cqi = PEOCQIRecord.objects.get(id=cqi_id)
         except PEOCQIRecord.DoesNotExist:
-            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
         
         user_role = request.user.role
         user_secondary_role = request.user.secondary_role
         is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
         
         if not is_hod:
-            return Response({'error': 'Only HODs can update PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can update PO CQI records'}, status=status.HTTP_403_FORBIDDEN)
         
         if cqi.is_locked:
-            return Response({'error': 'This PEO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'This PO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
         
         # Save history if there are changes to root_cause or remedial_plan
         if 'root_cause' in request.data or 'remedial_plan' in request.data:
@@ -1361,17 +1361,17 @@ class PEOCQISubmitView(APIView):
         try:
             cqi = PEOCQIRecord.objects.get(id=cqi_id)
         except PEOCQIRecord.DoesNotExist:
-            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
         
         user_role = request.user.role
         user_secondary_role = request.user.secondary_role
         is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
         
         if not is_hod:
-            return Response({'error': 'Only HODs can submit PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can submit PO CQI records'}, status=status.HTTP_403_FORBIDDEN)
         
         if cqi.is_locked:
-            return Response({'error': 'This PEO CQI record is locked and cannot be submitted'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'This PO CQI record is locked and cannot be submitted'}, status=status.HTTP_403_FORBIDDEN)
         
         # Save history
         PEOCQISubmissionHistory.objects.create(
@@ -1399,7 +1399,7 @@ class PEOCQICreateView(APIView):
         is_hod = (user_role == 'hod') or (user_secondary_role == 'hod')
         
         if not is_hod:
-            return Response({'error': 'Only HODs can create PEO CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can create PO CQI records'}, status=status.HTTP_403_FORBIDDEN)
         
         peo_id = request.data.get('peo')
         batch_id = request.data.get('batch')
@@ -1408,11 +1408,11 @@ class PEOCQICreateView(APIView):
             peo = PEO.objects.get(id=peo_id)
             batch = Batch.objects.get(id=batch_id)
         except (PEO.DoesNotExist, Batch.DoesNotExist):
-            return Response({'error': 'PEO or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO or Batch not found'}, status=status.HTTP_404_NOT_FOUND)
         
         # Check if program end ready
         if not batch.is_program_end_ready:
-            return Response({'error': 'Program not yet complete — PEO CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Program not yet complete - PO CQI not available until all semesters finish'}, status=status.HTTP_403_FORBIDDEN)
         
         # Get or create existing record
         cqi, created = PEOCQIRecord.objects.get_or_create(
@@ -1421,7 +1421,7 @@ class PEOCQICreateView(APIView):
         )
         
         if not created and cqi.is_locked:
-            return Response({'error': 'This PEO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'This PO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
         
         if not created:
             # Save history
@@ -1455,7 +1455,7 @@ class PEOCQIHistoryView(APIView):
         try:
             cqi = PEOCQIRecord.objects.get(id=cqi_id)
         except PEOCQIRecord.DoesNotExist:
-            return Response({'error': 'PEO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO CQI record not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(PEOCQISubmissionHistorySerializer(cqi.history.all(), many=True).data)
 
 
@@ -1641,16 +1641,16 @@ class PEOCQICloseView(APIView):
         try:
             cqi = PEOCQIRecord.objects.get(id=cqi_id)
         except PEOCQIRecord.DoesNotExist:
-            return Response({'error': 'PEO-CQI not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'PO-CQI not found'}, status=status.HTTP_404_NOT_FOUND)
 
         user_role = getattr(request.user, 'role', '')
         user_secondary_role = getattr(request.user, 'secondary_role', '')
         is_hod = user_role == 'hod' or user_secondary_role == 'hod'
         if not is_hod:
-            return Response({'error': 'Only HODs can close PEO-CQI records'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'Only HODs can close PO-CQI records'}, status=status.HTTP_403_FORBIDDEN)
 
         if cqi.status == 'CLOSED_IMPLEMENTED':
-            return Response({'error': 'This PEO-CQI record is already closed'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'This PO-CQI record is already closed'}, status=status.HTTP_400_BAD_REQUEST)
 
         implemented_in_batch_id = request.data.get('implemented_in_batch')
         action_taken_description = request.data.get('action_taken_description', '')

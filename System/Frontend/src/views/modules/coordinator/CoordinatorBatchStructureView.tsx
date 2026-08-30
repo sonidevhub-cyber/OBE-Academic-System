@@ -1,9 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Archive, BookOpen, Download, Filter, Loader2, Network } from 'lucide-react';
-import batchService, { BatchFlat, BatchStructureGA, BatchStructureResponse } from '../../../api/batchService';
+import { Archive, BookOpen, Download, Filter, Loader2, Network, RefreshCw } from 'lucide-react';
+import batchService, {
+  BatchFlat,
+  BatchFrameworkSnapshotField,
+  BatchStructureGA,
+  BatchStructureResponse,
+} from '../../../api/batchService';
 import useBatchStructure from '../../../hooks/useBatchStructure';
+import { toast } from 'react-toastify';
 
 const statusOptions = [
   { value: 'all', label: 'All' },
@@ -28,6 +34,30 @@ const safeFilePart = (value: string) => value.replace(/[^a-z0-9_-]+/gi, '_').rep
 const percentText = (value: unknown) => {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? `${number.toFixed(1)}%` : '-';
+};
+
+const getEmptySnapshotFields = (structure: BatchStructureResponse | null): BatchFrameworkSnapshotField[] => {
+  if (!structure) return [];
+  if (structure.snapshot_empty_fields) {
+    return (Object.entries(structure.snapshot_empty_fields) as Array<[BatchFrameworkSnapshotField, boolean]>)
+      .filter(([, isEmpty]) => isEmpty)
+      .map(([field]) => field);
+  }
+
+  const hasVisionMission = (structure.vision_mission_snapshot || []).some(item =>
+    Boolean(item.statement || (item.keywords || []).length > 0)
+  );
+  const emptyFields: BatchFrameworkSnapshotField[] = [];
+  if ((structure.ga_snapshot || []).length === 0) emptyFields.push('ga');
+  if ((structure.peo_snapshot || []).length === 0) emptyFields.push('peo');
+  if (!hasVisionMission) emptyFields.push('vision_mission');
+  return emptyFields;
+};
+
+const snapshotFieldLabel: Record<BatchFrameworkSnapshotField, string> = {
+  ga: 'GA',
+  peo: 'PO',
+  vision_mission: 'Vision/Mission',
 };
 
 const gaLabelShort = (ga: { code?: string; order_number?: number; title?: string }) =>
@@ -139,6 +169,7 @@ const CoordinatorBatchStructureView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('active');
   const [loadingBatches, setLoadingBatches] = useState(true);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [copyingSnapshot, setCopyingSnapshot] = useState(false);
 
   useEffect(() => {
     const loadBatches = async () => {
@@ -207,10 +238,42 @@ const CoordinatorBatchStructureView: React.FC = () => {
     setSelectedSemester(current => semesterOptions.includes(current) ? current : semesterOptions[semesterOptions.length - 1]);
   }, [semesterOptions]);
 
-  const { data: structure, loading: structureLoading, error: structureError } = useBatchStructure(
+  const {
+    data: structure,
+    loading: structureLoading,
+    error: structureError,
+    refetch: refetchStructure,
+  } = useBatchStructure(
     selectedBatchId,
     selectedSemester || undefined
   );
+  const emptySnapshotFields = useMemo(() => getEmptySnapshotFields(structure), [structure]);
+  const hasEmptySnapshotFields = emptySnapshotFields.length > 0;
+
+  const handleCopyCurrentFramework = async () => {
+    if (!selectedBatchId || emptySnapshotFields.length === 0) return;
+    setCopyingSnapshot(true);
+    try {
+      const response = await batchService.copyFrameworkSnapshot(selectedBatchId, emptySnapshotFields);
+      const copied = Object.keys(response.data.copied || {});
+      const errors = Object.values(response.data.errors || {}).filter(Boolean);
+      if (copied.length > 0) {
+        toast.success(`Copied current framework: ${copied.map(field => snapshotFieldLabel[field as BatchFrameworkSnapshotField]).join(', ')}`);
+      }
+      errors.forEach(message => toast.error(String(message)));
+      await refetchStructure();
+    } catch (error: any) {
+      const data = error?.response?.data;
+      const messages = data?.errors ? Object.values(data.errors).filter(Boolean) : [];
+      if (messages.length > 0) {
+        messages.forEach(message => toast.error(String(message)));
+      } else {
+        toast.error(data?.detail || data?.error || error?.message || 'Failed to copy current framework');
+      }
+    } finally {
+      setCopyingSnapshot(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -299,6 +362,25 @@ const CoordinatorBatchStructureView: React.FC = () => {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {hasEmptySnapshotFields && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Missing Snapshot</p>
+                  <p className="text-xs font-bold text-amber-800">
+                    {emptySnapshotFields.map(field => snapshotFieldLabel[field]).join(', ')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyCurrentFramework}
+                  disabled={copyingSnapshot || structureLoading}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {copyingSnapshot ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                  Copy Current Framework
+                </button>
+              </div>
+            )}
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-black text-indigo-700">
               {selectedSemester ? `Semester ${selectedSemester}` : 'All semesters'}
             </div>

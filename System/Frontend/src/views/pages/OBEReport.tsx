@@ -50,6 +50,8 @@ interface Student {
   retake_id?: string;
   count: number;
   name: string;
+  registration_number?: string;
+  custom_id?: string;
   percentage: number;
   gpa: number;
   status: 'PASS' | 'FAIL' | string;
@@ -112,6 +114,21 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     try {
       const res = await api.get(`/assessments/clo-report/${courseId}/${batchId}/${semesterId}/`);
       let data: ReportData = res.data?.data || res.data?.students ? res.data : res.data;
+      
+      // Sort students by registration number and add sequential numbering
+      if (data.students && Array.isArray(data.students)) {
+        data.students = [...data.students]
+          .sort((a: Student, b: Student) => {
+            const regA = a.registration_number || a.custom_id || '';
+            const regB = b.registration_number || b.custom_id || '';
+            return regA.localeCompare(regB);
+          })
+          .map((student: Student, index: number) => ({
+            ...student,
+            count: index + 1
+          }));
+      }
+      
       setReportData(data);
     } catch (err) {
       console.error("Error fetching report:", err);
@@ -398,6 +415,9 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
       <td className="border border-blue-200 p-2 font-semibold text-center text-blue-900">{student.count}</td>
       <td className="border border-blue-200 p-2 font-semibold text-center text-blue-950">
         <div>{student.name}</div>
+        <div className="text-[11px] text-blue-600 font-normal">
+          {student.registration_number || student.custom_id || ''}
+        </div>
         {student.is_retake && (
           <span className="mt-1 inline-block text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
             Retake Attempt {student.attempt_number || 1}
@@ -441,10 +461,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
               {student.type_totals?.[group.type.toLowerCase()]?.is_exempt ? (
                 <span className="text-gray-400 font-medium">NA</span>
               ) : (
-                <div>
-                  {calculateWeightedTotal(student, group)}
-                  <span className="text-[10px] text-blue-700 block font-semibold">(Wt: {targetWeight})</span>
-                </div>
+                calculateWeightedTotal(student, group)
               )}
             </td>
           </React.Fragment>

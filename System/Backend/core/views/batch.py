@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 
-from core.models.batch import Batch
+from core.models.batch import Batch, BatchFrameworkSnapshotFillAudit
 from core.permissions import (
     IsHOD,
     IsSAC,
@@ -16,6 +16,7 @@ from core.permissions import (
 )
 from core.serializers.batch import (
     BatchCreateSerializer,
+    BatchFrameworkSnapshotCopySerializer,
     BatchFrameworkSnapshotSerializer,
     BatchListSerializer,
     BatchStructureSerializer,
@@ -58,7 +59,7 @@ class BatchDetailView(generics.RetrieveUpdateAPIView):
     
     def update(self, request, *args, **kwargs):
         from curriculum.models import CurriculumVersion
-        from curriculum.services import clone_curriculum_for_batch, create_offerings_from_version
+        from curriculum.services import branch_version_if_needed, create_offerings_from_version
         
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
@@ -70,7 +71,7 @@ class BatchDetailView(generics.RetrieveUpdateAPIView):
             try:
                 master_version = CurriculumVersion.objects.get(id=curriculum_version_id, program=instance.program, status='finalized')
                 user = request.user if request.user else instance.program.created_by
-                clone_curriculum_for_batch(master_version, instance, user)
+                branch_version_if_needed(master_version, instance, user)
                 # Also ensure CourseSessions are created!
                 create_offerings_from_version(master_version)
             except CurriculumVersion.DoesNotExist:
@@ -276,6 +277,118 @@ class BatchStructureView(generics.RetrieveAPIView):
         else:
             context['semester'] = None
         return context
+
+
+class BatchFrameworkSnapshotCopyView(APIView):
+    """Manual recovery path for empty write-once batch framework snapshots."""
+
+    permission_classes = [permissions.IsAuthenticated, CanAccessFrameworkSnapshot]
+
+    def _snapshot_summary(self, field_name, snapshot):
+        if field_name == 'ga':
+            return {'captured_ga_count': len((snapshot or {}).get('gas') or [])}
+        if field_name == 'peo':
+            return {'captured_peo_count': len((snapshot or {}).get('peos') or [])}
+        if field_name == 'vision_mission':
+            vision = (snapshot or {}).get('vision') or {}
+            mission = (snapshot or {}).get('mission') or {}
+            return {
+                'has_vision': bool(vision.get('vision_text') or vision.get('keywords')),
+                'has_mission': bool(mission.get('mission_text') or mission.get('keywords')),
+                'vision_keyword_count': len(vision.get('keywords') or []),
+                'mission_keyword_count': len(mission.get('keywords') or []),
+            }
+        return {}
+
+    @transaction.atomic
+    def post(self, request, pk):
+        serializer = BatchFrameworkSnapshotCopySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        from django.shortcuts import get_object_or_404
+        from obe.framework_snapshots import populate_batch_framework_snapshot
+
+        batch = get_object_or_404(
+            Batch.objects.select_for_update(of=('self',)).select_related('program', 'program__department'),
+            id=pk,
+            is_active=True,
+        )
+        self.check_object_permissions(request, batch)
+
+        original = {
+            'ga': batch.ga_snapshot,
+            'peo': batch.peo_snapshot,
+            'vision_mission': batch.vision_mission_snapshot,
+        }
+        populate_batch_framework_snapshot(batch)
+        generated = {
+            'ga': batch.ga_snapshot,
+            'peo': batch.peo_snapshot,
+            'vision_mission': batch.vision_mission_snapshot,
+        }
+
+        batch.ga_snapshot = original['ga']
+        batch.peo_snapshot = original['peo']
+        batch.vision_mission_snapshot = original['vision_mission']
+
+        saved_fields = []
+        results = {}
+        errors = {}
+        now = timezone.now()
+
+        field_to_model_field = {
+            'ga': 'ga_snapshot',
+            'peo': 'peo_snapshot',
+            'vision_mission': 'vision_mission_snapshot',
+        }
+
+        for field_name in serializer.validated_data['fields']:
+            model_field = field_to_model_field[field_name]
+            current_snapshot = getattr(batch, model_field)
+            if not BatchFrameworkSnapshotSerializer.is_snapshot_empty(current_snapshot, field_name):
+                errors[field_name] = f"{model_field} already set for this batch - write-once rule prevents overwrite"
+                continue
+
+            new_snapshot = generated[field_name]
+            if BatchFrameworkSnapshotSerializer.is_snapshot_empty(new_snapshot, field_name):
+                errors[field_name] = f"No current {field_name.replace('_', ' ')} framework data is available to copy"
+                continue
+
+            setattr(batch, model_field, new_snapshot)
+            saved_fields.append(model_field)
+            BatchFrameworkSnapshotFillAudit.objects.create(
+                batch=batch,
+                snapshot_field=field_name,
+                filled_by=request.user,
+                filled_at=now,
+                snapshot_summary=self._snapshot_summary(field_name, new_snapshot),
+            )
+            results[field_name] = {
+                'status': 'copied',
+                'filled_at': now.isoformat(),
+                'filled_by': str(request.user.id),
+            }
+
+        if saved_fields:
+            batch.save(update_fields=saved_fields)
+
+        response_status = status.HTTP_200_OK if results else status.HTTP_400_BAD_REQUEST
+        return Response(
+            {
+                'batch_id': str(batch.id),
+                'copied': results,
+                'errors': errors,
+                'snapshot_empty_fields': {
+                    'ga': BatchFrameworkSnapshotSerializer.is_snapshot_empty(batch.ga_snapshot, 'ga'),
+                    'peo': BatchFrameworkSnapshotSerializer.is_snapshot_empty(batch.peo_snapshot, 'peo'),
+                    'vision_mission': BatchFrameworkSnapshotSerializer.is_snapshot_empty(
+                        batch.vision_mission_snapshot,
+                        'vision_mission',
+                    ),
+                },
+            },
+            status=response_status,
+        )
 
 
 class BatchDossierListView(generics.ListAPIView):

@@ -744,8 +744,12 @@ class BatchStudentsListView(APIView):
                 'student_id': user.custom_id or str(user.id),
                 'name': user.full_name,
                 'roll_number': student_profile.registration_number if student_profile else '',
+                'registration_number': student_profile.registration_number if student_profile else '',
                 'is_active': user.is_active
             })
+        
+        # Sort students by registration number
+        student_list.sort(key=lambda x: x.get('registration_number', '') or '')
         
         return Response(student_list)
 

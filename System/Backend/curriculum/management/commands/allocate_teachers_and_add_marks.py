@@ -47,7 +47,7 @@ class Command(BaseCommand):
             if created:
                 self.stdout.write(self.style.SUCCESS(f"Created instructor: {full_name} ({email})"))
 
-        # Create 5 TRF teachers (using 'tvf' role)
+        # Create 5 TVF teachers (using 'instructor' role with 'Visiting Faculty' designation)
         for i in range(1, 6):
             email = f"trf_{i}@eduobe.edu"
             full_name = f"TRF Teacher {i}"
@@ -55,7 +55,8 @@ class Command(BaseCommand):
                 email=email,
                 defaults={
                     "full_name": full_name,
-                    "role": "tvf",
+                    "role": "instructor",
+                    "designation": "Visiting Faculty",
                 }
             )
             if created:
@@ -68,9 +69,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"Semester 1 not found for {program.name}!"))
             return
 
-        # Get all active instructors and TVF for this program
+        # Get all active instructors for this program
         faculty = list(User.objects.filter(
-            role__in=["instructor", "tvf"],
+            role="instructor",
             is_active=True
         ))
         if not faculty:

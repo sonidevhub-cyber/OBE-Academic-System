@@ -71,13 +71,6 @@ class UserCreateSerializer(serializers.ModelSerializer):
         if role == 'SAC':
             raise serializers.ValidationError('SAC created via CLI only')
 
-        if role == 'tvf':
-            attrs['secondary_role'] = 'none'
-            attrs['programs'] = []
-            attrs['batch'] = None
-            attrs['designation'] = 'Visiting Faculty'
-            return attrs
-
         if role in ['student', 'alumni']:
             if not batch:
                 raise serializers.ValidationError('batch is required')
@@ -86,12 +79,16 @@ class UserCreateSerializer(serializers.ModelSerializer):
             return attrs
 
         is_program_admin = role in ['coordinator', 'hod'] or secondary_role in ['coordinator', 'hod']
-        if is_program_admin:
+        is_coordinator = role == 'coordinator' or secondary_role == 'coordinator'
+        is_hod_only = (role == 'hod' or secondary_role == 'hod') and not is_coordinator
+        if is_coordinator:
             if not programs:
-                raise serializers.ValidationError('programs is required for coordinator/hod')
+                raise serializers.ValidationError('programs is required for coordinator')
+        elif is_hod_only:
+            attrs['programs'] = []  # HOD is department-scoped, no program assignment needed
         else:
             if programs:
-                raise serializers.ValidationError('Only coordinator or hod users can have programs assigned')
+                raise serializers.ValidationError('Only coordinator users can have programs assigned')
 
         if secondary_role != 'none' and secondary_role == role:
             raise serializers.ValidationError('Primary and secondary role cannot be same')

@@ -21,6 +21,7 @@ interface Student {
     id: number;
     name: string;
   } | null;
+  department_name?: string;
   father_guardian?: string;
   guardian_name?: string;
   guardian_contact?: string;
@@ -130,7 +131,7 @@ const SimpleStudentProfile: React.FC<SimpleStudentProfileProps> = ({ studentId, 
                     <p className="text-gray-600 mb-2">Email: {student.email}</p>
                     <p className="text-gray-600 mb-2">Phone: {student.phone}</p>
                   <p className="text-gray-600 mb-2">Course: {student.course?.name || 'Not assigned'}</p>
-                  <p className="text-gray-600 mb-2">Department: {student.department?.name || 'Not assigned'}</p>
+                  <p className="text-gray-600 mb-2">Department: {student.department_name || student.department?.name || 'Not assigned'}</p>
                 </div>
                 <div>
                   <p className="text-gray-600 mb-2">GPA: {student.gpa?.toFixed(2) || 'N/A'}</p>
@@ -189,7 +190,7 @@ const SimpleStudentProfile: React.FC<SimpleStudentProfileProps> = ({ studentId, 
                 
                 <div>
                   <h4 className="font-semibold text-gray-700 mb-1">Department</h4>
-                  <p className="text-gray-600">{student.department?.name || 'Not assigned'}</p>
+                  <p className="text-gray-600">{student.department_name || student.department?.name || 'Not assigned'}</p>
                 </div>
                 
                 <div>

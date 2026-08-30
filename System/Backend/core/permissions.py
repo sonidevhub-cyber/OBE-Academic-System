@@ -29,7 +29,7 @@ class IsInstructor(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and request.user.role in ['instructor', 'tvf']
+            and request.user.role == 'instructor'
         )
 
 

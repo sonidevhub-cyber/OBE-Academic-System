@@ -519,7 +519,7 @@ class CQIClosingSummaryView(APIView):
             try:
                 flagged_info = {
                     'peo_id': str(cqi.peo_id),
-                    'peo_code': f'PEO-{cqi.peo.order_number}' if cqi.peo else None,
+                    'peo_code': f'PO-{cqi.peo.order_number}' if cqi.peo else None,
                     'peo_title': cqi.peo.title if cqi.peo else None,
                     'triggered_batch_id': str(cqi.batch_id),
                     'triggered_batch_name': cqi.batch.name if cqi.batch else None,

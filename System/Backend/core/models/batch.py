@@ -156,3 +156,35 @@ class Batch(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.custom_id})"
+
+
+class BatchFrameworkSnapshotFillAudit(models.Model):
+    SNAPSHOT_FIELD_CHOICES = [
+        ('ga', 'GA'),
+        ('peo', 'PO'),
+        ('vision_mission', 'Vision/Mission'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(
+        Batch,
+        on_delete=models.CASCADE,
+        related_name='framework_snapshot_fill_audits',
+    )
+    snapshot_field = models.CharField(max_length=20, choices=SNAPSHOT_FIELD_CHOICES)
+    filled_by = models.ForeignKey(
+        'core.CustomUser',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='framework_snapshot_fills',
+    )
+    filled_at = models.DateTimeField(default=timezone.now)
+    snapshot_summary = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-filled_at']
+        unique_together = ('batch', 'snapshot_field')
+
+    def __str__(self) -> str:
+        return f"{self.batch} {self.snapshot_field} snapshot filled at {self.filled_at}"

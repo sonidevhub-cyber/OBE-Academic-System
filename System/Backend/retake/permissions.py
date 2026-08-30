@@ -25,7 +25,7 @@ def is_teacher(user):
     return bool(
         user
         and user.is_authenticated
-        and user.role in {"instructor", "tvf", "Teacher"}
+        and user.role in {"instructor", "Teacher"}
     )
 
 

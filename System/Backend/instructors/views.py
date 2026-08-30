@@ -20,6 +20,51 @@ class InstructorViewSet(viewsets.ModelViewSet):
     serializer_class = InstructorSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def list(self, request, *args, **kwargs):
+        from django.contrib.auth import get_user_model
+        from core.permissions import _get_user_department
+        User = get_user_model()
+
+        user = request.user
+        # All active faculty roles
+        qs = Instructor.objects.filter(
+            is_active=True,
+            user__isnull=False,
+            user__is_active=True,
+            user__role__in=['instructor', 'hod', 'coordinator'],
+        ).select_related('user', 'department')
+
+        # Scope HOD to their department
+        is_hod = user.role == 'hod' or getattr(user, 'secondary_role', '') == 'hod'
+        is_coord = user.role == 'coordinator' or getattr(user, 'secondary_role', '') == 'coordinator'
+        if is_hod:
+            dept = _get_user_department(user)
+            if dept is not None:
+                qs = qs.filter(department=dept)
+            else:
+                qs = qs.none()
+        elif is_coord:
+            # Coordinator sees instructors from their programs' department
+            program = user.programs.select_related('department').first()
+            if program and program.department:
+                qs = qs.filter(department=program.department)
+
+        data = [
+            {
+                'id': inst.id,
+                'user': str(inst.user.id),
+                'name': inst.name,
+                'email': inst.email,
+                'designation': inst.designation,
+                'employment_type': inst.employment_type,
+                'department': inst.department_id,
+                'department_name': inst.department.name if inst.department else None,
+                'role': inst.user.role,
+            }
+            for inst in qs
+        ]
+        return api_response(data=data, message='Instructors retrieved successfully')
+
     @action(detail=False, methods=['get'], url_path='my-courses')
     def my_courses(self, request):
         """Get courses allocated to the currently logged-in instructor."""
@@ -33,6 +78,8 @@ class InstructorViewSet(viewsets.ModelViewSet):
             is_active=True,
             status='active',
             batch__status='active'
+        ).exclude(
+            allocated_by__role='SAC'
         ).select_related('course', 'batch', 'curriculum_version')
         
         print(f"Found {allocations.count()} active allocations")
@@ -132,14 +179,24 @@ class InstructorViewSet(viewsets.ModelViewSet):
         data = UserListSerializer(user, context={'request': request}).data
 
         try:
-            instructor = Instructor.objects.get(user=user)
+            instructor = Instructor.objects.select_related('department').get(user=user)
             serializer = InstructorSerializer(instructor, context={'request': request})
             instructor_data = serializer.data
 
-            # Merge data
+            # Merge data - skips 'id' and 'user' to avoid conflicts
             for key, value in instructor_data.items():
                 if key not in ['id', 'user']:
                     data[key] = value
+
+            # Ensure department_name is always present and correct
+            if instructor.department:
+                data['department_name'] = instructor.department.name
+            else:
+                data['department_name'] = None
+
+            # Remove raw department ID so frontend always uses department_name
+            if 'department' in data:
+                del data['department']
 
         except Instructor.DoesNotExist:
             pass
@@ -155,7 +212,9 @@ class InstructorViewSet(viewsets.ModelViewSet):
     is_active=True,
     status='active',
     batch__status='active'
-).select_related(
+).exclude(
+                allocated_by__role='SAC'
+            ).select_related(
                 'course',
                 'course__semester',
                 'allocated_by',

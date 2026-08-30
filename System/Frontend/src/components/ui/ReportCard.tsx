@@ -45,6 +45,7 @@ interface Student {
   student_id: string;
   enrollment_date: string;
   department: { name: string };
+  department_name?: string;
   semester: { name: string };
   image?: string;
 }
@@ -267,7 +268,7 @@ const ReportCard: React.FC<ReportCardProps> = ({ student, assignedCourses, resul
                       </svg>
                       <div>
                         <label className="block text-sm font-semibold text-gray-600">Department</label>
-                        <p className="text-lg font-bold text-gray-800">{student.department?.name || 'N/A'}</p>
+                        <p className="text-lg font-bold text-gray-800">{student.department_name || student.department?.name || 'N/A'}</p>
                       </div>
                     </div>
                     <div className="flex items-center p-4 bg-gradient-to-r from-indigo-50 to-indigo-100 rounded-lg border-l-4 border-indigo-500">

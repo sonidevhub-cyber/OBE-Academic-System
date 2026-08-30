@@ -34,7 +34,7 @@ class PEO(models.Model):
         ordering = ['order_number']
 
     def __str__(self): 
-        return f"PEO-{self.order_number}: {self.title}"
+        return f"PO-{self.order_number}: {self.title}"
     
     def save(self, *args, **kwargs):
         skip_alumni_survey = kwargs.pop('skip_alumni_survey', False)
@@ -1219,7 +1219,7 @@ class SurveyQuestion(models.Model):
         return []
 
     def __str__(self):
-        peo_label = f"PEO-{self.peo.order_number}" if self.peo else "General"
+        peo_label = f"PO-{self.peo.order_number}" if self.peo else "General"
         return f"{self.get_survey_type_display()} - {peo_label}: {self.question_text[:50]}..."
 
 
@@ -1748,6 +1748,13 @@ class VisionKeyword(models.Model):
         related_name='keywords'
     )
     text = models.CharField(max_length=255)
+    peos = models.ManyToManyField(
+        PEO,
+        through='PEOKeywordMapping',
+        through_fields=('vision_keyword', 'peo'),
+        related_name='vision_keywords',
+        blank=True,
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1767,6 +1774,13 @@ class MissionKeyword(models.Model):
         related_name='keywords'
     )
     text = models.CharField(max_length=255)
+    peos = models.ManyToManyField(
+        PEO,
+        through='PEOKeywordMapping',
+        through_fields=('mission_keyword', 'peo'),
+        related_name='mission_keywords',
+        blank=True,
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1776,28 +1790,6 @@ class MissionKeyword(models.Model):
 
     def __str__(self):
         return f"Mission Keyword: {self.text}"
-
-
-class VisionMissionMapping(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    mission_keyword = models.ForeignKey(
-        MissionKeyword,
-        on_delete=models.CASCADE,
-        related_name='vision_mappings'
-    )
-    vision_keyword = models.ForeignKey(
-        VisionKeyword,
-        on_delete=models.CASCADE,
-        related_name='mission_mappings'
-    )
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('mission_keyword', 'vision_keyword')
-
-    def __str__(self):
-        return f"{self.mission_keyword.text} → {self.vision_keyword.text}"
 
 
 class PEOKeywordMapping(models.Model):
@@ -1825,11 +1817,29 @@ class PEOKeywordMapping(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('peo', 'mission_keyword', 'vision_keyword')
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(mission_keyword__isnull=False, vision_keyword__isnull=True)
+                    | Q(mission_keyword__isnull=True, vision_keyword__isnull=False)
+                ),
+                name='peo_keyword_exactly_one_keyword',
+            ),
+            models.UniqueConstraint(
+                fields=['peo', 'mission_keyword'],
+                condition=Q(mission_keyword__isnull=False),
+                name='uniq_peo_mission_keyword_mapping',
+            ),
+            models.UniqueConstraint(
+                fields=['peo', 'vision_keyword'],
+                condition=Q(vision_keyword__isnull=False),
+                name='uniq_peo_vision_keyword_mapping',
+            ),
+        ]
 
     def clean(self):
-        if not self.mission_keyword and not self.vision_keyword:
-            raise ValidationError("At least one of mission_keyword or vision_keyword must be set.")
+        if bool(self.mission_keyword) == bool(self.vision_keyword):
+            raise ValidationError("Exactly one of mission_keyword or vision_keyword must be set.")
 
     def save(self, *args, **kwargs):
         self.full_clean()

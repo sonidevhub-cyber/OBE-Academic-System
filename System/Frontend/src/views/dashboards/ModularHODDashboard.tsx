@@ -64,7 +64,6 @@ type TabId =
   | 'vision-mission'
   | 'peo'
   | 'ga'
-  | 'vision-mission-map'
   | 'po-keywords'
   | 'ga-peo'
   | 'peo-report'
@@ -161,8 +160,7 @@ const ModularHODDashboard: React.FC = () => {
         { id: 'vision-mission', label: 'Vision & Mission', icon: Target },
         { id: 'peo', label: 'PO Setup', icon: Award },
         { id: 'ga', label: 'GA Setup', icon: Info },
-        { id: 'vision-mission-map', label: 'Vision-Mission Mapping', icon: LayoutGrid },
-        { id: 'po-keywords', label: 'PO Mission Mapping', icon: LayoutGrid },
+        { id: 'po-keywords', label: 'PO Keyword Mapping', icon: LayoutGrid },
         { id: 'ga-peo', label: 'GA-PO Mapping', icon: LayoutGrid },
       ],
     },
@@ -535,7 +533,6 @@ const ModularHODDashboard: React.FC = () => {
       case 'vision-mission':
       case 'peo':
       case 'ga':
-      case 'vision-mission-map':
       case 'po-keywords':
       case 'ga-peo':
         return <OBEConfigurationModule initialSubTab={activeTab as OBEMappingSubTabId} hideSubTabs />;

@@ -30,6 +30,7 @@ interface Student {
     id: number;
     name: string;
   } | null;
+  department_name?: string;
   program_name?: string;
   program_code?: string;
   program_details?: {

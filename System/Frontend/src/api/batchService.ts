@@ -101,6 +101,11 @@ export interface BatchStructureResponse {
     batch_id: string;
     batch_name: string;
     snapshot_locked_date: string | null;
+    snapshot_empty_fields?: {
+        ga: boolean;
+        peo: boolean;
+        vision_mission: boolean;
+    };
     ga_snapshot: BatchStructureGA[];
     peo_snapshot: BatchStructurePEO[];
     vision_mission_snapshot: BatchStructureVisionMission[];
@@ -123,6 +128,19 @@ export interface BatchStructureResponse {
         vision_keyword?: string | null;
     }>;
     courses: BatchStructureCourse[];
+}
+
+export type BatchFrameworkSnapshotField = 'ga' | 'peo' | 'vision_mission';
+
+export interface BatchFrameworkSnapshotCopyResponse {
+    batch_id: string;
+    copied: Partial<Record<BatchFrameworkSnapshotField, {
+        status: string;
+        filled_at: string;
+        filled_by: string;
+    }>>;
+    errors: Partial<Record<BatchFrameworkSnapshotField, string>>;
+    snapshot_empty_fields: Record<BatchFrameworkSnapshotField, boolean>;
 }
 
 export interface BatchStructurePOKeywordMapping {
@@ -167,6 +185,9 @@ const batchService = {
         api.get<BatchStructureResponse>(`batches/${batchId}/structure/`, {
             params: semester ? { semester } : undefined,
         }),
+
+    copyFrameworkSnapshot: (batchId: string, fields: BatchFrameworkSnapshotField[]) =>
+        api.post<BatchFrameworkSnapshotCopyResponse>(`batches/${batchId}/copy-framework-snapshot/`, { fields }),
 };
 
 export default batchService;

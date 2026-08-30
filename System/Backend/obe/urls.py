@@ -77,7 +77,6 @@ from .views import (
     ExtractKeywordsView,
     VisionKeywordListView,
     MissionKeywordListView,
-    VisionMissionMappingView,
     ProgramPEOKeywordMappingView,
     BatchVisionMissionAnalyticsView,
     VisionMissionCQIUpsertView,
@@ -316,8 +315,6 @@ urlpatterns = [
     path('visions/<uuid:vision_id>/keywords/', VisionKeywordListView.as_view()),
     # Mission keywords CRUD
     path('missions/<uuid:mission_id>/keywords/', MissionKeywordListView.as_view()),
-    # Vision-Mission keyword mappings
-    path('departments/<uuid:department_id>/vision-mission-mappings/', VisionMissionMappingView.as_view()),
     # PEO/PO → Mission + Vision keyword mappings (program scoped)
     path('programs/<uuid:program_id>/po-keyword-mappings/', ProgramPEOKeywordMappingView.as_view()),
     # Batch-level Vision/Mission analytics for the OBE report

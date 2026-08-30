@@ -332,7 +332,7 @@ const ResultManagement: React.FC = () => {
         student.student_id,
         student.student_name,
         student.semester,
-        student.department
+        student.department_name || student.department?.name || student.department
       ].join(','))
     ].join('\n');
 
