@@ -5,8 +5,7 @@ import { Link } from "react-router-dom";
 const links = [
   { id: "home", label: "Home" },
   { id: "about", label: "About" },
-  { id: "news", label: "Events" },
-  { id: "notice", label: "Notice Board" }, // 🔥 NEW
+  { id: "notice", label: "Notice Board" }, 
 ];
 
 export default function Navbar() {

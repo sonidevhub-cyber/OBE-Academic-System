@@ -149,35 +149,37 @@ const CQI: React.FC<Props> = ({
           <p className="text-green-600">All CLOs Achieved 🎉</p>
         ) : (
           <>
-            {weakClos.map((item: any, i: number) => (
+            {weakClos.map((item: any, i: number) => {
+  console.log("CQI ITEM:", item);
 
-              <div key={i} className="bg-gray-100 p-4 rounded mb-3">
+  return (
+    <div key={i} className="bg-gray-100 p-4 rounded mb-3">
 
-                <h3 className="text-red-600 font-bold mb-2">
-                  {item.clo} — {item.attainment}% (KPI: {item.kpi})
-                </h3>
+      <h3 className="text-red-600 font-bold mb-2">
+        {item.clo_code} — {item.attainment}% (KPI: {item.kpi})
+      </h3>
 
-                <textarea
-                  className="w-full border p-2 mb-2"
-                  placeholder="Reason"
-                  value={form[item.clo]?.reason || ""}
-                  onChange={(e) =>
-                    handleChange(item.clo, "reason", e.target.value)
-                  }
-                />
+      <textarea
+        className="w-full border p-2 mb-2"
+        placeholder="Reason"
+        value={form[item.clo]?.reason || ""}
+        onChange={(e) =>
+          handleChange(item.clo, "reason", e.target.value)
+        }
+      />
 
-                <textarea
-                  className="w-full border p-2"
-                  placeholder="Action Plan"
-                  value={form[item.clo]?.action_plan || ""}
-                  onChange={(e) =>
-                    handleChange(item.clo, "action_plan", e.target.value)
-                  }
-                />
+      <textarea
+        className="w-full border p-2"
+        placeholder="Action Plan"
+        value={form[item.clo]?.action_plan || ""}
+        onChange={(e) =>
+          handleChange(item.clo, "action_plan", e.target.value)
+        }
+      />
 
-              </div>
-            ))}
-
+    </div>
+  );
+})}
             <button
               onClick={handleSubmit}
               className="bg-blue-600 text-white w-full py-2 rounded mt-3"

@@ -626,20 +626,32 @@ const CurriculumVersionDetailPage: React.FC<
             if (!fullBatch) return assignedBatch;
 
             return {
-              ...assignedBatch,
-              current_semester:
-                fullBatch.current_semester ??
-                fullBatch.currentSemester ??
-                fullBatch.semester ??
-                assignedBatch.current_semester,
-              semester:
-                fullBatch.semester ??
-                assignedBatch.semester,
-              batch_current_semester:
-                fullBatch.current_semester ??
-                fullBatch.currentSemester ??
-                fullBatch.semester,
-            };
+  ...assignedBatch,
+
+  // Batch's own semester
+  current_semester:
+    fullBatch.current_semester ??
+    fullBatch.currentSemester ??
+    fullBatch.semester ??
+    assignedBatch.current_semester,
+
+  semester:
+    fullBatch.semester ??
+    assignedBatch.semester,
+
+  batch_current_semester:
+    fullBatch.current_semester ??
+    fullBatch.currentSemester ??
+    fullBatch.semester ??
+    assignedBatch.batch_current_semester,
+
+  // Keep batch mode if API provides it
+  curriculum_mode:
+    assignedBatch.curriculum_mode ??
+    assignedBatch.mode ??
+    fullBatch.curriculum_mode ??
+    fullBatch.mode,
+};
           }),
         };
       } catch (batchError) {
@@ -1635,31 +1647,41 @@ const handleUpdateCourse = async (
      ENSURE EDITABLE
   ============================================================ */
 
-  const getBatchMode = (batch: any): 'complete' | 'progressive' | null => {
-    const raw =
-      batch?.curriculum_mode ??
-      batch?.mode ??
-      batch?.curriculum?.mode ??
-      null;
+  const getBatchMode = (
+  batch: any
+): 'complete' | 'progressive' | null => {
+  // Batch-specific mode if API provides it
+  const batchMode =
+    batch?.curriculum_mode ??
+    batch?.mode ??
+    batch?.curriculum?.mode;
 
-    if (String(raw).toLowerCase() === 'progressive') {
-      return 'progressive';
-    }
+  if (String(batchMode).toLowerCase() === 'progressive') {
+    return 'progressive';
+  }
 
-    if (String(raw).toLowerCase() === 'complete') {
-      return 'complete';
-    }
+  if (String(batchMode).toLowerCase() === 'complete') {
+    return 'complete';
+  }
 
-    // Older API responses may only expose the version-level mode.
-    // Use it only when there is a single assigned batch.
-    if ((version?.assigned_batches?.length || 0) === 1) {
-      const fallback = String(version?.curriculum_mode || '').toLowerCase();
-      if (fallback === 'progressive') return 'progressive';
-      if (fallback === 'complete') return 'complete';
-    }
+  // IMPORTANT:
+  // One curriculum version can be shared by multiple batches.
+  // Mode belongs to the curriculum version, while semester belongs
+  // to the individual batch.
+  const versionMode = String(
+    version?.curriculum_mode || ''
+  ).toLowerCase();
 
-    return null;
-  };
+  if (versionMode === 'progressive') {
+    return 'progressive';
+  }
+
+  if (versionMode === 'complete') {
+    return 'complete';
+  }
+
+  return null;
+};
 
   const getBatchCurrentSemester = (batch: any): number | null => {
     // The batch/promotion record is the ONLY source of truth for the
@@ -1676,19 +1698,20 @@ const handleUpdateCourse = async (
     return Number.isFinite(value) && value > 0 ? value : null;
   };
 
-  const activeBatch = useMemo(() => {
-    const assigned = version?.assigned_batches || [];
-    if (!assigned.length) return null;
+ const activeBatch = useMemo(() => {
+  const assigned = version?.assigned_batches || [];
 
-    return (
-      assigned.find(
-        (b: any) => String(b.id) === String(selectedBatchContextId)
-      ) ||
-      assigned.find((b: any) => getBatchMode(b) === 'progressive') ||
-      assigned[0]
-    );
-  }, [version, selectedBatchContextId]);
+  if (!assigned.length || !selectedBatchContextId) {
+    return null;
+  }
 
+  return (
+    assigned.find(
+      (b: any) =>
+        String(b.id) === String(selectedBatchContextId)
+    ) || null
+  );
+}, [version, selectedBatchContextId]);
   const activeBatchMode = getBatchMode(activeBatch);
   const activeBatchCurrentSemester = getBatchCurrentSemester(activeBatch);
 
@@ -2332,6 +2355,7 @@ await curriculumService.addCourseToVersion(
                         Configure Mode
                       </button>
                     )}
+                    
                   </div>
                   <p className={`text-[10px] mt-1 ${activeBatchMode === 'progressive' ? 'text-green-600' : 'text-gray-500'}`}>
                     {activeBatchMode === 'progressive'
