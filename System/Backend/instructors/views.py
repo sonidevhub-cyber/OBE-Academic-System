@@ -683,13 +683,11 @@ class InstructorViewSet(viewsets.ModelViewSet):
         ).data
 
         try:
-<<<<<<< HEAD
             instructor = Instructor.objects.select_related('department').get(user=user)
             serializer = InstructorSerializer(instructor, context={'request': request})
             instructor_data = serializer.data
 
             # Merge data - skips 'id' and 'user' to avoid conflicts
-=======
 
             instructor = Instructor.objects.get(
                 user=user
@@ -702,7 +700,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
             instructor_data = serializer.data
 
->>>>>>> 7ef20df67565ec77c0bc7c72c66549fae5c1ae69
             for key, value in instructor_data.items():
 
                 if key not in ["id", "user"]:
@@ -733,7 +730,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
     def courses(self, request):
 
         try:
-<<<<<<< HEAD
             allocations = TeacherAllocation.objects.filter(
     teacher=request.user,
     is_active=True,
@@ -746,8 +742,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'course__semester',
                 'allocated_by',
                 'batch',
-                'curriculum_version'
-=======
+                'curriculum_version')
 
             allocations = (
                 TeacherAllocation.objects.filter(
@@ -769,7 +764,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     "semester_no",
                     "course__name",
                 )
->>>>>>> 7ef20df67565ec77c0bc7c72c66549fae5c1ae69
             )
 
             data = []
