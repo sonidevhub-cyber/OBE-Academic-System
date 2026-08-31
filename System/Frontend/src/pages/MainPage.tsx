@@ -5,7 +5,6 @@ import Navbar from "../components/Navbar";
 import HeroSlider from "../components/Heroslider";
 import Footer from "../components/Footers";
 import NoticeBoard from "../pages/NoticeBoard";
-import NewEvents from "../components/NewEvents";
 import ScrollAnimate from "../components/ScrollAnimate";
 
 export default function CUIPortalPage() {
@@ -108,12 +107,6 @@ export default function CUIPortalPage() {
         </ScrollAnimate>
       </section>
 
-      {/* 🔥 NEWS */}
-      <section id="news" className="py-20 px-6 md:px-20 bg-slate-50">
-        <ScrollAnimate>
-          <NewEvents />
-        </ScrollAnimate>
-      </section>
 
       <Footer />
 

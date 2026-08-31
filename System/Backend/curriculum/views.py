@@ -601,14 +601,6 @@ class CurriculumVersionViewSet(viewsets.ModelViewSet):
                     curriculum_mode
                 )
 
-                new_version.curriculum_mode = curriculum_mode
-
-                new_version.save(
-                    update_fields=[
-                        'curriculum_mode'
-                    ]
-                )
-
                 if hasattr(
                     batch,
                     'curriculum_mode'

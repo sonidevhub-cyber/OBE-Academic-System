@@ -53,78 +53,220 @@ class EnableFeedbackView(APIView):
     def post(self, request):
         user = request.user
 
-        if user.role != "hod":
-            return Response({"error": "Only HOD allowed"}, status=403)
+        # ==============================
+        # 1. USER / ROLE CHECK
+        # ==============================
+        print("USER:", user)
+        print("ROLE:", user.role)
 
+        if user.role not in ["hod", "instructor"]:
+            return Response(
+                {"error": "Only HOD or Instructor allowed"},
+                status=403
+            )
+
+        # ==============================
+        # 2. GET BATCH
+        # ==============================
         batch_id = request.data.get("batch")
 
+        print("Received batch_id:", batch_id)
+
         if not batch_id:
-            return Response({"error": "Batch is required"}, status=400)
+            return Response(
+                {"error": "Batch is required"},
+                status=400
+            )
 
         try:
             batch = Batch.objects.get(id=batch_id)
         except Batch.DoesNotExist:
-            return Response({"error": "Invalid batch"}, status=404)
+            return Response(
+                {"error": "Invalid batch"},
+                status=404
+            )
 
-        # 🔥 STEP 1: get semester number (int)
+        print("Batch:", batch)
+        print("Batch ID:", batch.id)
+        print("Current Semester:", batch.current_semester)
+        print("Curriculum Version:", batch.curriculum_version)
+
+        # ==============================
+        # 3. GET CURRENT SEMESTER NUMBER
+        # ==============================
         semester_number = batch.current_semester
 
         if not semester_number:
-            return Response({"error": "Semester not set in batch"}, status=400)
+            return Response(
+                {"error": "Semester not set in batch"},
+                status=400
+            )
 
-        # 🔥 STEP 2: map to Semester object
+        print("Semester Number:", semester_number)
+
+        # ==============================
+        # 4. GET SEMESTER OBJECT
+        # ==============================
         semester = Semester.objects.filter(
-            number=semester_number   # ⚠️ make sure field name correct hai
+            number=semester_number
         ).first()
 
         if not semester:
-            return Response({"error": "Semester mapping not found"}, status=400)
+            return Response(
+                {"error": "Semester mapping not found"},
+                status=400
+            )
 
-        print("Batch:", batch)
         print("Semester:", semester)
+        print("Semester ID:", semester.id)
 
-        # 🔥 STEP 3: get only courses that belong to this batch's curriculum version
-        courses, _ = get_batch_version_courses(batch, semester_number)
+        # ==============================
+        # 5. GET CURRICULUM VERSION COURSES
+        # ==============================
+        courses, _ = get_batch_version_courses(
+            batch,
+            semester_number
+        )
 
-        print("Courses found:", courses)
+        print("Courses QuerySet:", courses)
+        print("Courses Count:", courses.count())
 
         if not courses.exists():
             if batch.curriculum_version:
                 return Response(
-                    {"error": "No courses found for this batch curriculum version in the current semester"},
+                    {
+                        "error": (
+                            "No courses found for this batch "
+                            "curriculum version in the current semester"
+                        )
+                    },
                     status=400
                 )
-            return Response({"error": "No courses found for this semester"}, status=400)
 
-        # 🔥 STEP 4: create sessions
-        created = 0
+            return Response(
+                {"error": "No courses found for this semester"},
+                status=400
+            )
 
-        # Deactivate any stale sessions for this batch/semester so irrelevant courses do not leak back in.
-        allowed_course_ids = list(
-            courses.values_list("course_id" if batch.curriculum_version else "id", flat=True)
-        )
+        # ==============================
+        # 6. GET ALLOWED COURSE IDS
+        # ==============================
+        if batch.curriculum_version:
+            allowed_course_ids = list(
+                courses.values_list(
+                    "course_id",
+                    flat=True
+                )
+            )
+        else:
+            allowed_course_ids = list(
+                courses.values_list(
+                    "id",
+                    flat=True
+                )
+            )
 
-        FeedbackSession.objects.filter(
+        print("Allowed Course IDs:", allowed_course_ids)
+
+        # ==============================
+        # 7. DEACTIVATE OLD / STALE SESSIONS
+        # ==============================
+        stale_sessions = FeedbackSession.objects.filter(
             batch=batch,
             semester=semester
         ).exclude(
             course_id__in=allowed_course_ids
-        ).update(is_active=False)
+        )
+
+        print(
+            "Stale sessions found:",
+            stale_sessions.count()
+        )
+
+        stale_sessions.update(
+            is_active=False
+        )
+
+        # ==============================
+        # 8. CREATE / ACTIVATE SESSIONS
+        # ==============================
+        created = 0
 
         for course_entry in courses:
-            course = course_entry.course if batch.curriculum_version else course_entry
-            FeedbackSession.objects.update_or_create(
-                batch=batch,
-                semester=semester,
-                course_id=course.id,
-                defaults={"is_active": True}
+
+            if batch.curriculum_version:
+                course = course_entry.course
+            else:
+                course = course_entry
+
+            print(
+                "Processing Course:",
+                course.id,
+                course.name
             )
+
+            session, created_flag = (
+                FeedbackSession.objects.update_or_create(
+                    batch=batch,
+                    semester=semester,
+                    course_id=course.id,
+                    defaults={
+                        "is_active": True
+                    }
+                )
+            )
+
+            print(
+                "SESSION:",
+                session.id,
+                "| COURSE:",
+                course.name,
+                "| CREATED:",
+                created_flag,
+                "| ACTIVE:",
+                session.is_active
+            )
+
             created += 1
 
-        return Response({
-            "message": "Feedback enabled",
-            "sessions_created": created
-        })
+        # ==============================
+        # 9. VERIFY ACTIVE SESSIONS
+        # ==============================
+        active_sessions = FeedbackSession.objects.filter(
+            batch=batch,
+            semester=semester,
+            is_active=True
+        )
+
+        print(
+            "ACTIVE SESSIONS COUNT:",
+            active_sessions.count()
+        )
+
+        print(
+            "ACTIVE SESSIONS:",
+            list(
+                active_sessions.values(
+                    "id",
+                    "batch_id",
+                    "semester_id",
+                    "course_id",
+                    "is_active"
+                )
+            )
+        )
+
+        # ==============================
+        # 10. FINAL RESPONSE
+        # ==============================
+        return Response(
+            {
+                "message": "Feedback enabled",
+                "sessions_created": created,
+                "active_sessions": active_sessions.count()
+            },
+            status=200
+        )
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -135,84 +277,165 @@ class CheckFeedbackStatus(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-
         batch_id = request.GET.get("batch")
 
         if not batch_id:
             return Response({
                 "enabled": False,
-                "submitted": False
+                "submitted": False,
+                "required": 0,
+                "completed": 0
             })
 
+        # ==========================================
+        # GET BATCH
+        # ==========================================
         try:
             batch = Batch.objects.get(id=batch_id)
-
-            student = Student.objects.get(
-                user=request.user
-            )
-
-        except (Batch.DoesNotExist, Student.DoesNotExist):
+        except Batch.DoesNotExist:
             return Response({
                 "enabled": False,
-                "submitted": False
+                "submitted": False,
+                "required": 0,
+                "completed": 0
             })
 
-        session = FeedbackSession.objects.filter(
-            batch=batch,
-            semester__number=batch.current_semester,
-            is_active=True
+        print("STATUS BATCH:", batch)
+        print("STATUS BATCH ID:", batch.id)
+        print("STATUS CURRENT SEMESTER:", batch.current_semester)
+
+        # ==========================================
+        # GET SEMESTER
+        # ==========================================
+        semester = Semester.objects.filter(
+            number=batch.current_semester
         ).first()
 
-        # Total required CLO questions
-        total_questions = 0
+        if not semester:
+            print("STATUS: Semester not found")
 
+            return Response({
+                "enabled": False,
+                "submitted": False,
+                "required": 0,
+                "completed": 0
+            })
+
+        print("STATUS SEMESTER:", semester)
+        print("STATUS SEMESTER ID:", semester.id)
+
+        # ==========================================
+        # GET ACTIVE SESSIONS
+        # ==========================================
         sessions = FeedbackSession.objects.filter(
             batch=batch,
-            semester__number=batch.current_semester,
+            semester=semester,
             is_active=True
         )
 
-        allowed_courses, _ = get_batch_version_courses(batch, batch.current_semester)
-        if allowed_courses.exists():
-            sessions = sessions.filter(
-                course_id__in=allowed_courses.values_list("course_id" if batch.curriculum_version else "id", flat=True)
+        print(
+            "STATUS ACTIVE SESSION COUNT:",
+            sessions.count()
+        )
+
+        print(
+            "STATUS ACTIVE SESSIONS:",
+            list(
+                sessions.values(
+                    "id",
+                    "batch_id",
+                    "semester_id",
+                    "course_id",
+                    "is_active"
+                )
+            )
+        )
+
+        # ==========================================
+        # ENABLED
+        # ==========================================
+        enabled = sessions.exists()
+
+        print("STATUS ENABLED:", enabled)
+
+        # ==========================================
+        # GET STUDENT IF AVAILABLE
+        # ==========================================
+        student = None
+
+        try:
+            student = Student.objects.get(user=request.user)
+        except Student.DoesNotExist:
+            print("STATUS: Current user is not a student")
+
+        # ==========================================
+        # REQUIRED / COMPLETED
+        # ==========================================
+        required = 0
+        completed = 0
+
+        # Only calculate student submission data
+        # if current user is actually a student.
+        if student and sessions.exists():
+
+            for session in sessions:
+
+                try:
+                    course = session.course
+                except Exception:
+                    continue
+
+                # Count CLOs/questions for this course
+                course_questions = CLO.objects.filter(
+                    course=course
+                ).count()
+
+                required += course_questions
+
+            print(
+                "STATUS REQUIRED QUESTIONS:",
+                required
             )
 
-        for s in sessions:
-            total_questions += CLO.objects.filter(
-                course=s.course
-            ).count()
-
-        # Student submitted responses
-        submitted_count = FeedbackResponse.objects.filter(
-            student=student,
-            batch=batch,
-            semester__number=batch.current_semester
-        ).count()
-
-        allowed_courses, _ = get_batch_version_courses(batch, batch.current_semester)
-        if allowed_courses.exists():
-            submitted_count = FeedbackResponse.objects.filter(
+            # Count student's submitted feedback
+            completed = FeedbackResponse.objects.filter(
                 student=student,
                 batch=batch,
-                semester__number=batch.current_semester,
-                course_id__in=allowed_courses.values_list(
-                    "course_id" if batch.curriculum_version else "id",
+                semester=semester,
+                course_id__in=sessions.values_list(
+                    "course_id",
                     flat=True
                 )
             ).count()
 
+            print(
+                "STATUS COMPLETED RESPONSES:",
+                completed
+            )
+
+        # ==========================================
+        # SUBMITTED
+        # ==========================================
         submitted = (
-            total_questions > 0 and
-            submitted_count >= total_questions
+            required > 0
+            and completed >= required
         )
 
-        return Response({
-            "enabled": bool(session),
+        print("STATUS SUBMITTED:", submitted)
+
+        # ==========================================
+        # FINAL RESPONSE
+        # ==========================================
+        response_data = {
+            "enabled": enabled,
             "submitted": submitted,
-            "required": total_questions,
-            "completed": submitted_count
-        })
+            "required": required,
+            "completed": completed
+        }
+
+        print("FINAL STATUS RESPONSE:", response_data)
+
+        return Response(response_data)
 # 🟣 3. GET QUESTIONS
 from students.models import Student
 from core.models import Batch
@@ -490,7 +713,6 @@ class FeedbackService:
                             'is_active': True
                         }
                     )
-# 🚨 5. COMPARE (RED FLAG)
 # 🚨 5. COMPARE DIRECT vs INDIRECT
 class CompareView(APIView):
     permission_classes = [IsAuthenticated]
@@ -504,37 +726,83 @@ class CompareView(APIView):
         direct_records = CLOAttainment.objects.all()
         indirect_records = IndirectCLOAttainment.objects.all()
 
+        batch_obj = None
         allowed_course_ids = None
+
+        # ==========================================
+        # BATCH
+        # ==========================================
         if batch:
-            batch_obj = Batch.objects.select_related("curriculum_version").filter(id=batch).first()
+            batch_obj = (
+                Batch.objects
+                .select_related("curriculum_version")
+                .filter(id=batch)
+                .first()
+            )
+
             if batch_obj and batch_obj.curriculum_version:
                 allowed_course_ids = list(
-                    batch_obj.curriculum_version.version_courses.filter(
-                        is_active=True
-                    ).values_list("course_id", flat=True)
+                    batch_obj.curriculum_version.version_courses
+                    .filter(is_active=True)
+                    .values_list("course_id", flat=True)
                 )
 
+        # ==========================================
+        # CURRICULUM COURSE FILTER
+        # ==========================================
         if allowed_course_ids:
-            direct_records = direct_records.filter(course_id__in=allowed_course_ids)
-            indirect_records = indirect_records.filter(course_id__in=allowed_course_ids)
+            direct_records = direct_records.filter(
+                course_id__in=allowed_course_ids
+            )
 
+            indirect_records = indirect_records.filter(
+                course_id__in=allowed_course_ids
+            )
+
+        # ==========================================
+        # COURSE FILTER
+        # ==========================================
         if course:
-            direct_records = direct_records.filter(course_id=course)
-            indirect_records = indirect_records.filter(course_id=course)
+            direct_records = direct_records.filter(
+                course_id=course
+            )
 
+            indirect_records = indirect_records.filter(
+                course_id=course
+            )
+
+        # ==========================================
+        # BATCH FILTER
+        # ==========================================
         if batch:
-            direct_records = direct_records.filter(batch_id=batch)
-            indirect_records = indirect_records.filter(batch_id=batch)
+            direct_records = direct_records.filter(
+                batch_id=batch
+            )
 
+            indirect_records = indirect_records.filter(
+                batch_id=batch
+            )
+
+        # ==========================================
+        # SEMESTER FILTER
+        # ==========================================
         if semester:
-            direct_records = direct_records.filter(semester_id=semester)
-            indirect_records = indirect_records.filter(semester_id=semester)
+            direct_records = direct_records.filter(
+                semester_id=semester
+            )
+
+            indirect_records = indirect_records.filter(
+                semester_id=semester
+            )
 
         KPI = 60
         GAP_LIMIT = 10
 
         results = []
 
+        # ==========================================
+        # COMPARE DIRECT + INDIRECT
+        # ==========================================
         for direct in direct_records:
 
             indirect = indirect_records.filter(
@@ -547,46 +815,179 @@ class CompareView(APIView):
             if not indirect:
                 continue
 
-            direct_percent = float(direct.attained_percentage)
-            indirect_percent = float(indirect.attained_percentage)
+            direct_percent = float(
+                direct.attained_percentage
+            )
 
-            gap = round(abs(direct_percent - indirect_percent), 2)
+            indirect_percent = float(
+                indirect.attained_percentage
+            )
+
+            gap = round(
+                abs(direct_percent - indirect_percent),
+                2
+            )
+
+            # ==========================================
+            # CURRENT BATCH CQI
+            # ==========================================
             existing_cqi = FeedbackCQI.objects.filter(
-    course=direct.course,
-    clo=direct.clo,
-    batch=direct.batch,
-    semester=direct.semester
-).first()
+                course=direct.course,
+                clo=direct.clo,
+                batch=direct.batch,
+                semester=direct.semester
+            ).first()
+
+            # ==========================================
+            # PREVIOUS BATCH CQI APPLIED TO THIS BATCH
+            # ==========================================
+            implemented_cqi = None
+
+            if batch_obj:
+
+                implemented_cqi = (
+                    FeedbackCQI.objects
+                    .filter(
+                        implemented_batch=batch_obj,
+                        course=direct.course,
+                        clo=direct.clo
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+
+            # ==========================================
+            # STATUS
+            # ==========================================
             if direct_percent < KPI:
+
                 status = "CQI_REQUIRED"
                 message = "Direct attainment is below KPI."
 
             elif gap > GAP_LIMIT:
+
                 status = "RED_FLAG"
-                message = "Large difference between Direct and Indirect attainment."
+                message = (
+                    "Large difference between Direct "
+                    "and Indirect attainment."
+                )
 
             else:
-                status = "MATCHED"
-                message = "Direct and Indirect attainment are aligned."
 
+                status = "MATCHED"
+                message = (
+                    "Direct and Indirect attainment "
+                    "are aligned."
+                )
+
+            # ==========================================
+            # RESULT
+            # ==========================================
             results.append({
+
+                # --------------------------------------
+                # COURSE
+                # --------------------------------------
                 "course": direct.course.name,
                 "course_code": direct.course.code,
                 "course_id": str(direct.course.id),
-                "cqi_exists" : existing_cqi is not None,
-                 "cqi_id": (
-                     str(existing_cqi.id) if existing_cqi else None
-                 ),
-                "clo": getattr(direct.clo, "code", str(direct.clo)),
+
+                # --------------------------------------
+                # CLO
+                # --------------------------------------
+                "clo": getattr(
+                    direct.clo,
+                    "code",
+                    str(direct.clo)
+                ),
+
                 "clo_id": str(direct.clo.id),
+
+                # --------------------------------------
+                # BATCH
+                # --------------------------------------
                 "batch_id": str(direct.batch.id),
-                "semester_id": str(direct.semester.id),
+
+                "batch": str(direct.batch),
+
+                # --------------------------------------
+                # SEMESTER
+                # --------------------------------------
+                "semester_id": str(
+                    direct.semester.id
+                ),
+
+                "semester": str(
+                    direct.semester
+                ),
+
+                # --------------------------------------
+                # ASSESSMENT
+                # --------------------------------------
                 "direct": direct_percent,
                 "indirect": indirect_percent,
                 "gap": gap,
+
+                # --------------------------------------
+                # STATUS
+                # --------------------------------------
                 "status": status,
                 "message": message,
-                "trigger_cqi": status == "CQI_REQUIRED" or status == "RED_FLAG"
+
+                "trigger_cqi": (
+                    status == "CQI_REQUIRED"
+                    or status == "RED_FLAG"
+                ),
+
+                # --------------------------------------
+                # CURRENT CQI
+                # --------------------------------------
+                "cqi_exists": (
+                    existing_cqi is not None
+                ),
+
+                "cqi_id": (
+                    str(existing_cqi.id)
+                    if existing_cqi
+                    else None
+                ),
+
+                # --------------------------------------
+                # NEXT BATCH / INHERITED CQI
+                # --------------------------------------
+                "implemented_cqi_exists": (
+                    implemented_cqi is not None
+                ),
+
+                "implemented_cqi_id": (
+                    str(implemented_cqi.id)
+                    if implemented_cqi
+                    else None
+                ),
+
+                "implemented_cqi_status": (
+                    implemented_cqi.status
+                    if implemented_cqi
+                    else None
+                ),
+
+                "implemented_cqi_root_cause": (
+                    implemented_cqi.root_cause
+                    if implemented_cqi
+                    else None
+                ),
+
+                "implemented_cqi_remedial_action": (
+                    implemented_cqi.remedial_action
+                    if implemented_cqi
+                    else None
+                ),
+
+                "implemented_from_batch": (
+                    str(implemented_cqi.batch)
+                    if implemented_cqi
+                    else None
+                ),
 
             })
 
@@ -628,49 +1029,169 @@ class NextBatchCQI(APIView):
 
     def get(self, request):
 
-        batch = request.GET.get("batch")
+        batch_id = request.GET.get("batch")
 
-        data = FeedbackCQI.objects.filter(
-            implemented_batch=batch
+        if not batch_id:
+            return Response(
+                {"error": "Batch is required"},
+                status=400
+            )
+
+        cqi_records = (
+            FeedbackCQI.objects
+            .filter(
+                implemented_batch_id=batch_id,
+                status="IMPLEMENTED"
+            )
+            .select_related(
+                "course",
+                "clo",
+                "batch",
+                "semester"
+            )
+            .order_by("-created_at")
         )
 
-        return Response([
+        data = []
 
-            {
+        for cqi in cqi_records:
 
-                "course": x.course.name,
+            data.append({
 
-                "course_code": x.course.code,
+                "id": str(cqi.id),
 
-                "clo": x.clo.title,
+                "course_id": str(
+                    cqi.course.id
+                ),
 
-                "root_cause": x.root_cause,
+                "course": cqi.course.name,
 
-                "remedial_action": x.remedial_action
+                "course_code": cqi.course.code,
 
-            }
+                "clo_id": str(
+                    cqi.clo.id
+                ),
 
-            for x in data
+                "clo": getattr(
+                    cqi.clo,
+                    "code",
+                    str(cqi.clo)
+                ),
 
-        ])
+                "root_cause": cqi.root_cause,
+
+                "remedial_action":
+                    cqi.remedial_action,
+
+                "status": cqi.status,
+
+                "source_batch": str(
+                    cqi.batch
+                ),
+
+                "implemented_batch": str(
+                    cqi.implemented_batch
+                ),
+
+                "semester_id": str(
+                    cqi.semester.id
+                ),
+
+            })
+
+        return Response({
+            "results": data
+        })
 class ApplyCQIToNextBatch(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
 
-        cqi = FeedbackCQI.objects.get(
-            id=request.data["cqi_id"]
+        cqi_id = request.data.get("cqi_id")
+        next_batch_id = request.data.get("next_batch")
+
+        if not cqi_id:
+            return Response(
+                {"error": "CQI ID is required"},
+                status=400
+            )
+
+        if not next_batch_id:
+            return Response(
+                {"error": "Next batch is required"},
+                status=400
+            )
+
+        try:
+            cqi = FeedbackCQI.objects.get(
+                id=cqi_id
+            )
+        except FeedbackCQI.DoesNotExist:
+            return Response(
+                {"error": "CQI not found"},
+                status=404
+            )
+
+        try:
+            next_batch = Batch.objects.get(
+                id=next_batch_id
+            )
+        except Batch.DoesNotExist:
+            return Response(
+                {"error": "Next batch not found"},
+                status=404
+            )
+
+        # ==========================================
+        # PREVENT APPLYING TO SAME BATCH
+        # ==========================================
+        if cqi.batch_id == next_batch.id:
+            return Response(
+                {
+                    "error":
+                    "CQI cannot be applied to the same batch."
+                },
+                status=400
+            )
+
+        # ==========================================
+        # APPLY CQI
+        # ==========================================
+        cqi.status = "IMPLEMENTED"
+        cqi.implemented_batch = next_batch
+        cqi.save(
+            update_fields=[
+                "status",
+                "implemented_batch"
+            ]
         )
 
-        cqi.status = "IMPLEMENTED"
-
-        cqi.implemented_batch_id = request.data["next_batch"]
-
-        cqi.save()
-
         return Response({
-            "message": "CQI Applied"
+
+            "message": "CQI Applied Successfully",
+
+            "cqi_id": str(cqi.id),
+
+            "source_batch": str(cqi.batch),
+
+            "implemented_batch": str(
+                next_batch
+            ),
+
+            "course_id": str(
+                cqi.course.id
+            ),
+
+            "course": cqi.course.name,
+
+            "clo_id": str(
+                cqi.clo.id
+            ),
+
+            "status": cqi.status
+
         })                
 class HODBatchesView(APIView):
     permission_classes = [IsAuthenticated]

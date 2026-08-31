@@ -696,6 +696,7 @@ class CheckCQIView(APIView):
             "weak_clos": [
                 {
                     "clo": str(c.clo.id),
+                    "clo_code": f"CLO-{c.clo.order_number}",
                     "attainment": float(c.attained_percentage),
                     "kpi": float(c.kpi_target)
                 }

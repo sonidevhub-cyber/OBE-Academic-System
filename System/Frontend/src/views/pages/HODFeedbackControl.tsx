@@ -42,19 +42,28 @@ const HODFeedbackControl = () => {
     }
   }, [selectedBatch]);
 
-  const checkStatus = async () => {
-    try {
-      console.log("Checking status for batch:", selectedBatch);
+ const checkStatus = async () => {
+  try {
+    console.log("Checking status for batch:", selectedBatch);
 
-      const res = await feedbackService.status(selectedBatch);
+    const res = await feedbackService.status(selectedBatch);
 
-      console.log("Status response:", res);
+    console.log("RAW STATUS RESPONSE:", res);
+    console.log("STATUS TYPE:", typeof res);
+    console.log("STATUS JSON:", JSON.stringify(res));
 
-      setIsEnabled(res.enabled);
-    } catch (err) {
-      console.error("Status error", err);
+    if (res && typeof res === "object") {
+      setIsEnabled(Boolean(res.enabled));
+    } else {
+      console.error("Invalid status response:", res);
+      setIsEnabled(false);
     }
-  };
+
+  } catch (err) {
+    console.error("Status error:", err);
+    setIsEnabled(false);
+  }
+};
 
   // 🔹 Toggle feedback
   const toggleFeedback = async () => {

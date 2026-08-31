@@ -48,7 +48,6 @@ const AdminManagement: React.FC<AdminManagementProps> = ({ activeTab }) => {
     { code: 'manage_attendance', label: 'Attendance Management', hint: 'Review attendance and edit requests' },
     { code: 'manage_results', label: 'Results Management', hint: 'Manage results and publishing' },
     { code: 'manage_announcements', label: 'Announcements Management', hint: 'Create/update announcements' },
-    { code: 'manage_events', label: 'Events Management', hint: 'Create/update events and approvals' },
     { code: 'view_obe_reports', label: 'OBE Reports', hint: 'View OBE analytics and reports' },
   ];
 
