@@ -1298,50 +1298,66 @@ class BatchGAReportView(APIView):
         # Get GA report using the updated calculation function
         ga_report_rows = get_ga_report_with_invalidation_check(batch)
         
+        # Prefetch all GAs in a single query
+        ga_ids_for_report = [ga_row['ga_id'] for ga_row in ga_report_rows]
+        ga_objects = {ga.id: ga for ga in GA.objects.filter(id__in=ga_ids_for_report)}
+        
+        # Prefetch all CourseGAScore and CourseFeedbackGAScore in bulk
+        all_sessions_for_courses = get_effective_course_sessions(
+            batch,
+            upto_semester=batch.current_semester,
+            require_assessment_done=False,
+        )
+        if batch.curriculum_version:
+            allowed_ids = set(batch.curriculum_version.version_courses.filter(is_active=True).values_list('course_id', flat=True))
+            all_sessions_for_courses = [s for s in all_sessions_for_courses if str(s.course_id) in allowed_ids]
+        
+        all_session_ids_for_courses = [s.id for s in all_sessions_for_courses]
+        
+        # Bulk fetch all CourseGAScore for these sessions and GAs
+        all_course_ga_scores = CourseGAScore.objects.filter(
+            course_session_id__in=all_session_ids_for_courses,
+            ga_id__in=ga_ids_for_report,
+            is_active=True,
+        ).select_related('course_session')
+        
+        # Group by (session_id, ga_id)
+        course_ga_score_map = {}
+        for score in all_course_ga_scores:
+            course_ga_score_map[(score.course_session_id, score.ga_id)] = score
+        
+        # Bulk fetch all CourseFeedbackGAScore
+        all_feedback_scores = CourseFeedbackGAScore.objects.filter(
+            course_id__in=[s.course_id for s in all_sessions_for_courses],
+            ga_id__in=ga_ids_for_report,
+            batch=batch,
+            is_active=True,
+        )
+        feedback_score_map = {}
+        for cf_score in all_feedback_scores:
+            feedback_score_map[(cf_score.course_id, cf_score.ga_id)] = cf_score
+        
+        enrolled_students_count = get_students_for_batch(batch).count()
+        
         response_items = []
         for ga_row in ga_report_rows:
-            ga = GA.objects.get(id=ga_row['ga_id'])
+            ga = ga_objects.get(ga_row['ga_id'])
+            if not ga:
+                continue
             
             # Trigger cumulative CQI only if program end is ready
             if is_program_end_ready:
                 check_and_trigger_ga_cqi(batch, ga, 'CUMULATIVE')
 
-            # Contributing courses: show course_ga_score per course session (only <= current semester AND in curriculum)
-            allowed_course_ids = []
-            if batch.curriculum_version:
-                allowed_course_ids = batch.curriculum_version.version_courses.filter(
-                    is_active=True
-                ).values_list('course_id', flat=True)
-
-            cs_query = get_effective_course_sessions(
-                batch,
-                upto_semester=batch.current_semester,
-                require_assessment_done=False,
-            )
-            if allowed_course_ids:
-                allowed_course_ids = {str(course_id) for course_id in allowed_course_ids}
-                cs_query = [
-                    session for session in cs_query
-                    if str(session.course_id) in allowed_course_ids
-                ]
-
-            enrolled_students_count = get_students_for_batch(batch).count()
             contributing_courses = []
-            for session in cs_query:
-                score = CourseGAScore.objects.filter(course_session=session, ga=ga, is_active=True).first()
-                # Keep the course visible even if it has not been finalized yet.
+            for session in all_sessions_for_courses:
+                score = course_ga_score_map.get((session.id, ga.id))
                 course_ga_score = float(score.score) if score else None
                 enrolled_students = score.enrolled_students if score else enrolled_students_count
 
-                # Get Course Feedback (Indirect) score for this course & GA & batch.
-                # If the course has not been finalized yet, expose N/A instead of zero.
+                # Get Course Feedback (Indirect) score from prefetched map
                 cf_score = None
-                cf_score_obj = CourseFeedbackGAScore.objects.filter(
-                    course=session.course,
-                    ga=ga,
-                    batch=batch,
-                    is_active=True
-                ).first()
+                cf_score_obj = feedback_score_map.get((session.course_id, ga.id))
                 if cf_score_obj and cf_score_obj.score is not None:
                     cf_score = float(cf_score_obj.score)
 

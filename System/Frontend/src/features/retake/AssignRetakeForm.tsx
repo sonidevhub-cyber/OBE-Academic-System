@@ -224,7 +224,12 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
           getPreviousInstructor(selectedBatchId, selectedCourseId),
         ]);
 
-        setFailedStudents(studentsData || []);
+        const sortedStudents = (studentsData || []).sort((a, b) => {
+          const regA = a.registration_number || a.student_id || '';
+          const regB = b.registration_number || b.student_id || '';
+          return regA.localeCompare(regB);
+        });
+        setFailedStudents(sortedStudents);
 
         if (instructorData.found && instructorData.teacher_id && instructorData.name) {
           const teacherExists = teachers.some(
@@ -510,7 +515,6 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                     <th className="px-3 py-3">Student</th>
                     <th className="px-3 py-3">Reg. No.</th>
                     <th className="px-3 py-3">Last %</th>
-                    <th className="px-3 py-3">Grade</th>
                     <th className="px-3 py-3">Attempts</th>
                     <th className="px-3 py-3">Status</th>
                   </tr>
@@ -546,12 +550,9 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                             className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                         </td>
-                        <td className="px-3 py-3">
-                          <div className="font-bold text-gray-900">{student.name}</div>
-                          <div className="text-xs text-gray-500">
-                            ID: {student.student_id.slice(0, 8)}...
-                          </div>
-                        </td>
+                         <td className="px-3 py-3">
+                           <div className="font-bold text-gray-900">{student.name}</div>
+                         </td>
                         <td className="px-3 py-3 text-sm text-gray-700">
                           {student.registration_number || '—'}
                         </td>
@@ -569,9 +570,6 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
                           )}
-                        </td>
-                        <td className="px-3 py-3 text-sm font-semibold text-gray-700">
-                          {student.last_grade || '—'}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-700">
                           {student.current_retake_attempts} / 3
@@ -592,39 +590,46 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                                 Failed
                               </div>
                             )
-                          ) : student.has_active_retake ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">
-                              Has active retake
-                            </span>
-                          ) : student.eligibility_status === 'passed' ? (
-                            <span
-                              className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700"
-                              title={student.eligibility_reason || ''}
-                            >
-                              Improvement
-                            </span>
-                          ) : student.eligibility_status === 'no_result' ? (
-                            <span
-                              className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700"
-                              title={student.eligibility_reason || ''}
-                            >
-                              Manual retake
-                            </span>
-                          ) : student.eligibility_status === 'max_attempts' ? (
-                            <span
-                              className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
-                              title={student.eligibility_reason || ''}
-                            >
-                              Max attempts
-                            </span>
-                          ) : (
-                            <span
-                              className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
-                              title={student.eligibility_reason || ''}
-                            >
-                              Failed
-                            </span>
-                          )}
+                           ) : student.has_active_retake ? (
+                             <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">
+                               Has active retake
+                             </span>
+                           ) : student.eligibility_status === 'max_attempts' ? (
+                             <span
+                               className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
+                               title={student.eligibility_reason || ''}
+                             >
+                               Max attempts
+                             </span>
+                           ) : student.is_pass === false ? (
+                             <span
+                               className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
+                               title={student.eligibility_reason || ''}
+                             >
+                               Fail
+                             </span>
+                           ) : student.eligibility_status === 'passed' ? (
+                             <span
+                               className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700"
+                               title={student.eligibility_reason || ''}
+                             >
+                               Improvement
+                             </span>
+                           ) : student.eligibility_status === 'no_result' ? (
+                             <span
+                               className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700"
+                               title={student.eligibility_reason || ''}
+                             >
+                               Manual retake
+                             </span>
+                           ) : (
+                             <span
+                               className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"
+                               title={student.eligibility_reason || ''}
+                             >
+                               Failed
+                             </span>
+                           )}
                         </td>
                       </tr>
                     );
@@ -648,7 +653,7 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                       <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                       <div>
                         <span className="font-bold">
-                          {st?.name || r.student_id.slice(0, 8)}:
+                           {st?.name || 'Student'}:
                         </span>{' '}
                         {r.error}
                       </div>
@@ -788,9 +793,9 @@ const AssignRetakeForm: React.FC<{ onCreated?: () => void }> = ({ onCreated }) =
                           </span>
                           <span className="font-semibold text-gray-800">{s.name}</span>
                         </div>
-                        <span className="text-xs text-gray-500">
-                          {s.registration_number || s.student_id.slice(0, 8)}
-                        </span>
+                         <span className="text-xs text-gray-500">
+                           {s.registration_number || '—'}
+                         </span>
                       </div>
                     ))
                   )}

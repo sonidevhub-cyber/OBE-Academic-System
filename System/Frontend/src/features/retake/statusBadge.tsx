@@ -18,6 +18,11 @@ export const getRetakeStatusBadgeMeta = (status: RetakeStatus): BadgeMeta => {
         label: 'Failed Again',
         className: 'bg-rose-100 text-rose-800 border-rose-200',
       };
+    case 'dropped':
+      return {
+        label: 'Dropped',
+        className: 'bg-gray-200 text-gray-700 border-gray-300',
+      };
     case 'ongoing':
     default:
       return {

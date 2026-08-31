@@ -1,12 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from rest_framework import serializers
 
 from assessments.models import Assessment, Question, StudentAssessment, StudentQuestionMark
 from obe.serializers import CourseGAScoreSerializer
 
-from .models import CourseRetake, ReportInvalidationLog
+from .models import CourseRetake, ReportInvalidationLog, RetakeAssessmentSnapshot
 
 User = get_user_model()
 
@@ -23,6 +23,7 @@ class CourseRetakeSerializer(serializers.ModelSerializer):
         return {
             "id": str(obj.student.student_id),
             "name": obj.student.name,
+            "registration_number": obj.student.registration_number,
         }
 
     def get_failed_course(self, obj):

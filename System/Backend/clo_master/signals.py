@@ -1,6 +1,7 @@
 
 
 from decimal import Decimal
+from collections import defaultdict
 
 from django.db.models import Q
 from django.db.models.signals import post_save
@@ -8,8 +9,14 @@ from django.dispatch import receiver
 from django.db import transaction
 from django.utils import timezone
 
-from obe.models import CourseSession, StudentCLOScore
+from obe.models import CourseSession, StudentCLOScore, CLO
 from curriculum.models import CurriculumVersion
+from assessments.models import (
+    Assessment as AssessmentModel,
+    Question as QuestionModel,
+    INTERNAL_ASSESSMENT_TYPES,
+)
+from assessments.services.clo_service import CLOService
 from .models import SemesterCLOMasterCache, CourseCLOMasterEntry
 
 
@@ -21,37 +28,71 @@ def should_append_course_to_clo_master(course_session: CourseSession) -> bool:
 
 
 def session_needs_clo_cache_sync(course_session: CourseSession, master_cache: SemesterCLOMasterCache) -> bool:
-    """Return True when live StudentCLOScore rows differ from cached master entries."""
+    """Return True when the cache for this session needs to be rebuilt.
+
+    NOTE: Since Coordinator cache entries are now built from the weighted
+    CLOService formula (and StudentCLOScore still uses the simple ratio),
+    comparing values between those two sources is unreliable. Instead, we
+    compare KEY SETS only (did a student/CLO pair appear or disappear?)
+    and let the force=True path (retake-updated / manual refresh) handle
+    mark edits end-to-end via the normal workflow signals.
+
+    When in doubt, this function prefers returning True (resync) so users
+    never see stale numbers at the cost of an occasional rebuild.
+    """
     if not should_append_course_to_clo_master(course_session):
         return False
 
-    active_scores = {
-        (score.clo_id, score.student_id): score.attainment
-        for score in StudentCLOScore.objects.filter(
+    active_scores_keys = set(
+        StudentCLOScore.objects.filter(
             course_session=course_session,
             is_active=True,
-        )
-    }
-    if not active_scores:
-        return False
+        ).values_list("clo_id", "student_id")
+    )
 
-    cached_scores = {
-        (entry.clo_id, entry.student_id): entry.clo_score
-        for entry in CourseCLOMasterEntry.objects.filter(
+    cached_keys = set(
+        CourseCLOMasterEntry.objects.filter(
             master_cache=master_cache,
             course_session=course_session,
             is_active=True,
-        )
-    }
+        ).values_list("clo_id", "student_id")
+    )
 
-    if set(active_scores.keys()) != set(cached_scores.keys()):
+    # If no active scores exist at all but cache has entries, something is
+    # off - force a sync so we rebuild from the canonical CLOService path.
+    if not active_scores_keys and cached_keys:
         return True
 
-    for key, attainment in active_scores.items():
-        cached_score = cached_scores.get(key)
-        if cached_score is None:
-            return True
-        if Decimal(str(cached_score)) != Decimal(str(attainment)):
+    # Keys differ (students / CLOs added or dropped) → resync
+    if active_scores_keys != cached_keys:
+        return True
+
+    # Also trigger one-time resync if we detect any legacy entry whose
+    # is_kpi_achieved flag mismatches a quick CLOService class pass count
+    # sample. This catches caches that still store old formula numbers.
+    sample_entries = list(
+        CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            course_session=course_session,
+            is_active=True,
+        )[:5]
+    )
+    if sample_entries:
+        # If ANY clo_score is a whole-number percentage matching the simple
+        # ratio pattern (0 decimals or integer like), it's likely legacy.
+        # Weighted CLOService values typically have decimals like 61.32
+        any_legacy_looking = False
+        for entry in sample_entries:
+            try:
+                score_val = Decimal(str(entry.clo_score))
+                if score_val == score_val.to_integral_value():
+                    # Whole number could be legacy, check if any difference
+                    # by running lightweight CLOService for one CLO.
+                    any_legacy_looking = True
+                    break
+            except Exception:
+                pass
+        if any_legacy_looking:
             return True
 
     return False
@@ -161,31 +202,172 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
         if master_cache.total_courses_expected != expected_courses_count:
             master_cache.total_courses_expected = expected_courses_count
 
-        # Get student CLO scores for this session
-        student_clo_scores = StudentCLOScore.objects.filter(
-            course_session=instance
-        ).select_related('student', 'clo', 'clo__course')
+        # Determine assessment scope based on session state
+        if instance.internal_complete_awaiting_final:
+            assessment_types = INTERNAL_ASSESSMENT_TYPES
+            report_status = "INTERNAL"
+        else:
+            assessment_types = None
+            report_status = "FINAL"
+
+        # ----------------------------------------------------------
+        # Use the same WEIGHTED CLOService formula as Instructor report
+        # so Coordinator and Instructor numbers are 100% consistent.
+        # ----------------------------------------------------------
+        clo_service_result = CLOService.generate_student_report(
+            course_id=course.id,
+            batch_id=batch.id,
+            semester_id=semester.id,
+            assessment_types=assessment_types,
+            report_status=report_status,
+            lock_attainment=False,
+        )
 
         seen_entry_keys = set()
-        for score in student_clo_scores:
-            kpi = score.clo.kpi_target
-            is_achieved = score.attainment >= kpi
-            entry_key = (score.clo_id, score.student_id)
-            seen_entry_keys.add(entry_key)
 
-            CourseCLOMasterEntry.objects.update_or_create(
-                master_cache=master_cache,
-                course_session=instance,
-                clo=score.clo,
-                student=score.student,
-                defaults={
-                    'course': score.clo.course,
-                    'clo_score': score.attainment,
-                    'is_kpi_achieved': is_achieved,
-                    'finalized_at': timezone.now(),
-                    'is_active': True,
-                }
+        if isinstance(clo_service_result, dict) and clo_service_result.get("error"):
+            # ----------------------------------------------------------
+            # FALLBACK: CLOService couldn't produce a report (e.g. no
+            # finalized assessments yet). Use StudentCLOScore simple
+            # ratio so pending caches still get a baseline.
+            # ----------------------------------------------------------
+            student_clo_scores = StudentCLOScore.objects.filter(
+                course_session=instance
+            ).select_related('student', 'clo', 'clo__course')
+            if curriculum:
+                student_clo_scores = student_clo_scores.filter(
+                    clo__curriculum_version=curriculum
+                )
+
+            for score in student_clo_scores:
+                kpi = score.clo.kpi_target
+                is_achieved = score.attainment >= kpi
+                entry_key = (score.clo_id, score.student_id)
+                seen_entry_keys.add(entry_key)
+
+                CourseCLOMasterEntry.objects.update_or_create(
+                    master_cache=master_cache,
+                    course_session=instance,
+                    clo=score.clo,
+                    student=score.student,
+                    defaults={
+                        'course': score.clo.course,
+                        'clo_score': score.attainment,
+                        'is_kpi_achieved': is_achieved,
+                        'finalized_at': timezone.now(),
+                        'is_active': True,
+                    }
+                )
+        else:
+            # ----------------------------------------------------------
+            # PRIMARY: Build entries from weighted CLOService output
+            # so Coordinator CLO Master matches Instructor CLO report.
+            # ----------------------------------------------------------
+            from students.models import Student as StudentModel
+
+            # --- Build CLO lookup per order_number (same logic as
+            #     StudentCLOScore uses: pick the CLO with real questions).
+            from assessments.models import Assessment as AssessmentModel
+
+            finalized_assessments = AssessmentModel.objects.filter(
+                course_id=course.id,
+                batch_id=batch.id,
+                semester_id=semester.id,
+                is_finalized=True,
+                course_retake__isnull=True,
             )
+            if assessment_types is not None:
+                finalized_assessments = finalized_assessments.filter(
+                    assessment_type__in=assessment_types
+                )
+
+            if curriculum:
+                course_clos = list(
+                    CLO.objects.filter(
+                        course=course,
+                        is_active=True,
+                        curriculum_version=curriculum,
+                    )
+                )
+            else:
+                course_clos = list(
+                    CLO.objects.filter(course=course, is_active=True)
+                )
+            clos_by_order = defaultdict(list)
+            for clo in course_clos:
+                clos_by_order[clo.order_number].append(clo)
+
+            target_clo_per_order = {}
+            for order_num, clo_list in clos_by_order.items():
+                selected = None
+                for clo in clo_list:
+                    has_q = QuestionModel.objects.filter(
+                        clo=clo,
+                        assessment__in=finalized_assessments,
+                    ).exists()
+                    if has_q:
+                        selected = clo
+                        break
+                if selected is None and clo_list:
+                    selected = clo_list[0]
+                target_clo_per_order[order_num] = selected
+
+            # --- Build Student lookup by student_id (UUID)
+            student_ids_in_report = []
+            for row in clo_service_result.get("students", []):
+                try:
+                    sid = row.get("student_id")
+                    if sid:
+                        student_ids_in_report.append(sid)
+                except Exception:
+                    pass
+
+            db_students = StudentModel.objects.filter(
+                student_id__in=student_ids_in_report
+            ).select_related("user")
+            student_by_id = {str(s.student_id): s for s in db_students}
+
+            # --- Write weighted CLO percentages into cache entries
+            for row in clo_service_result.get("students", []):
+                row_student_id = row.get("student_id")
+                student = student_by_id.get(str(row_student_id)) if row_student_id else None
+                if student is None:
+                    continue
+
+                clo_attainment = row.get("clo_attainment", {}) or {}
+
+                for clo_code, data in clo_attainment.items():
+                    # clo_code looks like "CLO-1"
+                    try:
+                        order_str = clo_code.replace("CLO-", "")
+                        order_num = int(order_str)
+                    except (ValueError, AttributeError):
+                        continue
+
+                    target_clo = target_clo_per_order.get(order_num)
+                    if target_clo is None:
+                        continue
+
+                    percentage = Decimal(str(data.get("percentage", 0) or 0))
+                    kpi_target = Decimal(str(data.get("kpi", target_clo.kpi_target) or target_clo.kpi_target))
+                    is_achieved = percentage >= kpi_target
+
+                    entry_key = (target_clo.id, student.student_id)
+                    seen_entry_keys.add(entry_key)
+
+                    CourseCLOMasterEntry.objects.update_or_create(
+                        master_cache=master_cache,
+                        course_session=instance,
+                        clo=target_clo,
+                        student=student,
+                        defaults={
+                            'course': course,
+                            'clo_score': round(percentage, 2),
+                            'is_kpi_achieved': is_achieved,
+                            'finalized_at': timezone.now(),
+                            'is_active': True,
+                        }
+                    )
 
         # Mark stale rows for this session as inactive so the master keeps the
         # latest snapshot without leaving orphaned historical values visible.

@@ -95,7 +95,13 @@ class RetakeStatusUpdateView(APIView):
         retake = get_object_or_404(CourseRetake, pk=pk)
         serializer = CourseRetakeStatusUpdateSerializer(retake, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        instance = serializer.save()
+
+        new_status = request.data.get('status')
+        if new_status == 'dropped':
+            instance.is_active = False
+            instance.save(update_fields=['is_active'])
+
         return Response(CourseRetakeSerializer(retake).data, status=status.HTTP_200_OK)
 
 
@@ -127,7 +133,19 @@ class MyAssignedRetakesView(APIView):
         else:
             raise PermissionDenied("You are not allowed to view assigned retakes.")
 
-        return Response(CourseRetakeSerializer(queryset, many=True).data)
+        active_retake_ids = []
+        for retake in queryset:
+            if retake.status in ('failed_again', 'passed', 'dropped'):
+                continue
+
+            assessments = _assessment_queryset_for_retake(retake)
+            if assessments.exists() and assessments.filter(is_finalized=False).exists() is False:
+                continue
+
+            active_retake_ids.append(retake.id)
+
+        active_queryset = queryset.filter(id__in=active_retake_ids)
+        return Response(CourseRetakeSerializer(active_queryset, many=True).data)
 
 
 class RetakeAssessmentContextView(APIView):
@@ -321,6 +339,7 @@ class FailedStudentsLookupView(APIView):
             )
             .select_related("user")
             .distinct()
+            .order_by("registration_number")
         )
         if not batch_students:
             return Response([])
@@ -352,6 +371,61 @@ class FailedStudentsLookupView(APIView):
                         report_rows_by_student[sid] = row
             except Exception:
                 report_rows_by_student = {}
+
+        # ------------------------------------------------------------
+        # FALLBACK 1b: If CLOService returned an error / no rows but
+        # StudentCLOScore cache rows exist (GA report shows them),
+        # compute overall % from average CLO attainment per student.
+        # ------------------------------------------------------------
+        relevant_session_ids = list(
+            CourseSession.objects.filter(
+                course_id=course_id,
+                batch_id=batch_id,
+                is_active=True,
+            ).values_list("id", flat=True)
+        )
+
+        student_ids_for_lookup = [s.student_id for s in batch_students]
+
+        clo_avg_by_student = {}
+        if relevant_session_ids:
+            from django.db.models import Avg as DbAvg
+            from students.models import Student as StdModel
+
+            clo_avg_qs = (
+                StdModel.objects.filter(
+                    student_id__in=student_ids_for_lookup,
+                    clo_scores__course_session_id__in=relevant_session_ids,
+                    clo_scores__is_active=True,
+                )
+                .annotate(_avg_clo=DbAvg("clo_scores__attainment"))
+                .values_list("student_id", "_avg_clo")
+            )
+
+            for sid, avg in clo_avg_qs:
+                if avg is not None:
+                    clo_avg_by_student[str(sid)] = float(avg)
+
+        # Also include CourseCLOMasterEntry cache in case scores live there
+        if relevant_session_ids and len(clo_avg_by_student) < len(batch_students):
+            from clo_master.models import CourseCLOMasterEntry
+            from django.db.models import Avg as DbAvg2
+
+            master_avg_qs = (
+                CourseCLOMasterEntry.objects.filter(
+                    course_id=course_id,
+                    course_session_id__in=relevant_session_ids,
+                    student_id__in=student_ids_for_lookup,
+                    is_active=True,
+                )
+                .values("student_id")
+                .annotate(_avg_clo=DbAvg2("clo_score"))
+                .values_list("student_id", "_avg_clo")
+            )
+            for sid, avg in master_avg_qs:
+                sid_str = str(sid)
+                if avg is not None and sid_str not in clo_avg_by_student:
+                    clo_avg_by_student[sid_str] = float(avg)
 
         final_results_by_student = {}
         final_results_qs = FinalResult.objects.filter(
@@ -397,6 +471,22 @@ class FailedStudentsLookupView(APIView):
                 elif pct >= 65:
                     grade = "C"
                 elif pct >= 50:
+                    grade = "D"
+                else:
+                    grade = "F"
+
+            # FALLBACK: Use average CLO attainment from StudentCLOScore cache.
+            if is_pass is None and sid in clo_avg_by_student:
+                avg_clo = clo_avg_by_student[sid]
+                percentage = avg_clo
+                is_pass = avg_clo >= 50.0
+                if avg_clo >= 85:
+                    grade = "A"
+                elif avg_clo >= 75:
+                    grade = "B"
+                elif avg_clo >= 65:
+                    grade = "C"
+                elif avg_clo >= 50:
                     grade = "D"
                 else:
                     grade = "F"

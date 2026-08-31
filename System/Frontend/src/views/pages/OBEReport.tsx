@@ -27,6 +27,7 @@ interface OBEReportProps {
 interface CloItem {
   clo: string;
   total: number;
+  description?: string;
 }
 
 interface AssessmentItem {
@@ -75,17 +76,52 @@ interface ClassCloAttainment {
 interface ReportData {
   course?: { code?: string; name?: string };
   semester?: { number?: string | number };
+  normal_students?: Student[];
+  retake_students?: Student[];
   students?: Student[];
   type_groups?: TypeGroup[];
   class_clo_attainment?: Record<string, ClassCloAttainment>;
+  all_clos?: string[];
 }
 
 const DEFAULT_WEIGHTAGES: Record<string, number> = {
   quiz: 5,
   assignment: 5,
   presentation: 5,
+  sessional: 5,
   midterm: 25,
   final: 50,
+};
+
+const ASSESSMENT_ORDER = [
+  'quiz',
+  'assignment',
+  'presentation',
+  'sessional',
+  'project',
+  'midterm',
+  'final',
+] as const;
+
+const cloSortKey = (cloCode: string): [number, number | string] => {
+  try {
+    if (cloCode.startsWith('CLO-')) {
+      const n = parseInt(cloCode.replace('CLO-', ''), 10);
+      if (!Number.isNaN(n)) return [0, n];
+    }
+    if (cloCode === 'SP') return [1, 0];
+    return [2, cloCode];
+  } catch {
+    return [3, cloCode];
+  }
+};
+
+const compareCloCode = (a: string, b: string) => {
+  const ka = cloSortKey(a);
+  const kb = cloSortKey(b);
+  if (ka[0] !== kb[0]) return ka[0] - kb[0];
+  if (typeof ka[1] === 'number' && typeof kb[1] === 'number') return ka[1] - kb[1];
+  return String(ka[1]).localeCompare(String(kb[1]));
 };
 
 // ================= COMPONENT =================
@@ -112,21 +148,31 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
   const fetchReport = async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/assessments/clo-report/${courseId}/${batchId}/${semesterId}/`);
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = Date.now();
+      const res = await api.get(`/assessments/clo-report/${courseId}/${batchId}/${semesterId}/?_t=${timestamp}`);
       let data: ReportData = res.data?.data || res.data?.students ? res.data : res.data;
       
-      // Sort students by registration number and add sequential numbering
-      if (data.students && Array.isArray(data.students)) {
-        data.students = [...data.students]
-          .sort((a: Student, b: Student) => {
-            const regA = a.registration_number || a.custom_id || '';
-            const regB = b.registration_number || b.custom_id || '';
-            return regA.localeCompare(regB);
-          })
-          .map((student: Student, index: number) => ({
-            ...student,
-            count: index + 1
-          }));
+      const rawNormalStudents = (data.normal_students && Array.isArray(data.normal_students))
+        ? data.normal_students
+        : (data.students || []).filter((s: Student) => !s.is_retake);
+
+      rawNormalStudents.sort((a: Student, b: Student) => {
+        const regA = a.registration_number || a.custom_id || '';
+        const regB = b.registration_number || b.custom_id || '';
+        return regA.localeCompare(regB);
+      });
+
+      data.normal_students = rawNormalStudents.map((student: Student, index: number) => ({
+        ...student,
+        count: index + 1
+      }));
+
+      if (data.retake_students && Array.isArray(data.retake_students)) {
+        data.retake_students = data.retake_students.map((student: Student, index: number) => ({
+          ...student,
+          count: index + 1
+        }));
       }
       
       setReportData(data);
@@ -144,6 +190,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
       midterm: 'Midterm',
       presentation: 'Presentation',
       final: 'Final',
+      sessional: 'Student Performance',
     };
     return titles[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1);
   };
@@ -192,7 +239,9 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
   // COMPLETE DYNAMIC EXCEL EXPORT (MANUAL MATRIX BUILDER)
   const handleExportExcel = () => {
     setShowExportMenu(false);
-    if (!reportData?.students?.length) return;
+    if (!reportData) return;
+    const studentsToExport = tableReportStudents;
+    if (!studentsToExport.length) return;
 
     const processedGroups = (reportData.type_groups || []).map((group) => {
       const typeKey = group.type.toLowerCase();
@@ -231,10 +280,10 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     row2.push("", "", "");
 
     // 3. Student Data Rows
-    const studentRows = reportData.students.map((student) => {
+    const studentRows = studentsToExport.map((student) => {
       const rowData: (string | number)[] = [
         student.count,
-        student.is_retake ? `${student.name} (Retake ${student.attempt_number || 1})` : student.name
+        student.name
       ];
 
       processedGroups.forEach((group) => {
@@ -247,7 +296,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
             const isExempt = studentAssData?.clo_data?.[clo.clo]?.is_exempt;
 
             if (student.is_retake && retakeCell) {
-              rowData.push(`${formatMarks(retakeCell.obtained)}/${formatMarks(retakeCell.total)}`);
+              rowData.push(formatMarks(retakeCell.obtained));
             } else if (isExempt) {
               rowData.push("NA");
             } else {
@@ -304,16 +353,29 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
   if (!reportData) return <div className="text-center py-12 text-gray-500 font-semibold">No report data available.</div>;
 
   const allReportStudents = reportData.students || [];
-  const totalStudents = allReportStudents.length;
-  const passedStudents = allReportStudents.filter((s) => s.status === "PASS").length;
+  const tableReportStudents = [
+    ...(reportData.normal_students || []),
+    ...(reportData.retake_students || []),
+  ]
+    .sort((a: any, b: any) => {
+      const regA = a.registration_number || a.custom_id || '';
+      const regB = b.registration_number || b.custom_id || '';
+      return regA.localeCompare(regB);
+    })
+    .map((student, index) => ({
+      ...student,
+      count: index + 1,
+    }));
+  const totalStudents = tableReportStudents.length;
+  const passedStudents = tableReportStudents.filter((s) => s.status === "PASS").length;
   const failedStudents = totalStudents - passedStudents;
 
   const overallPercentage = totalStudents > 0
-    ? (allReportStudents.reduce((sum, s) => sum + (s.percentage || 0), 0) / totalStudents).toFixed(2)
+    ? (tableReportStudents.reduce((sum, s) => sum + (s.percentage || 0), 0) / totalStudents).toFixed(2)
     : "0";
 
   const overallGPA = totalStudents > 0
-    ? (allReportStudents.reduce((sum, s) => sum + (s.gpa || 0), 0) / totalStudents).toFixed(2)
+    ? (tableReportStudents.reduce((sum, s) => sum + (s.gpa || 0), 0) / totalStudents).toFixed(2)
     : "0";
 
   const pieData = [
@@ -323,14 +385,36 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
 
   const processedTypeGroups = (reportData.type_groups || []).map((group) => {
     const typeKey = group.type.toLowerCase();
+    const newGroup = { ...group };
     if (typeKey === 'quiz' || typeKey === 'assignment') {
-      return { ...group, assessments: (group.assessments || []).slice(0, 3) };
+      newGroup.assessments = (group.assessments || []).slice(0, 3);
     }
-    return group;
+    (newGroup.assessments || []).forEach((ass) => {
+      if (ass.clos && ass.clos.length > 1) {
+        ass.clos = [...ass.clos].sort((a, b) => {
+          const ka = cloSortKey(a.clo || '');
+          const kb = cloSortKey(b.clo || '');
+          if (ka[0] !== kb[0]) return ka[0] - kb[0];
+          if (typeof ka[1] === 'number' && typeof kb[1] === 'number') return ka[1] - kb[1];
+          return String(ka[1]).localeCompare(String(kb[1]));
+        });
+      }
+    });
+    return newGroup;
   });
 
-  const displayClassCloAttainment = Object.entries(reportData.class_clo_attainment || {}).reduce(
+  const displayClassCloAttainment = Object.entries(reportData.class_clo_attainment || {})
+    .sort(([a], [b]) => {
+      const ka = cloSortKey(a);
+      const kb = cloSortKey(b);
+      if (ka[0] !== kb[0]) return ka[0] - kb[0];
+      if (typeof ka[1] === 'number' && typeof kb[1] === 'number') return ka[1] - kb[1];
+      return String(ka[1]).localeCompare(String(kb[1]));
+    })
+    .reduce(
     (acc: Record<string, ClassCloAttainment>, [cloCode, value]) => {
+      const kpi = Number(value?.kpi ?? 60);
+      const totalAllStudents = allReportStudents.length;
       const passedCount = allReportStudents.filter((student) => {
         if (student.is_retake && student.retake_display_cells) {
           const retakeCloCells = Object.entries(student.retake_display_cells).filter(([key]) =>
@@ -344,15 +428,14 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
               }),
               { obtained: 0, total: 0 }
             );
-            return totals.total > 0 && (totals.obtained / totals.total) * 100 >= 50;
+            return totals.total > 0 && (totals.obtained / totals.total) * 100 >= kpi;
           }
         }
         const percentage = Number(student.clo_attainment?.[cloCode]?.percentage ?? 0);
-        return percentage >= 50;
+        return percentage >= kpi;
       }).length;
 
-      const percentage = totalStudents > 0 ? Number(((passedCount / totalStudents) * 100).toFixed(2)) : 0;
-      const kpi = Number(value?.kpi ?? 60);
+      const percentage = totalAllStudents > 0 ? Number(((passedCount / totalAllStudents) * 100).toFixed(2)) : 0;
 
       acc[cloCode] = {
         ...value,
@@ -364,9 +447,11 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     {}
   );
 
-  const lineData = Object.entries(displayClassCloAttainment).map(([clo, value]) => ({
+  const sortedUniqueCloCodes: string[] = Object.keys(displayClassCloAttainment);
+
+  const lineData = sortedUniqueCloCodes.map((clo) => ({
     clo,
-    percentage: value.percentage ?? 0,
+    percentage: displayClassCloAttainment[clo]?.percentage ?? 0,
   }));
 
   const COLORS = ["#1e40af", "#dc2626"];
@@ -376,28 +461,42 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     rowBg: string,
     getValueNode: (cloCode: string, cloData: ClassCloAttainment | undefined) => React.ReactNode
   ) => {
-    const shownClos = new Set<string>();
-    const cells: React.ReactNode[] = [];
+    const flatCells: Array<{ key: string; isClo: boolean; originalClo?: string }> = [];
 
     processedTypeGroups.forEach((group, gIdx) => {
       group.assessments?.forEach((ass, aIdx) => {
         ass.clos?.forEach((clo, cIdx) => {
           const key = `${gIdx}-${aIdx}-${cIdx}`;
-          if (!shownClos.has(clo.clo)) {
-            shownClos.add(clo.clo);
-            const cloData = displayClassCloAttainment?.[clo.clo];
-            cells.push(
-              <td key={`sum-${label}-${clo.clo}-${key}`} className="border border-blue-200 p-2 text-center font-semibold text-sm">
-                {getValueNode(clo.clo, cloData)}
-              </td>
-            );
-          } else {
-            cells.push(<td key={`sum-empty-${label}-${key}`} className="border border-blue-200 p-2"></td>);
-          }
+          flatCells.push({ key, isClo: true, originalClo: clo.clo });
         });
       });
+      flatCells.push({ key: `type-${gIdx}`, isClo: false });
+    });
 
-      cells.push(<td key={`sum-type-total-${label}-${gIdx}`} className="border border-blue-200 p-2"></td>);
+    const shownClos = new Set<string>();
+    const valuePositions: number[] = [];
+    flatCells.forEach((cell, i) => {
+      if (cell.isClo && cell.originalClo && cell.originalClo !== 'SP' && !shownClos.has(cell.originalClo)) {
+        shownClos.add(cell.originalClo);
+        valuePositions.push(i);
+      }
+    });
+
+    const sortedValueClos = Array.from(shownClos).sort(compareCloCode);
+
+    let sortedPtr = 0;
+    const cells: React.ReactNode[] = flatCells.map((cell, i) => {
+      if (valuePositions.includes(i) && sortedValueClos[sortedPtr]) {
+        const cloCode = sortedValueClos[sortedPtr];
+        sortedPtr += 1;
+        const cloData = displayClassCloAttainment?.[cloCode];
+        return (
+          <td key={`sum-${label}-${cloCode}-${cell.key}`} className="border border-blue-200 p-2 text-center font-semibold text-sm">
+            {getValueNode(cloCode, cloData)}
+          </td>
+        );
+      }
+      return <td key={`sum-empty-${label}-${cell.key}`} className="border border-blue-200 p-2"></td>;
     });
 
     return (
@@ -410,19 +509,34 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     );
   };
 
-  const renderStudentDataRow = (student: Student, typeGroups: TypeGroup[]) => (
-    <tr key={student.retake_id || student.student_id || student.count} className="hover:bg-blue-50/50 transition-colors">
+  const renderStudentDataRow = (student: Student, typeGroups: TypeGroup[]) => {
+    const failedCLOs = Object.entries(student.clo_attainment || {})
+      .filter(([_, clo]: [string, any]) => (clo?.percentage ?? 100) < (clo?.kpi ?? 60))
+      .map(([cloCode, _]) => cloCode)
+      .sort((a, b) => {
+        const ka = cloSortKey(a);
+        const kb = cloSortKey(b);
+        if (ka[0] !== kb[0]) return ka[0] - kb[0];
+        if (typeof ka[1] === 'number' && typeof kb[1] === 'number') return ka[1] - kb[1];
+        return String(ka[1]).localeCompare(String(kb[1]));
+      });
+    const hasFailedCLO = failedCLOs.length > 0;
+
+    return (
+    <tr key={student.retake_id || student.student_id || student.count} className={`hover:bg-blue-50/50 transition-colors ${hasFailedCLO ? 'bg-red-50/30' : ''}`}>
       <td className="border border-blue-200 p-2 font-semibold text-center text-blue-900">{student.count}</td>
       <td className="border border-blue-200 p-2 font-semibold text-center text-blue-950">
-        <div>{student.name}</div>
+        <div className="flex items-center justify-center gap-1">
+          {student.name}
+          {hasFailedCLO && (
+            <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-red-500 text-white text-[9px] font-bold" title={`Failed: ${failedCLOs.join(', ')}`}>
+              {failedCLOs.join(', ')}
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-blue-600 font-normal">
           {student.registration_number || student.custom_id || ''}
         </div>
-        {student.is_retake && (
-          <span className="mt-1 inline-block text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-            Retake Attempt {student.attempt_number || 1}
-          </span>
-        )}
       </td>
       {typeGroups.map((group, groupIdx) => {
         const targetWeight = getTargetWeightage(group);
@@ -439,12 +553,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
                     return (
                       <td key={`${groupIdx}-${assIdx}-${cloIdx}`} className="border border-blue-200 p-2 text-center text-sm">
                         {student.is_retake && retakeCell ? (
-                          <div className="leading-tight">
-                            <div className="text-[11px] font-semibold text-amber-700">{retakeCell.title || getTypeTitle(group.type)}</div>
-                            <div className="font-bold">
-                              {formatMarks(retakeCell.obtained)}/{formatMarks(retakeCell.total)}
-                            </div>
-                          </div>
+                          formatMarks(retakeCell.obtained)
                         ) : isExempt ? (
                           <span className="text-gray-400 font-medium">NA</span>
                         ) : (
@@ -478,6 +587,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
       </td>
     </tr>
   );
+  };
 
   return (
     <div className="p-4 bg-slate-50 min-h-screen printable-container">
@@ -615,7 +725,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
           </thead>
 
           <tbody>
-            {reportData.students?.map((student) => renderStudentDataRow(student, processedTypeGroups))}
+            {tableReportStudents.map((student) => renderStudentDataRow(student, processedTypeGroups))}
 
             {/* Class CLO Summary */}
             {renderSummaryRow("Class CLO", "bg-blue-50/80", (cloCode, cloData) => (
@@ -722,8 +832,16 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
                 <Legend />
                 <Line type="monotone" dataKey="percentage" stroke="#1e40af" strokeWidth={3} dot={{ r: 5 }} />
               </LineChart>
-            </ResponsiveContainer>
+             </ResponsiveContainer>
           </div>
+        </div>
+
+        {/* Footer Legend */}
+        <div className="mt-4 text-right">
+          <span className="text-[6px] text-gray-400">
+            <span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-0.5"></span>
+            Red label = Failed CLO (below KPI threshold)
+          </span>
         </div>
       </div>
     </div>

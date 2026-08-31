@@ -37,6 +37,8 @@ class ProvisionalPromoteAllView(generics.GenericAPIView):
             batch=batch,
             role='student',
             is_active=True,
+        ).exclude(
+            promotion_status__in=['freeze', 'repeat']
         ).update(current_semester=next_sem, promotion_status='provisional')
 
         return Response({'success': True, 'new_semester': next_sem, 'promoted_count': count}, status=status.HTTP_200_OK)
@@ -93,12 +95,12 @@ class MarkAsRepeatView(generics.GenericAPIView):
         if student.promotion_status != 'provisional':
             return Response({'error': 'Student is not in provisional status'}, status=status.HTTP_400_BAD_REQUEST)
 
-        student.promotion_status = 'repeat'
+        student.promotion_status = 'freeze'
         student.save(update_fields=['promotion_status'])
 
         return Response({
             'success': True,
-            'message': f'{student.full_name} marked as Repeat',
+            'message': f'{student.full_name} marked as Freeze',
             'student_name': student.full_name,
             'repeat_semester': student.current_semester,
         }, status=status.HTTP_200_OK)
@@ -180,8 +182,8 @@ class FailFrozenStudentView(APIView):
         except User.DoesNotExist:
             return Response({'error': 'Active student not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if student.promotion_status not in ['provisional', 'freeze']:
-            return Response({'error': 'Only provisional or frozen students can be failed/dropped'}, status=status.HTTP_400_BAD_REQUEST)
+        if student.promotion_status not in ['provisional', 'freeze', 'repeat']:
+            return Response({'error': 'Only provisional, frozen, or repeat students can be failed/dropped'}, status=status.HTTP_400_BAD_REQUEST)
 
         student.is_active = False
         student.promotion_status = 'none'

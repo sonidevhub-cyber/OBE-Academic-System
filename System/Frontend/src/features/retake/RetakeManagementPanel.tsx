@@ -114,7 +114,9 @@ const RetakeManagementPanel: React.FC = () => {
                   <tr key={retake.id} className="align-middle border-b border-gray-50 last:border-b-0">
                     <td className="py-4 pr-4">
                       <div className="font-bold text-gray-900">{retake.student?.name}</div>
-                      <div className="text-xs text-gray-500">{retake.student?.id}</div>
+                      <div className="text-xs text-gray-500">
+                        {retake.student?.registration_number || retake.current_batch?.name}
+                      </div>
                     </td>
                     <td className="py-4 pr-4 font-semibold text-gray-700">{retake.failed_course?.name}</td>
                     <td className="py-4 pr-4 text-sm text-gray-600">{retake.current_batch?.name}</td>
@@ -131,6 +133,7 @@ const RetakeManagementPanel: React.FC = () => {
                           <option value="ongoing">Ongoing</option>
                           <option value="passed">Passed</option>
                           <option value="failed_again">Failed Again</option>
+                          <option value="dropped">Dropped</option>
                         </select>
                       </div>
                     </td>

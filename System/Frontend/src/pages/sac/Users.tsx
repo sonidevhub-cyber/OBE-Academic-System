@@ -123,6 +123,20 @@ const Users: React.FC = () => {
                 ? (user.designation as FacultyPrimaryRole)
                 : 'Assistant Professor';
 
+        const existingProgramIds: string[] = [];
+        if (Array.isArray(user.programs_list) && programs.length > 0) {
+            for (const progName of user.programs_list) {
+                const match = programs.find(p => p.name === progName);
+                if (match) existingProgramIds.push(match.id);
+            }
+        }
+        if (Array.isArray((user as any).programs)) {
+            for (const pid of (user as any).programs) {
+                const idStr = typeof pid === 'object' ? (pid.id || '') : String(pid);
+                if (idStr && !existingProgramIds.includes(idStr)) existingProgramIds.push(idStr);
+            }
+        }
+
         setEditingUserId(user.id);
         setSelectedPrimaryRole(primaryRole);
         setFormData({
@@ -133,7 +147,7 @@ const Users: React.FC = () => {
             designation: isTVF ? 'Visiting Faculty' : primaryRole,
             phone: user.phone || '',
             password: '',
-            programs: [],
+            programs: existingProgramIds,
             batch: null,
             profile_pic: null
         });
@@ -165,9 +179,13 @@ const Users: React.FC = () => {
             showToast('Please fill all required fields', 'error');
             return;
         }
+        const isTVF = selectedPrimaryRole === 'Visiting Faculty (TVF)';
+        if (!isTVF && formData.secondary_role === 'coordinator' && formData.programs.length === 0) {
+            showToast('Please assign at least one program for Coordinator role', 'error');
+            return;
+        }
 
         const data = new FormData();
-        const isTVF = selectedPrimaryRole === 'Visiting Faculty (TVF)';
         data.append('full_name', formData.full_name);
         data.append('email', formData.email);
         if (formData.password) data.append('password', formData.password);
@@ -175,8 +193,8 @@ const Users: React.FC = () => {
         data.append('secondary_role', isTVF ? 'none' : formData.secondary_role);
         data.append('designation', isTVF ? 'Visiting Faculty' : selectedPrimaryRole);
         data.append('phone', formData.phone || '');
-        // Only send programs for coordinator, not HOD
-        if (formData.secondary_role === 'coordinator') {
+        // Send programs for all non-TVF, non-HOD roles (instructors and coordinators)
+        if (!isTVF && formData.secondary_role !== 'hod') {
             formData.programs.forEach(pId => data.append('programs', pId));
         }
         if (formData.profile_pic) data.append('profile_pic', formData.profile_pic);
@@ -317,7 +335,9 @@ const Users: React.FC = () => {
                                 <td className="px-6 py-4">{renderRoleBadge(user)}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">{user.designation || '-'}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">
-                                    {(user.role === 'hod' || user.secondary_role === 'hod')
+                                    {user.designation === 'Visiting Faculty'
+                                        ? <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-semibold">TVF</span>
+                                        : (user.role === 'hod' || user.secondary_role === 'hod')
                                         ? <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium">Dept. Scoped</span>
                                         : user.programs_list?.length > 0 ? user.programs_list.join(', ') : '-'
                                     }
@@ -441,11 +461,18 @@ const Users: React.FC = () => {
                                                 </div>
                                             )}
 
-                                            {formData.secondary_role === 'coordinator' && (
+                                            {formData.secondary_role !== 'hod' && (
                                                 <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">Assign Programs *</label>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        {formData.secondary_role === 'coordinator' ? 'Assign Programs *' : 'Assign Programs'}
+                                                        {formData.secondary_role !== 'coordinator' && (
+                                                            <span className="text-[10px] text-gray-400 ml-2">(Recommended so Programs column is not empty)</span>
+                                                        )}
+                                                    </label>
                                                     <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-white">
-                                                        {programs.map(p => (
+                                                        {programs.length === 0 ? (
+                                                            <p className="text-xs text-gray-400 p-1">Loading programs…</p>
+                                                        ) : programs.map(p => (
                                                             <label key={p.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
                                                                 <input
                                                                     type="checkbox"

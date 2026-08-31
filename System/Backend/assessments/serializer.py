@@ -24,22 +24,46 @@ class AssessmentDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'type', 'date', 'total_marks', 'is_finalized', 'questions']
 
 class QuestionSerializer(serializers.Serializer):
-    clo = serializers.UUIDField()
-    description = serializers.CharField()
-    level = serializers.CharField()
+    clo = serializers.UUIDField(required=False, allow_null=True)
+    description = serializers.CharField(allow_blank=True, required=False, default="")
+    level = serializers.CharField(required=False, allow_null=True, allow_blank=True, default="")
     marks = serializers.FloatField()
+
+    def validate(self, data):
+        # Auto-fill description from CLO title if description is blank
+        if not data.get('description') and data.get('clo'):
+            try:
+                clo = CLO.objects.get(id=data['clo'])
+                data['description'] = clo.title or clo.description or ""
+            except CLO.DoesNotExist:
+                pass
+        return data
 
 
 class AssessmentCreateSerializer(serializers.Serializer):
     course = serializers.UUIDField()
     batch = serializers.UUIDField()
-    semester = serializers.UUIDField(required=False)
-    semester_number = serializers.IntegerField(required=False)
+    semester = serializers.UUIDField(required=False, allow_null=True)
+    semester_number = serializers.IntegerField(required=False, allow_null=True)
     title = serializers.CharField()
     type = serializers.CharField()
     total_marks = serializers.FloatField()
     date = serializers.DateField()
     questions = QuestionSerializer(many=True)
+
+    def validate_semester(self, value):
+        # If semester is empty string or falsy, treat it as None so semester_number fallback runs in view
+        if not value:
+            return None
+        return value
+
+    def validate_semester_number(self, value):
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
 
 from rest_framework import serializers

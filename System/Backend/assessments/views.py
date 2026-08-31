@@ -160,8 +160,59 @@ class CreateAssessmentView(APIView):
         retake_id = request.data.get('retake_id')
         course_retake = None
         if retake_id:
-            from retake.models import CourseRetake
+            from retake.models import CourseRetake, RetakeAssessmentSnapshot
             course_retake = CourseRetake.objects.get(id=retake_id)
+
+            snapshot = RetakeAssessmentSnapshot.objects.filter(
+                retake=course_retake,
+                is_locked=True,
+            ).first()
+
+            if not snapshot:
+                return Response({
+                    "error": "Retake assessment snapshot is missing. Cannot create assessments for this retake."
+                }, status=400)
+
+            requested_type = data.get('type')
+            matching_assessments = [
+                a for a in snapshot.snapshot_data.get('assessments', [])
+                if a['assessment_type'] == requested_type
+            ]
+
+            if not matching_assessments:
+                return Response({
+                    "error": f"Assessment type '{requested_type}' is not part of the locked retake structure."
+                }, status=400)
+
+            original_assessment = matching_assessments[0]
+            if data.get('total_marks') != original_assessment['total_marks']:
+                return Response({
+                    "error": f"Total marks must match the locked snapshot value ({original_assessment['total_marks']})."
+                }, status=400)
+
+            if data.get('title') != original_assessment['title']:
+                return Response({
+                    "error": f"Assessment title must match the locked snapshot value ({original_assessment['title']})."
+                }, status=400)
+
+            snapshot_question_count = len(original_assessment.get('questions', []))
+            if len(questions) != snapshot_question_count:
+                return Response({
+                    "error": f"Assessment must have exactly {snapshot_question_count} questions as per the locked snapshot."
+                }, status=400)
+
+            snapshot_clo_ids = {
+                q['clo_id'] for q in original_assessment.get('questions', [])
+                if q.get('clo_id')
+            }
+            request_clo_ids = {
+                q.get('clo') for q in questions
+                if q.get('clo')
+            }
+            if snapshot_clo_ids != request_clo_ids:
+                return Response({
+                    "error": "Question CLO mapping must match the locked snapshot."
+                }, status=400)
 
         # ✅ EMPTY CHECK
         if not questions:
@@ -227,7 +278,8 @@ class CreateAssessmentView(APIView):
         if data['type'] in ['midterm', 'final']:
             duplicate_check_query = Assessment.objects.filter(
                 course_id=data['course'],
-                assessment_type=data['type']
+                assessment_type=data['type'],
+                is_finalized=True
             )
             if course_retake:
                 duplicate_check_query = duplicate_check_query.filter(course_retake=course_retake)
@@ -253,12 +305,12 @@ class CreateAssessmentView(APIView):
         )
 
         for q in questions:
-            if q['clo'] not in valid_clos:
+            if q['clo'] is not None and q['clo'] not in valid_clos:
                 return Response({
                     "error": f"CLO {q['clo']} invalid"
                 }, status=400)
             normalized_level = normalize_question_bloom_level(q.get("level"))
-            if not normalized_level:
+            if q['clo'] is not None and not normalized_level:
                 return Response({
                     "error": f"Invalid Bloom level {q.get('level')}"
                 }, status=400)
@@ -332,7 +384,7 @@ class CreateAssessmentView(APIView):
     "questions": [
         {
             "id": str(q.id),
-            "clo": str(q.clo.id)
+            "clo": str(q.clo.id) if q.clo is not None else None
         }
         for q in questions_objs
     ]
@@ -368,27 +420,34 @@ class EnterMarksView(APIView):
             semester=assessment.semester
         ).first()
 
-        try:
-            validate_semester_write_allowed(
-                semester=assessment.semester,
-                batch=assessment.batch,
-                assessment_type=assessment.assessment_type,
-                course_session=course_session,
-            )
-        except Exception as exc:
-            return Response({"error": str(exc)}, status=400)
+        is_retake_assessment = assessment.course_retake is not None
+
+        if not is_retake_assessment:
+            try:
+                validate_semester_write_allowed(
+                    semester=assessment.semester,
+                    batch=assessment.batch,
+                    assessment_type=assessment.assessment_type,
+                    course_session=course_session,
+                )
+            except Exception as exc:
+                return Response({"error": str(exc)}, status=400)
 
         if assessment.is_locked and assessment.assessment_type != "final":
-            return Response({
-                "error": "Internals are locked for this course. Only the Final assessment can be submitted."
-            }, status=400)
-        
+            if not assessment.course_retake:
+                return Response({
+                    "error": "Internals are locked for this course. Only the Final assessment can be submitted."
+                }, status=400)
 
         # ✅ Step 3: Finalized check
         if assessment.is_finalized:
-            if not course_session or not course_session.allow_result_editing:
+            if not assessment.course_retake:
                 return Response({
                     "error": "Marks already finalized. Admin must enable editing."
+                }, status=400)
+            else:
+                return Response({
+                    "error": "Retake assessment marks have been finalized and cannot be edited."
                 }, status=400)
 
         # ✅ Step 3: Marks save karo
@@ -1316,6 +1375,25 @@ class AssessmentMarksView(APIView):
                 "date": assessment.assessment_date,
                 "total_marks": float(assessment.total_marks),
                 "is_finalized": assessment.is_finalized,
+                "questions": [
+                    {
+                        "id": str(q.id),
+                        "description": q.description,
+                        "bloom_level": q.bloom_level,
+                        "marks": float(q.marks),
+                        "clo": {
+                            "id": str(q.clo.id),
+                            "order_number": q.clo.order_number,
+                            "title": q.clo.title,
+                            "description": q.clo.description,
+                            "bloom_level": q.clo.bloom_level,
+                            "kpi_target": q.clo.kpi_target,
+                        } if q.clo else None,
+                        "clo_id": str(q.clo.id) if q.clo else None,
+                        "clo_code": f"CLO-{q.clo.order_number}" if q.clo else None,
+                    }
+                    for q in questions
+                ],
             },
             "allow_editing": session.allow_result_editing if session else False,
             "students": result

@@ -8,6 +8,7 @@ from core.models import Batch
 from curriculum.models import CurriculumVersion
 from students.models import Student
 from assessments.models import Assessment, Question, StudentQuestionMark, CQI
+from assessments.services.clo_service import CLOService
 from ..models import CourseSession, CLO, GACQIRecord, PEOCQIRecord, VisionMissionCQI, VisionMissionCQIRecord
 from ..services import get_teacher_ga_context, get_students_for_batch
 
@@ -157,39 +158,32 @@ class CourseCLOReportView(APIView):
         except CourseSession.DoesNotExist:
             return Response({'error': 'Course session not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        print(f"DEBUG: CourseSession - {session.id}, course: {session.course}, batch: {session.batch}, semester: {session.semester}")
-        
-        # Get Course info
         course = session.course
         
         # Get CLOs for this course
         version = None
         try:
-            if session.batch.curriculum_version:
+            # Always prefer the batch's curriculum version
+            if session.batch and session.batch.curriculum_version:
                 version = session.batch.curriculum_version
             else:
                 version = CurriculumVersion.objects.filter(program=course.program, is_active=True).first()
         except Exception:
             pass
         
-        # First get all finalized assessments for this session
         assessments = Assessment.objects.filter(
             course=course,
             batch=session.batch,
             semester=session.semester,
             is_finalized=True
         )
-        print(f"\nDEBUG: CourseSession: {session.id}, course={course.id}, batch={session.batch.id}, semester={session.semester.id if session.semester else None}")
-        print(f"DEBUG: Number of assessments found: {len(assessments)}")
-        for a in assessments:
-            print(f"DEBUG: Assessment {a.id} ({a.title}): course={a.course.id if a.course else None}, batch={a.batch.id if a.batch else None}, semester={a.semester.id if a.semester else None}")
-        
+
         # Get CLOs that are:
         # - From the batch's curriculum version, or (if no version) from questions
         clos_query = Q()
         if version:
             # Only take CLOs from this curriculum version
-            clos_query |= Q(is_active=True, course=course, curriculum_version=version)
+            clos_query = Q(is_active=True, course=course, curriculum_version=version)
         else:
             # Fallback: take CLOs linked to questions and those associated with any active version
             question_clos = Question.objects.filter(assessment__in=assessments).values_list('clo_id', flat=True)
@@ -198,14 +192,9 @@ class CourseCLOReportView(APIView):
         
         clos = CLO.objects.filter(clos_query).distinct()
         
-        # Map order number to our current CLO for remapping
         order_number_to_clo = {clo.order_number: clo for clo in clos}
-        
-        print(f"DEBUG: Found {len(assessments)} assessments")
-        for a in assessments:
-            print(f"DEBUG: Assessment - {a.id}, {a.title}")
-        
-        # Pre-fetch all relevant data FIRST (like CLOService does)
+
+        # Pre-fetch question and mark data for assessment mapping / effectiveness
         students = list(get_students_for_batch(session.batch))
         questions = list(
             Question.objects.filter(assessment__in=assessments)
@@ -230,111 +219,112 @@ class CourseCLOReportView(APIView):
             for m in all_marks
         }
         
+        clo_service_result = CLOService.generate_student_report(
+            course_id=course.id,
+            batch_id=session.batch.id,
+            semester_id=session.semester.id if session.semester else None,
+        )
+
+        service_students = (
+            clo_service_result.get("students", [])
+            if isinstance(clo_service_result, dict) and not clo_service_result.get("error")
+            else []
+        )
+        class_clo = (
+            clo_service_result.get("class_clo_attainment", {})
+            if isinstance(clo_service_result, dict) and not clo_service_result.get("error")
+            else {}
+        )
+        total_enrolled = len(service_students)
+
         clo_summary = []
         assessment_effectiveness = []
-        
+
         for clo in clos:
-            print(f"DEBUG: Processing CLO - {clo.id}, {clo.order_number}")
-            # Get questions mapped to this CLO
+            clo_code = clo.code if (hasattr(clo, 'code') and clo.code) else f'CLO-{clo.order_number}'
             clo_questions = [q for q in questions if q.clo_id == clo.id]
-            
-            print(f"DEBUG: Found {len(clo_questions)} questions for CLO")
-            
-            # Calculate overall CLO attainment
-            total_clo_marks = sum(q.marks for q in clo_questions)
-            overall_attainment = None
-            if total_clo_marks > 0:
-                total_obtained_all = Decimal('0')
-                total_possible_all = Decimal('0')
-                
-                for student in students:
-                    student_total = sum(
-                        marks_map.get((student.student_id, q.id), Decimal('0'))
-                        for q in clo_questions
-                    )
-                    total_obtained_all += student_total
-                    total_possible_all += total_clo_marks
-                
-                if total_possible_all > 0:
-                    overall_attainment = round(float((total_obtained_all / total_possible_all) * 100), 2)
-                    print(f"DEBUG: total_obtained_all={total_obtained_all}, total_possible_all={total_possible_all}, overall_attainment={overall_attainment}")
-            
-            # Determine status
-            if overall_attainment is not None:
-                if overall_attainment >= clo.kpi_target:
-                    status_str = 'ACHIEVED'
-                else:
-                    status_str = 'BELOW_TARGET'
-            else:
+
+            service_entry = class_clo.get(clo_code, {})
+            target_kpi = float(service_entry.get('kpi', clo.kpi_target))
+
+            pass_count = 0
+            for s in service_students:
+                s_clo = (s.get('clo_attainment') or {}).get(clo_code)
+                if s_clo and Decimal(str(s_clo.get('percentage', 0) or 0)) >= Decimal(str(s_clo.get('kpi', target_kpi) or target_kpi)):
+                    pass_count += 1
+
+            if isinstance(clo_service_result, dict) and clo_service_result.get("error"):
+                overall_attainment = None
                 status_str = 'NOT_ASSESSED'
-            
-            # Get mapped and unmapped assessments
+            elif total_enrolled > 0:
+                overall_attainment = round((Decimal(pass_count) / Decimal(total_enrolled)) * Decimal('100'), 2)
+                overall_attainment = float(overall_attainment)
+                status_str = 'ACHIEVED' if overall_attainment >= target_kpi else 'BELOW_TARGET'
+            else:
+                overall_attainment = None
+                status_str = 'NOT_ASSESSED'
+
             mapped_assessments = []
             unmapped_assessments = []
-            
             for assessment in assessments:
                 has_mapped_question = any(q.assessment_id == assessment.id for q in clo_questions)
-                
                 assessment_data = {
                     'id': str(assessment.id),
                     'title': assessment.title,
                     'weightage': assessment.total_marks
                 }
-                
                 if has_mapped_question:
                     mapped_assessments.append(assessment_data)
                 else:
                     unmapped_assessments.append(assessment_data)
-            
+
             clo_summary.append({
-                'clo_code': clo.code if hasattr(clo, 'code') else f'CLO-{clo.order_number}',
+                'clo_code': clo_code,
                 'description': clo.description,
-                'target_kpi': float(clo.kpi_target),
+                'target_kpi': target_kpi,
                 'overall_attainment': overall_attainment,
                 'status': status_str,
                 'mapped_assessments': mapped_assessments,
-                'unmapped_assessments': unmapped_assessments
+                'unmapped_assessments': unmapped_assessments,
+                'total_students': total_enrolled,
+                'pass_count': pass_count,
+                'fail_count': total_enrolled - pass_count if total_enrolled > 0 else 0,
             })
 
-        # Calculate assessment effectiveness
         for assessment in assessments:
-            print(f"\nDEBUG: Calculating effectiveness for assessment: {assessment.title} (id: {assessment.id})")
             assessment_questions = [q for q in questions if q.assessment_id == assessment.id]
-            print(f"DEBUG: Found {len(assessment_questions)} questions for this assessment")
             total_assessment_marks = sum(q.marks for q in assessment_questions)
-            print(f"DEBUG: total_assessment_marks: {total_assessment_marks}")
             avg_attainment = None
-            
-            if total_assessment_marks > 0:
-                # Calculate per student, then average (like CLOService)
+
+            if total_assessment_marks > 0 and len(service_students) > 0:
                 total_obtained_all = Decimal('0')
                 total_possible_all = Decimal('0')
-                
-                for student in students:
-                    student_total = sum(
-                        marks_map.get((student.student_id, q.id), Decimal('0'))
-                        for q in assessment_questions
-                    )
+                for student in service_students:
+                    sid = student.get('student_id')
+                    student_total = Decimal('0')
+                    for q in assessment_questions:
+                        key = (sid, q.id)
+                        mark_val = marks_map.get(key, Decimal('0'))
+                        try:
+                            student_total += Decimal(str(mark_val))
+                        except Exception:
+                            pass
                     total_obtained_all += student_total
-                    total_possible_all += total_assessment_marks
-                
+                    total_possible_all += Decimal(str(total_assessment_marks))
                 if total_possible_all > 0:
-                    avg_attainment = round(float((total_obtained_all / total_possible_all) * 100), 2)
-                    print(f"DEBUG: total_obtained_all: {total_obtained_all}, total_possible_all: {total_possible_all}, avg_attainment: {avg_attainment}")
-            
-            # Get mapped CLOs (remapped to current curriculum version if possible)
+                    avg_attainment = round(float((total_obtained_all / total_possible_all) * Decimal('100')), 2)
+
             mapped_clos = set()
             for q in assessment_questions:
                 if q.clo:
                     remapped_clo = order_number_to_clo.get(q.clo.order_number)
                     if remapped_clo:
-                        clo_code = remapped_clo.code if hasattr(remapped_clo, 'code') else f'CLO-{remapped_clo.order_number}'
-                        mapped_clos.add(clo_code)
+                        c = remapped_clo.code if (hasattr(remapped_clo, 'code') and remapped_clo.code) else f'CLO-{remapped_clo.order_number}'
+                        mapped_clos.add(c)
                     else:
-                        # Fallback to original if no matching order number
-                        clo_code = q.clo.code if hasattr(q.clo, 'code') else f'CLO-{q.clo.order_number}'
-                        mapped_clos.add(clo_code)
-            
+                        c = q.clo.code if (hasattr(q.clo, 'code') and q.clo.code) else f'CLO-{q.clo.order_number}'
+                        mapped_clos.add(c)
+
             effectiveness = {
                 'assessment': {
                     'id': str(assessment.id),
@@ -385,9 +375,6 @@ class CourseCLOReportView(APIView):
                 'status': cqi.status,
             })
 
-        print(f"DEBUG: clo_summary: {clo_summary}")
-        print(f"DEBUG: assessment_effectiveness: {assessment_effectiveness}")
-        
         return Response({
             'course': {
                 'code': course.code,

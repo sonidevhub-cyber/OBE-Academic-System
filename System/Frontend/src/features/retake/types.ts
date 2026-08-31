@@ -1,9 +1,10 @@
 export type RetakeAttemptNumber = 1 | 2 | 3;
-export type RetakeStatus = 'ongoing' | 'passed' | 'failed_again';
+export type RetakeStatus = 'ongoing' | 'passed' | 'failed_again' | 'dropped';
 
 export interface RetakeRelation {
   id: string;
   name: string;
+  registration_number?: string;
 }
 
 export interface RetakeBatchRelation extends RetakeRelation {

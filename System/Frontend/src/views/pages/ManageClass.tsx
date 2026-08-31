@@ -21,6 +21,7 @@ type CLO = {
   description: string;
   bloom_level: string;
   kpi_target: number;
+  title?: string;
 };
 
 type Question = {
@@ -51,6 +52,8 @@ type AssessmentHistoryItem = {
   questions_count: number;
   is_finalized: boolean;
   questions: AssessmentHistoryQuestion[];
+  assessmentDetail?: any;
+  studentMarks?: Array<{ question_id: string; marks_obtained: number }>;
 };
 
 type CourseWorkflowState = {
@@ -183,14 +186,15 @@ const ManageClass: React.FC<Props> = ({
     selectedCourse?.curriculum_version_id ??
     ''
   );
-  const courseType = String(
-  selectedCourse?.course_type || ""
-).toLowerCase();
-
-const isLabCourse = courseType === "lab";
-console.log("Selected Course:", selectedCourse);
-console.log("Course Type:", selectedCourse?.course_type);
-console.log("Is Lab:", isLabCourse);
+  const rawCourseType =
+    (selectedCourse as any)?.type ||
+    selectedCourse?.course_type ||
+    "";
+  const courseType = String(rawCourseType).toLowerCase();
+  const isLabCourse =
+    courseType === "lab" ||
+    (selectedCourse as any)?.is_lab === true ||
+    String((selectedCourse as any)?.title || "").toLowerCase().includes("lab");
   // EDIT STATE: Srif yahi ek dafa declare karna hai
   const [activeEditAssessmentId, setActiveEditAssessmentId] = useState<string | null>(
     initialEditAssessment ? String(initialEditAssessment.id || initialEditAssessment) : null
@@ -228,6 +232,36 @@ console.log("Is Lab:", isLabCourse);
   const [checkedCQI, setCheckedCQI] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [assessmentHistory, setAssessmentHistory] = useState<AssessmentHistoryItem[]>([]);
+  const [selectedRetakeAssessmentIndex, setSelectedRetakeAssessmentIndex] = useState<number>(0);
+
+  const marksTableStudents = React.useMemo(() => {
+    if (!isRetakeMode) return students;
+    if (!retakeStudentIdSet || retakeStudentIdSet.size === 0) return students;
+    return students.filter((s) => retakeStudentIdSet.has(String(s.student_id || (s as any).id)));
+  }, [students, isRetakeMode, retakeStudentIdSet]);
+
+  const uniqueRetakeAssessments = React.useMemo(() => {
+    if (!isRetakeMode || assessmentHistory.length === 0) return [];
+    const seen = new Set<string>();
+    return assessmentHistory.filter((item) => {
+      const key = `${item.type}-${item.title}-${item.total_marks}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [assessmentHistory, isRetakeMode]);
+
+  const selectedUniqueAssessment = React.useMemo(() => {
+    if (!isRetakeMode || uniqueRetakeAssessments.length === 0) return null;
+    const idx = Math.min(selectedRetakeAssessmentIndex, uniqueRetakeAssessments.length - 1);
+    return uniqueRetakeAssessments[idx] || null;
+  }, [uniqueRetakeAssessments, selectedRetakeAssessmentIndex, isRetakeMode]);
+
+  const findCLOIdByCode = (cloCode: string): string => {
+    const normalized = String(cloCode || '').replace('CLO-', '').trim();
+    const clo = clos.find(c => String(c.order_number) === normalized);
+    return clo ? String(clo.id) : '';
+  };
 
   const [assessmentCounts, setAssessmentCounts] = useState<Record<string, number>>(createEmptyAssessmentCounts);
 
@@ -315,7 +349,9 @@ console.log("Is Lab:", isLabCourse);
       assessments.forEach((assessment: any) => {
         const assessmentType = String(assessment.type || "").toLowerCase();
         if (assessmentType in counts) {
-          counts[assessmentType] += 1;
+          if (assessment.is_finalized) {
+            counts[assessmentType] += 1;
+          }
         }
       });
 
@@ -330,18 +366,18 @@ console.log("Is Lab:", isLabCourse);
   }, [courseId, batchId, semesterNumber, isRetakeMode, retakeScopeKey]);
 
 const handleTypeChange = (value: string) => {
-  const limit = isLabCourse
-    ? assessmentLimits[value as keyof typeof assessmentLimits]
-    : ASSESSMENT_LIMITS[value];
+      const limit = isLabCourse
+        ? assessmentLimits[value as keyof typeof assessmentLimits]
+        : ASSESSMENT_LIMITS[value];
 
-  if (limit !== undefined && assessmentCounts[value] >= limit) {
-    toast.error(
-      `${value === "sessional" ? "Student Performance" : value} can only be created ${limit} time${
-        limit > 1 ? "s" : ""
-      }.`
-    );
-    return;
-  }
+      if (!isRetakeMode && limit !== undefined && assessmentCounts[value] >= limit) {
+        toast.error(
+          `${value === "sessional" ? "Student Performance" : value} can only be created ${limit} time${
+            limit > 1 ? "s" : ""
+          }.`
+        );
+        return;
+      }
 
   setType(value);
   setMarks({});
@@ -413,7 +449,7 @@ const handleTypeChange = (value: string) => {
       return;
     }
     const confirmed = window.confirm(
-      "Lock internal assessments? All submitted Quiz, Assignment, Presentation, Midterm, and Sessional Assessment marks will become read-only. Only Final marks can be entered after this."
+      "Lock internal assessments? All submitted Quiz, Assignment, Presentation, Midterm, and Student Performance marks will become read-only. Only Final marks can be entered after this."
     );
     if (!confirmed) return;
 
@@ -580,6 +616,13 @@ const handleTypeChange = (value: string) => {
                 marks_obtained: Number(question.marks_obtained || question.obtained_marks || 0),
                 total: Number(question.total || question.max_marks || question.marks || 0),
               })),
+              assessmentDetail: marksResponse.data?.assessment || {},
+              studentMarks: Array.isArray(matchedStudent.questions)
+                ? matchedStudent.questions.map((q: any) => ({
+                    question_id: String(q.question_id || ''),
+                    marks_obtained: Number(q.marks_obtained || q.obtained_marks || 0),
+                  }))
+                : [],
             } as AssessmentHistoryItem;
           } catch (error) {
             console.error('Failed to load assessment history detail', error);
@@ -601,6 +644,48 @@ const handleTypeChange = (value: string) => {
     loadAssessmentHistory();
   }, [isRetakeMode, primaryRetakeStudentId, courseId, batchId, semesterNumber, historyBatchId, historySemesterId, retakeId, retakeScopeKey, selectedStudentScopeKey, students]);
 
+  useEffect(() => {
+    if (!isRetakeMode || !selectedUniqueAssessment) return;
+
+    const detail = selectedUniqueAssessment.assessmentDetail || {};
+
+    setType(detail.type || selectedUniqueAssessment.type || '');
+    setTitle(detail.title || selectedUniqueAssessment.title || '');
+    setTotalMarks(String(detail.total_marks || selectedUniqueAssessment.total_marks || 0));
+    setDate(detail.date || selectedUniqueAssessment.date || '');
+
+    const detailQuestions = Array.isArray(detail.questions) ? detail.questions : [];
+    if (detailQuestions.length > 0) {
+      const formQuestions = detailQuestions.map((q: any) => {
+        const cloId = q.clo?.id ? String(q.clo.id) : (q.clo_id ? String(q.clo_id) : '');
+        const matchedCLO = clos.find(c => String(c.id) === String(cloId));
+        return {
+          clo: cloId,
+          description: q.description || matchedCLO?.description || '',
+          level: q.bloom_level || matchedCLO?.bloom_level || '',
+          kpi: matchedCLO?.kpi_target || 0,
+          marks: q.marks || 0,
+        };
+      });
+      setQuestions(formQuestions);
+    }
+
+    if (selectedUniqueAssessment.studentId && selectedUniqueAssessment.studentMarks && selectedUniqueAssessment.studentMarks.length > 0) {
+      const newMarks: Record<string, number | string> = {};
+      selectedUniqueAssessment.studentMarks.forEach((mark: any, index: number) => {
+        newMarks[`${selectedUniqueAssessment.studentId}-${index}`] = mark.marks_obtained;
+      });
+      setMarks(newMarks);
+    }
+  }, [isRetakeMode, selectedUniqueAssessment, clos]);
+
+  const CLO_DESCRIPTION_FOR = (c: CLO) => {
+    const t: any = c as any;
+    if (t?.title && String(t.title).trim() !== "") return `CLO-${c.order_number}: ${t.title}`;
+    if (c?.description && String(c.description).trim() !== "") return `CLO-${c.order_number}: ${c.description}`;
+    return `CLO-${c.order_number}`;
+  };
+
   const handleCLOChange = (value: string, index: number) => {
     const selected = clos.find(c => c.id === value);
     if (!selected) return;
@@ -608,7 +693,7 @@ const handleTypeChange = (value: string) => {
     const updated = [...questions];
     updated[index] = {
       clo: value,
-      description: selected.description,
+      description: CLO_DESCRIPTION_FOR(selected),
       level: selected.bloom_level,
       kpi: selected.kpi_target,
       marks: 0
@@ -655,74 +740,83 @@ const handleTypeChange = (value: string) => {
       if (saving) return;
 
       // CREATE MODE VALIDATIONS
-      if (!title || !type || !totalMarks || !date) {
-        toast.error("Fill all fields");
-        return;
-      }
-
-      if (!canCreateAssessment) {
-        toast.error(isAwaitingFinal ? "Only Final assessment can be submitted now." : "This course is read-only.");
-        return;
-      }
-
-      setSaving(true);
-
-      const limit = ASSESSMENT_LIMITS[type];
-      if (limit !== undefined && assessmentCounts[type] >= limit) {
-        toast.error(`${type} assessment limit reached. Maximum allowed: ${limit}.`);
-        setSaving(false);
-        return;
-      }
-
-      if (type !== "sessional") {
-        const totalQ = questions.reduce((sum, q) => sum + Number(q.marks), 0);
-
-        if (totalQ !== Number(totalMarks)) {
-          toast.error("Question marks must equal total marks");
+      if (!isRetakeMode) {
+        if (!title || !type || !totalMarks || !date) {
+          toast.error("Fill all fields");
           setSaving(false);
           return;
         }
-      }
 
-      if (type === "final") {
-        const res = await api.post("assessments/clo-coverage/", {
-          course: courseId,
-          batch: batchId,
-          semester: semesterId,
-          curriculum_version: effectiveCurriculumVersionId,
-          current_clos: questions.map(q => q.clo),
-        });
-
-        if (!res.data.all_clos_covered) {
-          toast.error(
-            "Please assess these CLOs before Final: " +
-            res.data.missing_clos.map((c: any) => `CLO ${c.order}`).join(", ")
-          );
+        if (!canCreateAssessment) {
+          toast.error(isAwaitingFinal ? "Only Final assessment can be submitted now." : "This course is read-only.");
           setSaving(false);
           return;
+        }
+
+        const limit = ASSESSMENT_LIMITS[type];
+        if (limit !== undefined && assessmentCounts[type] >= limit) {
+          toast.error(`${type} assessment limit reached. Maximum allowed: ${limit}.`);
+          setSaving(false);
+          return;
+        }
+
+        if (type !== "sessional") {
+          const totalQ = questions.reduce((sum, q) => sum + Number(q.marks), 0);
+          if (totalQ !== Number(totalMarks)) {
+            toast.error("Question marks must equal total marks");
+            setSaving(false);
+            return;
+          }
+        }
+
+        if (type === "final") {
+          const cloCoveragePayload: any = {
+            course: courseId,
+            batch: batchId,
+            curriculum_version: effectiveCurriculumVersionId,
+            current_clos: questions.map(q => q.clo),
+          };
+          const UUID_REGEX_CLO = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/;
+          if (semesterId && UUID_REGEX_CLO.test(semesterId)) cloCoveragePayload.semester = semesterId;
+
+          const res = await api.post("assessments/clo-coverage/", cloCoveragePayload);
+
+          if (!res.data.all_clos_covered) {
+            toast.error(
+              "Please assess these CLOs before Final: " +
+              res.data.missing_clos.map((c: any) => `CLO ${c.order}`).join(", ")
+            );
+            setSaving(false);
+            return;
+          }
         }
       }
 
       const cleanQuestions = type === "sessional"
         ? [{ clo: null, description: "Student Performance Marks", level: null, marks: Number(totalMarks) }]
-        : questions.map(q => ({
-            clo: q.clo,
-            description: q.description,
-            level: q.level,
-            marks: Number(q.marks)
-          }));
+        : questions.map(q => {
+            const matched = q.clo ? clos.find(c => String(c.id) === String(q.clo)) : null;
+            const fallbackDesc = matched ? CLO_DESCRIPTION_FOR(matched) : "";
+            return {
+              clo: q.clo || null,
+              description: q.description || fallbackDesc,
+              level: q.level,
+              marks: Number(q.marks)
+            };
+          });
 
-      const createAssessmentPayload = {
+      const createAssessmentPayload: any = {
         course: courseId,
         batch: batchId,
-        semester: semesterId,
-        semester_number: Number(semesterNumber),
+        semester_number: Number(semesterNumber) || null,
         title,
         type,
         total_marks: Number(totalMarks),
         date,
         questions: cleanQuestions,
       };
+      const UUID_REGEX = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/;
+      if (semesterId && UUID_REGEX.test(semesterId)) createAssessmentPayload.semester = semesterId;
 
       const buildMarksPayload = (studentRows: Student[], backendQuestions: any[]) => {
         const payload: any[] = [];
@@ -755,9 +849,21 @@ const handleTypeChange = (value: string) => {
       let lastAssessmentId: string | null = null;
 
       if (isRetakeMode) {
-        for (const student of students) {
+        const selectedType = selectedUniqueAssessment?.type;
+
+        if (!selectedType) {
+          toast.error("No assessment type selected.");
+          setSaving(false);
+          return;
+        }
+
+        let firstError: string | null = null;
+        let hasCQI = false;
+        let cqiAssessmentId: string | null = null;
+
+        for (const student of marksTableStudents) {
           const sId = String(student.student_id || (student as any).id || '');
-          const studentRetakeId = retakeIdByStudentId?.[sId] || retakeId;
+          const studentRetakeId = retakeIdByStudentId?.[sId];
 
           if (!studentRetakeId) {
             toast.error(`Retake record missing for ${student.name}`);
@@ -765,17 +871,65 @@ const handleTypeChange = (value: string) => {
             return;
           }
 
-          const createResponse = await api.post("assessments/create/", {
-            ...createAssessmentPayload,
-            retake_id: studentRetakeId
-          });
-          lastAssessmentId = String(createResponse.data.assessment_id);
-
-          response = await api.post(
-            `assessments/${createResponse.data.assessment_id}/enter-marks/`,
-            buildMarksPayload([student], createResponse.data.questions)
+          const studentAssessment = assessmentHistory.find(
+            (a) => a.studentId === sId && a.type === selectedType
           );
+
+          if (!studentAssessment) {
+            toast.error(`Assessment not found for ${student.name}`);
+            setSaving(false);
+            return;
+          }
+
+          const existingAssessmentId =
+            studentAssessment.assessmentDetail?.id ||
+            studentAssessment.id?.split('-')[0];
+
+          if (!existingAssessmentId) {
+            toast.error(`Assessment ID missing for ${student.name}`);
+            setSaving(false);
+            return;
+          }
+
+          const backendQuestions =
+            studentAssessment.assessmentDetail?.questions || [];
+
+          try {
+            const response = await api.post(
+              `assessments/${existingAssessmentId}/enter-marks/`,
+              buildMarksPayload([student], backendQuestions)
+            );
+
+            if (response?.data?.trigger_cqi) {
+              hasCQI = true;
+              cqiAssessmentId = existingAssessmentId;
+            }
+          } catch (err: any) {
+            console.error(
+              `Failed to save marks for ${student.name}:`,
+              err?.response?.data || err
+            );
+            firstError =
+              err?.response?.data?.error ||
+              `Failed to save marks for ${student.name}`;
+          }
         }
+
+        if (firstError) {
+          toast.error(firstError);
+          setSaving(false);
+          return;
+        }
+
+        if (hasCQI && cqiAssessmentId) {
+          const cqiCheck = await api.get(
+            `assessments/cqi/check/${cqiAssessmentId}/`
+          );
+          setWeakClos(cqiCheck.data.weak_clos || []);
+          setShowCQI(true);
+        }
+
+        toast.success("Marks saved for all students ✅");
       } else {
         const res = await api.post("assessments/create/", createAssessmentPayload);
         lastAssessmentId = String(res.data.assessment_id);
@@ -784,24 +938,19 @@ const handleTypeChange = (value: string) => {
           `assessments/${res.data.assessment_id}/enter-marks/`,
           buildMarksPayload(students, res.data.questions)
         );
+
+        if (response?.data?.trigger_cqi && lastAssessmentId) {
+          const cqiCheck = await api.get(`assessments/cqi/check/${lastAssessmentId}/`);
+          setWeakClos(cqiCheck.data.weak_clos || []);
+          setShowCQI(true);
+        } else {
+          toast.success("Assessment saved successfully.");
+        }
       }
 
-      if (isRetakeMode) {
-        await loadAssessmentHistory();
-      }
-
+      await loadAssessmentHistory();
       await loadAssessmentCounts();
       await loadWorkflow();
-
-      if (response?.data?.trigger_cqi && lastAssessmentId) {
-        const cqiCheck = await api.get(`assessments/cqi/check/${lastAssessmentId}/`);
-        setWeakClos(cqiCheck.data.weak_clos || []);
-        setShowCQI(true);
-      } else {
-        toast.success("Assessment saved successfully.");
-      }
-
-      toast.success("Assessment completed ✅");
       resetForm();
 
     } catch (err: any) {
@@ -816,8 +965,8 @@ const handleTypeChange = (value: string) => {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="p-5 bg-white rounded shadow">
 
-        {/* AGAR EDIT VIEW ACTIVE HO TOH SIRF WOH DIKHAYEIN */}
-        {activeEditAssessmentId ? (
+        {/* AGAR EDIT VIEW ACTIVE HO TOH SIRF WOH DIKHAYEIN (normal mode only) */}
+        {activeEditAssessmentId && !isRetakeMode ? (
           <div className="mb-6">
             <EditAssessmentView
               assessmentId={activeEditAssessmentId}
@@ -831,10 +980,19 @@ const handleTypeChange = (value: string) => {
         ) : (
           <>
             {isRetakeMode && (
-              <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
-                {isGroupedRetakeMode
-                  ? `Grouped retake mode is active${retakeGroupLabel ? ` for ${retakeGroupLabel}` : ''}. Marks entered here will be saved to each student's own retake record.`
-                  : 'Retake mode is active. This assessment is limited to the assigned retake student.'}
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                <div className="flex items-start gap-2">
+                  <svg className="h-5 w-5 mt-0.5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  <div>
+                    <div className="font-bold">Retake Assessment Structure Locked</div>
+                    <div className="mt-1 text-xs text-amber-800">
+                      This retake uses the exact assessment structure (types, counts, and CLO mappings) from the original course offering.
+                      Only marks entry is allowed. Assessment components cannot be added, removed, or modified.
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -862,7 +1020,7 @@ const handleTypeChange = (value: string) => {
                             <th className="pb-3 pr-4">Type</th>
                             <th className="pb-3 pr-4">Date</th>
                             <th className="pb-3 pr-4">CLO Marks</th>
-                            <th className="pb-3 pr-4">Status</th>
+                            {!isRetakeMode && <th className="pb-3 pr-4">Status</th>}
                             <th className="pb-3 pr-4">Marks</th>
                           </tr>
                         </thead>
@@ -893,13 +1051,15 @@ const handleTypeChange = (value: string) => {
                                   <span className="text-gray-400">No CLO marks</span>
                                 )}
                               </td>
-                              <td className="py-3 pr-4 text-sm">
-                                <span className={`rounded-full px-2 py-1 text-xs font-bold ${
-                                  item.is_finalized ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                }`}>
-                                  {item.is_finalized ? 'Finalized' : 'Marks Editable'}
-                                </span>
-                              </td>
+                              {!isRetakeMode && (
+                                <td className="py-3 pr-4 text-sm">
+                                  <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                    item.is_finalized ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                  }`}>
+                                    {item.is_finalized ? 'Finalized' : 'Marks Editable'}
+                                  </span>
+                                </td>
+                              )}
                               <td className="py-3 pr-4 text-sm font-semibold text-gray-700">
                                 {item.obtained}/{item.total_marks}
                               </td>
@@ -909,6 +1069,28 @@ const handleTypeChange = (value: string) => {
                       </table>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {isRetakeMode && uniqueRetakeAssessments.length > 1 && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold text-amber-900">Select Assessment to Enter Marks:</span>
+                  <select
+                    value={selectedRetakeAssessmentIndex}
+                    onChange={(e) => setSelectedRetakeAssessmentIndex(Number(e.target.value))}
+                    className="border border-amber-300 rounded p-2 text-sm font-semibold text-amber-900 bg-white"
+                  >
+                    {uniqueRetakeAssessments.map((item, index) => (
+                      <option key={item.id} value={index}>
+                        {formatAssessmentType(item.type)}: {item.title} ({item.total_marks} marks)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="text-xs font-medium text-amber-700">
+                  Assessment {selectedRetakeAssessmentIndex + 1} of {uniqueRetakeAssessments.length}
                 </div>
               </div>
             )}
@@ -939,21 +1121,23 @@ const handleTypeChange = (value: string) => {
               </div>
             )}
 
-            {/* INPUT FORM FIELDS (CREATE MODE ONLY) */}
-            {!isReadOnly && (
+            {/* INPUT FORM FIELDS (CREATE MODE OR RETAKE MODE) */}
+            {(!isReadOnly || isRetakeMode) && (
               <div className="grid grid-cols-4 gap-4 mb-6">
                 <input
                   placeholder="Title"
                   value={title}
                   onChange={e => setTitle(e.target.value)}
-                  className="border p-2 rounded"
+                  disabled={isRetakeMode}
+                  className={`border p-2 rounded ${isRetakeMode ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
                 />
 
                 <select
-  value={type}
-  onChange={e => handleTypeChange(e.target.value)}
-  className="border p-2 rounded"
->
+                  value={type}
+                  onChange={e => handleTypeChange(e.target.value)}
+                  disabled={isRetakeMode}
+                  className={`border p-2 rounded ${isRetakeMode ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
+                >
   <option value="">Type</option>
 
   {isLabCourse ? (
@@ -1035,21 +1219,38 @@ const handleTypeChange = (value: string) => {
                   placeholder="Total Marks"
                   value={totalMarks}
                   onChange={e => handleTotalMarksChange(e.target.value)}
-                  className="border p-2 rounded"
+                  disabled={isRetakeMode}
+                  className={`border p-2 rounded ${isRetakeMode ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
                 />
 
                 <input
                   type="date"
                   value={date}
                   onChange={e => setDate(e.target.value)}
-                  className="border p-2 rounded"
+                  disabled={isRetakeMode}
+                  className={`border p-2 rounded ${isRetakeMode ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
                 />
               </div>
             )}
 
             {/* CLO SECTION */}
-            {!isReadOnly && (
+            {(!isReadOnly || isRetakeMode) && (
               <>
+                {isRetakeMode && (
+                  <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                    <div className="flex items-start gap-2">
+                      <svg className="h-5 w-5 mt-0.5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      <div>
+                        <div className="font-bold">Retake Assessment Structure Locked</div>
+                        <div className="mt-1 text-xs text-amber-800">
+                          Assessment type, title, total marks, and CLO mapping are fixed to match the original course offering. Only marks entry is editable.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div>
                   {type !== "sessional" ? (
                     <>
@@ -1058,62 +1259,94 @@ const handleTypeChange = (value: string) => {
                         CLO Mapping
                       </h3>
 
-                      <table className="w-full border mt-3">
-                        <thead className="bg-gray-100">
-                          <tr>
-                            <th className="border p-2">Questions</th>
-                            <th className="border p-2">CLO</th>
-                            <th className="border p-2">Description</th>
-                            <th className="border p-2">Bloom</th>
-                            <th className="border p-2">KPI</th>
-                            <th className="border p-2">Marks</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {questions.map((q, index) => {
-                            const matchedCLO = clos.find(c => String(c.id) === String(q.clo));
-                            return (
-                              <tr key={index}>
-                                <td className="border p-2 font-semibold text-center">
-                                  Q{index + 1}
-                                </td>
-                                <td className="border p-2">
-                                  <select
-                                    value={q.clo || ""}
-                                    onChange={(e) => handleCLOChange(e.target.value, index)}
-                                    className="w-full border rounded p-1"
-                                  >
-                                    <option value="">Select CLO</option>
-                                    {clos.map(c => (
-                                      <option key={c.id} value={c.id}>
-                                        CLO {c.order_number}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </td>
-                                <td className="border p-2">{q.description || matchedCLO?.description || "-"}</td>
-                                <td className="border p-2">{formatBloomLevel(q.level || matchedCLO?.bloom_level || null)}</td>
-                                <td className="border p-2">{q.kpi || matchedCLO?.kpi_target || 0}%</td>
-                                <td className="border p-2">
-                                  <input
-                                    type="number"
-                                    value={q.marks}
-                                    className="border w-20 p-1 text-center"
-                                    onChange={(e) => handleQuestionMarks(e.target.value, index)}
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                       <table className="w-full border mt-3">
+                         <thead className="bg-gray-100">
+                           <tr>
+                             <th className="border p-2">Questions</th>
+                             <th className="border p-2">CLO</th>
+                             <th className="border p-2">Description</th>
+                             <th className="border p-2">Bloom</th>
+                             <th className="border p-2">KPI</th>
+                             <th className="border p-2">Marks</th>
+                           </tr>
+                         </thead>
+                         <tbody>
+                           {questions.map((q, index) => {
+                             const matchedCLO = clos.find(c => String(c.id) === String(q.clo));
+                             if (isRetakeMode) {
+                               return (
+                                 <tr key={index}>
+                                   <td className="border p-2 font-semibold text-center">
+                                     Q{index + 1}
+                                   </td>
+                                   <td className="border p-2 font-semibold text-gray-900">
+                                     {matchedCLO ? `CLO ${matchedCLO.order_number}` : q.description ? q.description.split(':')[0] : '-'}
+                                   </td>
+                                   <td className="border p-2 text-sm text-gray-700">
+                                     {matchedCLO ? (matchedCLO.title || matchedCLO.description || '-') : (q.description || '-')}
+                                   </td>
+                                   <td className="border p-2 text-sm text-gray-700">
+                                     {formatBloomLevel(q.level || matchedCLO?.bloom_level || null)}
+                                   </td>
+                                   <td className="border p-2 text-sm text-gray-700">
+                                     {q.kpi || matchedCLO?.kpi_target || 0}%
+                                   </td>
+                                   <td className="border p-2 text-sm font-bold text-gray-900">
+                                     {q.marks}
+                                   </td>
+                                 </tr>
+                               );
+                             }
+                             return (
+                               <tr key={index}>
+                                 <td className="border p-2 font-semibold text-center">
+                                   Q{index + 1}
+                                 </td>
+                                  <td className="border p-2">
+                                    <select
+                                      value={q.clo || ""}
+                                      onChange={(e) => handleCLOChange(e.target.value, index)}
+                                      className="w-full border rounded p-1"
+                                    >
+                                     <option value="">Select CLO</option>
+                                     {clos.map(c => (
+                                       <option key={c.id} value={c.id}>
+                                         CLO {c.order_number}
+                                       </option>
+                                     ))}
+                                   </select>
+                                 </td>
+                                 <td className="border p-2">{q.description || matchedCLO?.description || "-"}</td>
+                                 <td className="border p-2">{formatBloomLevel(q.level || matchedCLO?.bloom_level || null)}</td>
+                                 <td className="border p-2">{q.kpi || matchedCLO?.kpi_target || 0}%</td>
+                                  <td className="border p-2">
+                                    <input
+                                      type="number"
+                                      value={q.marks}
+                                      className="border w-20 p-1 text-center"
+                                      onChange={(e) => handleQuestionMarks(e.target.value, index)}
+                                    />
+                                  </td>
+                               </tr>
+                             );
+                           })}
+                         </tbody>
+                       </table>
 
-                      <button
-                        onClick={addCLO}
-                        className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                      >
-                        + Add Question
-                      </button>
+                       {isRetakeMode && (
+                         <div className="mt-2 text-xs font-medium text-amber-700">
+                           CLO mapping is locked and matches the original course offering.
+                         </div>
+                       )}
+
+                       {!isRetakeMode && (
+                       <button
+                         onClick={addCLO}
+                         className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                       >
+                         + Add Question
+                       </button>
+                       )}
                     </>
                   ) : (
                     <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded my-4 text-sm font-medium">
@@ -1148,7 +1381,7 @@ const handleTypeChange = (value: string) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {students.map(student => {
+                      {marksTableStudents.map(student => {
                         const sId = student.student_id || (student as any).id;
                         let total = 0;
 
@@ -1246,15 +1479,17 @@ const handleTypeChange = (value: string) => {
                 </div>
 
                 <button
-                  disabled={saving || !canCreateAssessment}
+                  disabled={saving}
                   onClick={handleSubmit}
                   className={`w-full mt-6 py-2 rounded text-white font-medium ${
-                    saving || !canCreateAssessment
+                    saving
                       ? "bg-gray-400 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700"
+                      : isRetakeMode
+                        ? "bg-amber-600 hover:bg-amber-700"
+                        : "bg-blue-600 hover:bg-blue-700"
                   }`}
                 >
-                  {saving ? "Saving..." : "Save Assessment"}
+                  {saving ? "Saving..." : isRetakeMode ? "Save Marks" : "Save Assessment"}
                 </button>
               </>
             )}

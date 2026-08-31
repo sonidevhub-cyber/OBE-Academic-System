@@ -91,7 +91,11 @@ class BatchStudentListView(generics.ListAPIView):
 
     def get_queryset(self):
         batch_id = self.kwargs['pk']
-        return User.objects.filter(batch_id=batch_id, role='student', is_active=True)
+        return User.objects.filter(
+            batch_id=batch_id,
+            role='student',
+            is_active=True,
+        ).order_by('custom_id')
 
 
 class GraduateBatchView(generics.GenericAPIView):

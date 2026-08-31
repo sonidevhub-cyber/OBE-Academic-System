@@ -38,6 +38,21 @@ def sync_course_session_workflow_from_assessments(course_session: CourseSession 
     ).exists()
 
     if not final_exists:
+        update_fields = []
+        if course_session.final_submitted:
+            course_session.final_submitted = False
+            update_fields.append("final_submitted")
+        if course_session.assessment_done:
+            course_session.assessment_done = False
+            update_fields.append("assessment_done")
+        if course_session.assessment_status == "ASSESSMENT_DONE":
+            course_session.assessment_status = "ONGOING"
+            update_fields.append("assessment_status")
+        if course_session.internal_complete_awaiting_final:
+            course_session.internal_complete_awaiting_final = False
+            update_fields.append("internal_complete_awaiting_final")
+        if update_fields:
+            course_session.save(update_fields=update_fields)
         return course_session
 
     update_fields = []

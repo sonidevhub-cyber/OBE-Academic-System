@@ -18,6 +18,7 @@ class CourseRetake(models.Model):
         ("ongoing", "Ongoing"),
         ("passed", "Passed"),
         ("failed_again", "Failed Again"),
+        ("dropped", "Dropped"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False) 
@@ -176,5 +177,27 @@ class ReportInvalidationLog(models.Model):
         ]
 
     def __str__(self):
-        return f"Invalidation for {self.student} at {self.triggered_at}"        
+        return f"Invalidation for {self.student} at {self.triggered_at}"
+
+
+class RetakeAssessmentSnapshot(models.Model):
+    retake = models.OneToOneField(
+        CourseRetake,
+        on_delete=models.CASCADE,
+        related_name="assessment_snapshot",
+    )
+    original_course_id = models.UUIDField()
+    original_batch_id = models.UUIDField()
+    original_semester_id = models.UUIDField()
+    snapshot_data = models.JSONField()
+    is_locked = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["retake", "is_locked"]),
+        ]
+
+    def __str__(self):
+        return f"Snapshot for {self.retake}"        
 

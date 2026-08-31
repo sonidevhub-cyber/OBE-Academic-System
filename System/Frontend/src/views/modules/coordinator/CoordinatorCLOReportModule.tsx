@@ -18,6 +18,26 @@ import ExportChoiceModal from '../../../components/reports/ExportChoiceModal';
 
 type BatchCategory = 'all' | 'ongoing' | 'graduated';
 
+const cloSortKey = (cloCode: string): [number, number | string] => {
+  try {
+    if (cloCode.startsWith('CLO-')) {
+      const n = parseInt(cloCode.replace('CLO-', ''), 10);
+      if (!Number.isNaN(n)) return [0, n];
+    }
+    return [1, cloCode];
+  } catch {
+    return [2, cloCode];
+  }
+};
+
+const compareCloCode = (a: string, b: string) => {
+  const ka = cloSortKey(a);
+  const kb = cloSortKey(b);
+  if (ka[0] !== kb[0]) return ka[0] - kb[0];
+  if (typeof ka[1] === 'number' && typeof kb[1] === 'number') return ka[1] - kb[1];
+  return String(ka[1]).localeCompare(String(kb[1]));
+};
+
 const CoordinatorCLOReportModule: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [allPrograms, setAllPrograms] = useState<any[]>([]);
@@ -104,7 +124,13 @@ const CoordinatorCLOReportModule: React.FC = () => {
         'json',
         forceRefresh
       );
-      setReport(data as CLOMasterCompilationResponse);
+      const normalized = data as CLOMasterCompilationResponse;
+      (normalized.finalized_courses || []).forEach((course) => {
+        if (course.clos && course.clos.length > 1) {
+          course.clos = [...course.clos].sort((a, b) => compareCloCode(a.clo_code || '', b.clo_code || ''));
+        }
+      });
+      setReport(normalized);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load CLO Master Compilation');
@@ -152,8 +178,8 @@ const CoordinatorCLOReportModule: React.FC = () => {
     const header = ['Sr. No.', 'Reg. No.', 'Student Name', ...courseColumns.map(({ course, clo }) => `${course.course_code} - ${clo.clo_code}`)];
     rows.push(header);
 
-    report.students.forEach((student) => {
-      const row: any[] = [student.sr_no, student.reg_no, student.name];
+    report.students.forEach((student, idx) => {
+      const row: any[] = [idx + 1, student.reg_no, student.name];
       courseColumns.forEach(({ course, clo }) => {
         const score = student.courses?.[course.course_id]?.[clo.clo_code];
         row.push(score ? `${score.score.toFixed(1)}%` : '-');
@@ -209,7 +235,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
 
       const columnWidths = [
         { wch: 10 },
-        { wch: 16 },
+        { wch: 22 },
         { wch: 26 },
         ...courseColumns.map(() => ({ wch: 14 })),
       ];
@@ -566,7 +592,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
                   <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-0 bg-gray-50 z-20">
                     Sr. No
                   </th>
-                  <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-[80px] bg-gray-50 z-20">
+                  <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-[80px] bg-gray-50 z-20 min-w-[140px] w-auto">
                     Reg. No
                   </th>
                   <th rowSpan={3} className="px-4 py-3 text-xs font-black text-gray-400 uppercase tracking-wide border border-gray-200 sticky left-[180px] bg-gray-50 z-20">
@@ -650,13 +676,13 @@ const CoordinatorCLOReportModule: React.FC = () => {
                   .sort((a: CLOMasterCompilationStudent, b: CLOMasterCompilationStudent) => 
                     (a.reg_no || '').localeCompare(b.reg_no || '')
                   )
-                  .map((student: CLOMasterCompilationStudent) => (
-                  <React.Fragment key={student.sr_no}>
+                  .map((student: CLOMasterCompilationStudent, idx: number) => (
+                    <React.Fragment key={student.sr_no}>
                     <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-0 bg-gray-50 z-10">
-                        {student.sr_no}
+                        {idx + 1}
                       </td>
-                      <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-[80px] bg-gray-50 z-10">
+                      <td className="px-4 py-3 font-bold text-gray-700 border border-gray-100 sticky left-[80px] bg-gray-50 z-10 min-w-[140px] w-auto break-all">
                         {student.reg_no}
                       </td>
                       <td className="px-4 py-3 font-semibold text-gray-800 border border-gray-100 sticky left-[180px] bg-gray-50 z-10">
@@ -683,15 +709,9 @@ const CoordinatorCLOReportModule: React.FC = () => {
                   </td>
                   {report.finalized_courses.map((course) => 
                     course.clos.map((clo) => {
-                      // Count achieved students for this clo
-                      let achievedCount = 0;
-                      for (const student of report.students) {
-                        const courseData = student.courses[course.course_id];
-                        const cloData = courseData ? courseData[clo.clo_code] : null;
-                        if (cloData && cloData.achieved) {
-                          achievedCount++;
-                        }
-                      }
+                      const achievedCount = typeof clo.cohort_achieved_count === 'number'
+                        ? clo.cohort_achieved_count
+                        : 0;
                       return (
                         <td key={`count-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
                           {achievedCount}
@@ -707,21 +727,12 @@ const CoordinatorCLOReportModule: React.FC = () => {
                   </td>
                   {report.finalized_courses.map((course) => 
                     course.clos.map((clo) => {
-                      // Calculate percentage
-                      let achievedCount = 0;
-                      for (const student of report.students) {
-                        const courseData = student.courses[course.course_id];
-                        const cloData = courseData ? courseData[clo.clo_code] : null;
-                        if (cloData && cloData.achieved) {
-                          achievedCount++;
-                        }
-                      }
-                      const percentage = report.summary.total_students > 0 
-                        ? ((achievedCount / report.summary.total_students) * 100).toFixed(2)
-                        : '0.00';
+                      const percentage = typeof clo.cohort_percentage === 'number'
+                        ? clo.cohort_percentage
+                        : 0;
                       return (
                         <td key={`percentage-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
-                          {percentage}%
+                          {percentage.toFixed(2)}%
                         </td>
                       );
                     })

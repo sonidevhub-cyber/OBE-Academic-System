@@ -195,9 +195,11 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA, assessment_
     for student_id, retakes in student_retakes.items():
         latest_retake_per_student[student_id] = max(retakes, key=lambda r: r.attempt_number)
     
-    # Get all active CLOs for the course (any curriculum version), grouped by order number!
+    # Get all active CLOs for the course, filtered by curriculum version if available
     from collections import defaultdict
     all_clos = CLO.objects.filter(course=course_session.course, is_active=True)
+    if target_curriculum_version:
+        all_clos = all_clos.filter(curriculum_version=target_curriculum_version)
     clos_by_order = defaultdict(list)
     for clo in all_clos:
         clos_by_order[clo.order_number].append(clo)
@@ -401,11 +403,15 @@ def calculate_all_course_ga_scores(course_session: CourseSession, assessment_typ
         students = list(get_students_for_batch(course_session.batch))
         logger.info(f"[calculate_all_course_ga_scores] Found {len(students)} students for StudentCLOScore calculation")
 
-        # Get all active CLOs for this course, regardless of curriculum version!
+        # Get all active CLOs for this course, filtered by the batch's curriculum version
         all_clos = CLO.objects.filter(
             course=course_session.course,
             is_active=True
         )
+        if course_session.batch and course_session.batch.curriculum_version:
+            all_clos = all_clos.filter(
+                curriculum_version=course_session.batch.curriculum_version
+            )
         # Get all assessments for this course session
         assessments = Assessment.objects.filter(
             course=course_session.course,

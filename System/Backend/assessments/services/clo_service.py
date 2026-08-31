@@ -88,6 +88,17 @@ class CLOService:
     # ============================================================
 
     @staticmethod
+    def _clo_sort_key(clo_code: str):
+        try:
+            if clo_code.startswith("CLO-"):
+                return (0, int(clo_code.replace("CLO-", "")))
+            if clo_code == "SP":
+                return (1, 0)
+            return (2, clo_code)
+        except (ValueError, AttributeError):
+            return (3, clo_code)
+
+    @staticmethod
     def _decimal(value):
         if value is None:
             return Decimal("0")
@@ -261,15 +272,32 @@ class CLOService:
 
                 clo_list = []
 
-                for clo_code, total in sorted(
-                    ass_clos.items()
-                ):
+                # For sessional (Student Performance) without CLOs, add a special entry
+                if assessment.assessment_type == 'sessional' and not ass_clos:
                     clo_list.append({
-                        "clo": clo_code,
-                        "total": float(
-                            CLOService._round(total)
-                        )
+                        "clo": "SP",
+                        "total": float(CLOService._round(total_marks)),
+                        "description": assessment.title or "Student Performance"
                     })
+                else:
+                    for clo_code, total in sorted(
+                        ass_clos.items(),
+                        key=lambda kv: CLOService._clo_sort_key(kv[0])
+                    ):
+                        # Get CLO description from the question's CLO
+                        clo_description = ""
+                        for question in ass_questions:
+                            if question.clo and CLOService._clo_code(question.clo) == clo_code:
+                                clo_description = getattr(question.clo, 'description', '') or ''
+                                break
+                        
+                        clo_list.append({
+                            "clo": clo_code,
+                            "total": float(
+                                CLOService._round(total)
+                            ),
+                            "description": clo_description
+                        })
 
                 # ================================================
                 # TOTAL MARKS
@@ -307,13 +335,16 @@ class CLOService:
             # ALL CLOs IN THIS TYPE
             # ====================================================
 
-            type_clos = sorted({
-                clo_item["clo"]
-                for assessment_row
-                in formatted_assessments
-                for clo_item
-                in assessment_row["clos"]
-            })
+            type_clos = sorted(
+                {
+                    clo_item["clo"]
+                    for assessment_row
+                    in formatted_assessments
+                    for clo_item
+                    in assessment_row["clos"]
+                },
+                key=CLOService._clo_sort_key,
+            )
 
             # ====================================================
             # CATEGORY WEIGHT
@@ -420,8 +451,12 @@ class CLOService:
                     question.clo
                 )
 
+                # For sessional (Student Performance) without CLO, use "SP" code
                 if not clo_code:
-                    continue
+                    if ass_type == 'sessional':
+                        clo_code = "SP"
+                    else:
+                        continue
 
                 obtained = CLOService._decimal(
                     marks_map.get(
@@ -565,10 +600,21 @@ class CLOService:
             )
         )
 
+        # Filter CLOs by batch's curriculum version to avoid duplicates from other versions
+        batch_curriculum_version_id = None
+        if session and session.batch and session.batch.curriculum_version_id:
+            batch_curriculum_version_id = session.batch.curriculum_version_id
+
         all_clos_queryset = CLO.objects.filter(
             course_id=course_id,
             is_active=True
-        )
+        ).order_by("order_number", "id")
+
+        # If batch has a curriculum version, only use CLOs from that version
+        if batch_curriculum_version_id:
+            all_clos_queryset = all_clos_queryset.filter(
+                curriculum_version_id=batch_curriculum_version_id
+            )
 
         clos_by_order = defaultdict(list)
 
@@ -754,8 +800,12 @@ class CLOService:
                         question.clo
                     )
 
+                    # For sessional (Student Performance) without CLO, use "SP" code
                     if not clo_code:
-                        continue
+                        if assessment.assessment_type == 'sessional':
+                            clo_code = "SP"
+                        else:
+                            continue
 
                     obtained = CLOService._decimal(
                         original_marks_map.get(
@@ -1474,14 +1524,14 @@ class CLOService:
             # for every CLO.
             student_clo_weighted = {
                 f"CLO-{order_num}": Decimal("0")
-                for order_num in clos_by_order
+                for order_num in sorted(clos_by_order.keys())
             }
 
             # This stores the maximum applicable weighted
             # contribution for each CLO.
             student_clo_applicable_weight = {
                 f"CLO-{order_num}": Decimal("0")
-                for order_num in clos_by_order
+                for order_num in sorted(clos_by_order.keys())
             }
 
             # ====================================================
@@ -1762,7 +1812,7 @@ class CLOService:
             #
             # ====================================================
 
-            for order_num in clos_by_order:
+            for order_num in sorted(clos_by_order.keys()):
 
                 clo_code = f"CLO-{order_num}"
 
@@ -1915,22 +1965,23 @@ class CLOService:
         # CLASS CLO ATTAINMENT
         # ========================================================
 
-        total_students = len(report)
+        # Count all active students in batch (students without marks = failed)
+        total_students = len(students) if students else len(report)
 
         class_clo_pass_count = {
             f"CLO-{order_num}": 0
-            for order_num in clos_by_order
+            for order_num in sorted(clos_by_order.keys())
         }
 
         # ========================================================
-        # COUNT STUDENTS WITH CLO >= 50%
+        # COUNT STUDENTS WITH CLO >= KPI
         # ========================================================
 
         for row in report:
 
             for clo_code in class_clo_pass_count:
 
-                clo_percentage = (
+                clo_data = (
                     row.get(
                         "clo_attainment",
                         {}
@@ -1939,17 +1990,18 @@ class CLOService:
                         clo_code,
                         {}
                     )
-                    .get(
-                        "percentage",
-                        0
-                    )
                 )
+                
+                clo_percentage = clo_data.get("percentage", 0)
+                clo_kpi = clo_data.get("kpi", 60)
 
                 if (
                     CLOService._decimal(
                         clo_percentage
                     )
-                    >= Decimal("50")
+                    >= CLOService._decimal(
+                        clo_kpi
+                    )
                 ):
                     class_clo_pass_count[
                         clo_code
@@ -1961,7 +2013,7 @@ class CLOService:
 
         class_clo_attainment = {}
 
-        for order_num in clos_by_order:
+        for order_num in sorted(clos_by_order.keys()):
 
             clo_code = f"CLO-{order_num}"
 
@@ -2134,7 +2186,30 @@ class CLOService:
                     clo_code
                 )
 
-        all_clos.sort()
+        all_clos.sort(key=CLOService._clo_sort_key)
+
+        # ========================================================
+        # NORMAL + RETAKE SPLIT
+        # ========================================================
+
+        normal_students = []
+        retake_rows = []
+
+        for row in report:
+            if row.get("is_retake"):
+                retake_rows.append(row)
+            else:
+                normal_students.append(row)
+
+        normal_students = [
+            {**row, "count": idx + 1}
+            for idx, row in enumerate(normal_students)
+        ]
+
+        retake_students = [
+            {**row, "count": idx + 1}
+            for idx, row in enumerate(retake_rows)
+        ]
 
         # ========================================================
         # RETURN
@@ -2143,7 +2218,9 @@ class CLOService:
         return {
             "students": report,
 
-            "retake_students": [],
+            "normal_students": normal_students,
+
+            "retake_students": retake_students,
 
             "retake_students_legacy": retake_report,
 

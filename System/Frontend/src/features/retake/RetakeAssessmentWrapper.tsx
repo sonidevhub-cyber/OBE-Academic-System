@@ -83,7 +83,7 @@ const RetakeAssessmentWrapper: React.FC = () => {
 
   const currentSemester = assessmentContext?.currentSemester ?? retakeGroup?.currentSemester ?? retake?.current_batch?.current_semester ?? 1;
   const semesterNumber = String(currentSemester || 1);
-  const semesterId = String(currentSemester || 1);
+  const semesterId = '';
   const batchId = assessmentContext?.batchId || retakeGroup?.batchId || normalizeId(retake?.current_batch?.id);
   const courseId = assessmentContext?.courseId || retakeGroup?.courseId || normalizeId(retake?.failed_course?.id);
   const studentId = assessmentContext?.studentId || normalizeId(retake?.student?.id);
@@ -124,9 +124,9 @@ const RetakeAssessmentWrapper: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-3xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-indigo-950 shadow-sm">
+      <div className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
         <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-indigo-600 p-2 text-white shadow-sm">
+          <div className="rounded-2xl bg-amber-600 p-2 text-white shadow-sm">
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div className="flex-1">
@@ -134,15 +134,13 @@ const RetakeAssessmentWrapper: React.FC = () => {
               <h3 className="text-lg font-black">Retake Assessment</h3>
               <RetakeBadge attemptNumber={Number(attemptNumber) || 1} status={status} />
             </div>
-            <p className="mt-1 text-sm font-medium text-indigo-900/80">
+            <p className="mt-1 text-sm font-medium text-amber-800">
               {isGroupMode
                 ? `Attempt ${attemptNumber} for ${groupRetakes.length} students in ${retakeGroup?.batchName || 'this batch'}`
                 : `Attempt ${attemptNumber} for ${studentName}`}
             </p>
-            <p className="mt-1 text-xs font-medium text-indigo-900/70">
-              {isGroupMode
-                ? 'This grouped view saves each student against their own retake record.'
-                : 'This view reuses the existing assessment entry flow and limits it to the retake student.'}
+            <p className="mt-1 text-xs font-medium text-amber-700">
+              Assessment structure is locked to match the original course offering. Only marks entry is allowed.
             </p>
           </div>
         </div>

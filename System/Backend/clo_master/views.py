@@ -120,13 +120,18 @@ def get_clo_master_report(request, program_id, semester_id):
     }
 
     # Get all students for this batch.
+    # Use get_students_for_batch so the student roster matches the one that
+    # CLOService uses to build cache entries (includes students whose
+    # Student.batch was set to this batch even if user.batch differs, as well
+    # as frozen/retake students). This keeps total_students consistent with
+    # kpi_achieved_lookup so attainment never exceeds 100%.
     from students.models import Student
+    from obe.services import get_students_for_batch
 
-    students = (
-        Student.objects.filter(user__batch_id=batch_id).select_related("user")
-        if batch_id
-        else Student.objects.none()
-    )
+    if batch_id and batch:
+        students = get_students_for_batch(batch)
+    else:
+        students = Student.objects.none()
 
     # Get all active course entries from cache.
     course_entries = []
@@ -142,6 +147,7 @@ def get_clo_master_report(request, program_id, semester_id):
     # Precompute lookups for O(1) access.
     course_entry_lookup = {}
     kpi_achieved_lookup = {}
+    kpi_total_lookup = {}  # Count total students per CLO (from cache entries)
 
     for entry in course_entries:
         student_id = entry.student.student_id
@@ -151,6 +157,8 @@ def get_clo_master_report(request, program_id, semester_id):
 
         kpi_key = (course_id, clo_id)
         kpi_achieved_lookup.setdefault(kpi_key, 0)
+        kpi_total_lookup.setdefault(kpi_key, 0)
+        kpi_total_lookup[kpi_key] += 1  # Count total students for this CLO
         if entry.is_kpi_achieved:
             kpi_achieved_lookup[kpi_key] += 1
 
@@ -184,9 +192,10 @@ def get_clo_master_report(request, program_id, semester_id):
     sorted_courses = []
     for course_item in course_catalog:
         course = course_item["course"]
-        course_clos = list(
-            CLO.objects.filter(course=course, is_active=True).order_by("order_number")
-        )
+        clos_query = CLO.objects.filter(course=course, is_active=True)
+        if batch and batch.curriculum_version:
+            clos_query = clos_query.filter(curriculum_version=batch.curriculum_version)
+        course_clos = list(clos_query.order_by("order_number"))
         sorted_courses.append({
             "course": course,
             "semester_no": course_item["semester_no"],
@@ -311,6 +320,7 @@ def get_clo_master_report(request, program_id, semester_id):
                         "cohort_achieved_count": kpi_achieved_lookup.get(
                             (info["course"].id, clo.id), 0
                         ),
+                        "cohort_total_count": total_students,
                         "cohort_percentage": (
                             (
                                 kpi_achieved_lookup.get((info["course"].id, clo.id), 0)
