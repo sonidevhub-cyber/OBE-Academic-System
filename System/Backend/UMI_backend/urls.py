@@ -44,6 +44,7 @@ urlpatterns += [
     path('api/retakes/', include('retake.urls')),
     path('api/', include('peo_report.urls')),
     path('api/', include('ga_cqi_cohort.urls')),
+    path("api/course-history/",include("course_history.urls")),
     path('api/clo-master/', include('clo_master.urls')),
 ]
 

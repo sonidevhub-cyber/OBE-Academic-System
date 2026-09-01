@@ -116,7 +116,7 @@ const StudentFeedbackPopup: React.FC<Props> = ({ onSubmitSuccess }) => {
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
 
           <p className="text-sm font-medium text-gray-600">
-            Loading course feedback...
+            Loading Semester feedback...
           </p>
         </div>
       </div>
@@ -137,7 +137,7 @@ const StudentFeedbackPopup: React.FC<Props> = ({ onSubmitSuccess }) => {
           </h3>
 
           <p className="mt-1 text-sm text-gray-500">
-            Course feedback is currently not available.
+            Semeater feedback is currently not available.
           </p>
         </div>
       </div>
@@ -160,7 +160,7 @@ const StudentFeedbackPopup: React.FC<Props> = ({ onSubmitSuccess }) => {
 
           <div>
             <h2 className="text-2xl font-bold">
-              Course Feedback
+              Semester Feedback
             </h2>
 
             <p className="mt-1 text-sm text-indigo-100">

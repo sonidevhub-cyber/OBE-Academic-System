@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'teacher_alerts',
     'clo_master',
     'retake.apps.RetakeConfig',
+    'course_history',
 
 ]
 
