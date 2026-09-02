@@ -41,6 +41,8 @@ import CoordinatorExitSurveySetup from './views/modules/coordinator/CoordinatorE
 import StudentExitSurvey from './views/modules/student/StudentExitSurvey';
 import SACExitSurveyDashboard from './views/modules/sac/SACExitSurveyDashboard';
 import RetakeResultEntryPage from './views/pages/RetakeResultEntryPage';
+import StudentElectiveSelection from './views/modules/student/StudentElectiveSelection';
+import SACElectiveEnrollmentReview from './views/pages/SACElectiveEnrollmentReview';
 
 const Dashboard = () => <AdminDashboard />;
 
@@ -96,6 +98,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/student" element={<StudentDashboard />} />
         <Route path="/student-dashboard" element={<Navigate to="/student" />} />
         <Route path="/student/exit-survey" element={<StudentExitSurvey />} />
+        <Route path="/student/elective-selection" element={<StudentElectiveSelection />} />
       </Route>
 
       {/* Alumni Routes */}
@@ -149,6 +152,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/hod/ga-cqi" element={<HODCQI mode="ga" />} />
         <Route path="/hod/vision-mission-cqi" element={<HODVisionMissionCQI />} />
         <Route path="/hod/cqi-closing-advisory" element={<HODCQIClosingAdvisory />} />
+        <Route path="/sac/elective-enrollments" element={<SACElectiveEnrollmentReview />} />
       </Route>
 
       {/* Fallback route */}

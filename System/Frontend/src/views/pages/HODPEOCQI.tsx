@@ -31,7 +31,7 @@ const HODPEOCQI: React.FC = () => {
   const [expandedPeos, setExpandedPeos] = useState<string[]>([]);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [localCqiData, setLocalCqiData] = useState<
-    Record<string, { root_cause: string; remedial_plan: string }>
+    Record<string, { root_cause: string }>
   >({});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +67,11 @@ const HODPEOCQI: React.FC = () => {
     alumniBatches.find((batch) => batch.id === selectedBatchId) ||
     alumniBatches[0];
 
+  const ongoingBatches = useMemo(
+    () => batches.filter((batch) => batch.status === 'active'),
+    [batches]
+  );
+
   const fetchBatches = async () => {
     try {
       const data = await obeService.getAlumniFeedbackBatches();
@@ -93,7 +98,6 @@ const HODPEOCQI: React.FC = () => {
         cqis.forEach((record) => {
           next[record.id] = {
             root_cause: record.root_cause || '',
-            remedial_plan: record.remedial_plan || '',
           };
         });
         return next;
@@ -181,7 +185,6 @@ const HODPEOCQI: React.FC = () => {
         peo: peoReport.peo_id,
         batch: selectedBatchId,
         root_cause: '',
-        remedial_plan: '',
       });
       setPeoCqiRecords((prev) => [newCqi, ...prev]);
       setExpandedPeos((prev) =>
@@ -197,17 +200,11 @@ const HODPEOCQI: React.FC = () => {
     }
   };
 
-  const handleUpdateCqi = (
-    cqiId: string,
-    field: 'root_cause' | 'remedial_plan',
-    value: string
-  ) => {
+  const handleUpdateCqi = (cqiId: string, value: string) => {
     setLocalCqiData((prev) => ({
       ...prev,
       [cqiId]: {
-        root_cause: prev[cqiId]?.root_cause || '',
-        remedial_plan: prev[cqiId]?.remedial_plan || '',
-        [field]: value,
+        root_cause: value,
       },
     }));
   };
@@ -217,11 +214,9 @@ const HODPEOCQI: React.FC = () => {
       setSavingId(cqiId);
       const data = localCqiData[cqiId] || {
         root_cause: '',
-        remedial_plan: '',
       };
       await peoService.updatePEOCQIRecord(cqiId, {
         root_cause: data.root_cause,
-        remedial_plan: data.remedial_plan,
       });
       toast.success('PEO CQI saved');
       await fetchData(selectedBatchId);
@@ -236,6 +231,12 @@ const HODPEOCQI: React.FC = () => {
   const handleSubmitCqi = async (cqiId: string) => {
     try {
       setSavingId(cqiId);
+      const data = localCqiData[cqiId] || {
+        root_cause: '',
+      };
+      await peoService.updatePEOCQIRecord(cqiId, {
+        root_cause: data.root_cause,
+      });
       await peoService.submitPEOCQI(cqiId);
       toast.success('PEO CQI submitted and approved');
       await fetchData(selectedBatchId);
@@ -361,7 +362,6 @@ const HODPEOCQI: React.FC = () => {
             'CQI Status',
             'Approved On',
             'Root Cause',
-            'Corrective Action Plan',
           ],
         ],
         body: peoReports.length
@@ -373,7 +373,6 @@ const HODPEOCQI: React.FC = () => {
                 existingCqi?.updated_at || existingCqi?.created_at || '-';
               const draft = localCqiData[existingCqi?.id || ''] || {
                 root_cause: existingCqi?.root_cause || '',
-                remedial_plan: existingCqi?.remedial_plan || '',
               };
 
               return [
@@ -389,12 +388,9 @@ const HODPEOCQI: React.FC = () => {
                 needsCqi
                   ? draft.root_cause || 'Pending HOD submission'
                   : draft.root_cause || 'Not required',
-                needsCqi
-                  ? draft.remedial_plan || 'Pending HOD submission'
-                  : draft.remedial_plan || 'Not required',
               ];
             })
-          : [['-', 'No PO records available', '-', '-', '-', '-', '-']],
+          : [['-', 'No PO records available', '-', '-', '-', '-']],
         theme: 'grid',
         styles: {
           fontSize: 6.5,
@@ -417,7 +413,6 @@ const HODPEOCQI: React.FC = () => {
           3: { cellWidth: 24, halign: 'center' },
           4: { cellWidth: 24, halign: 'center' },
           5: { cellWidth: 60 },
-          6: { cellWidth: 60 },
         },
         margin: { left: marginX, right: marginX, bottom: 12 },
       });
@@ -566,7 +561,6 @@ const HODPEOCQI: React.FC = () => {
                     peoReport.final_score !== null && peoReport.final_score < kpi;
                   const draft = localCqiData[existingCqi?.id || ''] || {
                     root_cause: existingCqi?.root_cause || '',
-                    remedial_plan: existingCqi?.remedial_plan || '',
                   };
 
                   return (
@@ -694,7 +688,6 @@ const HODPEOCQI: React.FC = () => {
                                     onChange={(e) =>
                                       handleUpdateCqi(
                                         existingCqi.id,
-                                        'root_cause',
                                         e.target.value
                                       )
                                     }
@@ -708,31 +701,8 @@ const HODPEOCQI: React.FC = () => {
                                     }
                                   />
                                 </div>
-                                <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
-                                  <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
-                                    Remedial Plan
-                                  </p>
-                                  <textarea
-                                    value={draft.remedial_plan}
-                                    onChange={(e) =>
-                                      handleUpdateCqi(
-                                        existingCqi.id,
-                                        'remedial_plan',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-gray-200 p-3 outline-none focus:border-indigo-500"
-                                    rows={4}
-                                    placeholder="Describe the remedial plan..."
-                                    disabled={
-                                      existingCqi.status === 'APPROVED' ||
-                                      existingCqi.status === 'CLOSED_IMPLEMENTED' ||
-                                      existingCqi.is_locked
-                                    }
-                                  />
-                                </div>
 
-                              {existingCqi.status === 'CLOSED_IMPLEMENTED' && (
+                                {existingCqi.status === 'CLOSED_IMPLEMENTED' && (
                                 <>
                                   <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
                                     <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
@@ -883,18 +853,8 @@ const HODPEOCQI: React.FC = () => {
                                                   </span>{' '}
                                                   {historyItem.root_cause_snapshot}
                                                 </div>
-                                              ) : null}
-                                              {historyItem.remedial_plan_snapshot ? (
-                                                <div>
-                                                  <span className="font-semibold">
-                                                    Remedial Plan:
-                                                  </span>{' '}
-                                                  {
-                                                    historyItem.remedial_plan_snapshot
-                                                  }
-                                                </div>
-                                              ) : null}
-                                            </div>
+                                                ) : null}
+                                              </div>
                                           </div>
                                         )
                                       )}
@@ -960,7 +920,7 @@ const HODPEOCQI: React.FC = () => {
                   <option value="">
                     Select the batch where actions were implemented
                   </option>
-                  {batches.map((batch) => (
+                  {ongoingBatches.map((batch) => (
                     <option key={batch.id} value={batch.id}>
                       {batch.name}
                     </option>

@@ -12,6 +12,9 @@ class GACQICohortSerializer(serializers.ModelSerializer):
     closed_by_name = serializers.CharField(
         source='closed_by.full_name', read_only=True, allow_null=True
     )
+    implemented_in_batch_name = serializers.CharField(
+        source='implemented_in_batch.name', read_only=True, allow_null=True
+    )
     
     def get_ga_code(self, obj):
         return f'GA-{obj.ga.order_number}'
@@ -21,9 +24,12 @@ class GACQICohortSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'ga', 'ga_title', 'ga_code', 'batch', 'batch_name',
             'cqi_level', 'status', 'issue_statement', 'hod_action_plan',
+            'root_cause',
             'triggered_at', 'saved_by_hod', 'saved_by_hod_name', 'saved_at',
             'remedy_text', 'closed_by', 'closed_by_name', 'closed_at',
-            'is_active', 'attainment_value', 'kpi_threshold_at_trigger'
+            'is_active', 'attainment_value', 'kpi_threshold_at_trigger',
+            'implemented_in_batch', 'implemented_in_batch_name',
+            'action_taken_description', 'resulting_attainment',
         ]
         read_only_fields = [
             'id', 'triggered_at', 'saved_by_hod', 'saved_at', 'created_at',

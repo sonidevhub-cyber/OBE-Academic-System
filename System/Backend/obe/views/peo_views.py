@@ -102,18 +102,7 @@ def _refresh_alumni_feedback_cycle(cycle):
     if cycle.status != 'ACTIVE' or not cycle.is_active:
         return cycle
 
-    response_rate = _get_alumni_feedback_response_rate(cycle)
     now = timezone.now()
-
-    if response_rate >= (cycle.response_threshold or ALUMNI_FEEDBACK_THRESHOLD):
-        cycle.status = 'CLOSED'
-        cycle.closed_at = now
-        cycle.is_active = True
-        cycle.save(update_fields=['status', 'closed_at', 'is_active'])
-        cycle.batch.alumni_feedback_enabled = False
-        cycle.batch.alumni_feedback_due_at = cycle.due_at
-        cycle.batch.save(update_fields=['alumni_feedback_enabled', 'alumni_feedback_due_at'])
-        return cycle
 
     if cycle.due_at and now >= cycle.due_at and cycle.auto_extension_count < 1:
         cycle.due_at = cycle.due_at + timedelta(days=cycle.auto_extension_days or ALUMNI_FEEDBACK_EXTENSION_DAYS)
@@ -1337,12 +1326,11 @@ class PEOCQIDetailView(APIView):
         if cqi.is_locked:
             return Response({'error': 'This PO CQI record is locked and cannot be updated'}, status=status.HTTP_403_FORBIDDEN)
         
-        # Save history if there are changes to root_cause or remedial_plan
-        if 'root_cause' in request.data or 'remedial_plan' in request.data:
+        # Save history if there are changes to root_cause
+        if 'root_cause' in request.data:
             PEOCQISubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 status_at_time=cqi.status
             )
         
@@ -1377,7 +1365,6 @@ class PEOCQISubmitView(APIView):
         PEOCQISubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             status_at_time=cqi.status
         )
         
@@ -1428,7 +1415,6 @@ class PEOCQICreateView(APIView):
             PEOCQISubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 status_at_time=cqi.status
             )
         
@@ -1679,7 +1665,6 @@ class PEOCQICloseView(APIView):
         PEOCQISubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             status_at_time=cqi.status
         )
 

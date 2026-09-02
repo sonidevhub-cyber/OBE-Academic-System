@@ -143,11 +143,10 @@ class PEOCQIUpsertView(APIView):
 
     def post(self, request, program_id, peo_id, year):
         root_cause = (request.data.get("root_cause") or request.data.get("identified_weakness") or "").strip()
-        remedial_plan = (request.data.get("remedial_plan") or request.data.get("corrective_action_plan") or "").strip()
 
-        if not root_cause or not remedial_plan:
+        if not root_cause:
             return Response(
-                {"error": "root_cause and remedial_plan are required"},
+                {"error": "root_cause is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -167,7 +166,6 @@ class PEOCQIUpsertView(APIView):
             batch_id=batch_id,
             defaults={
                 "root_cause": root_cause,
-                "remedial_plan": remedial_plan,
                 "status": "APPROVED",
                 "submitted_by": request.user,
                 "is_locked": True,
@@ -184,7 +182,6 @@ class PEOCQIUpsertView(APIView):
                 "peo": str(peo.id),
                 "batch": batch_id,
                 "root_cause": cqi.root_cause,
-                "remedial_plan": cqi.remedial_plan,
                 "status": "Closed",
                 "hod_approved_by": request.user.full_name,
                 "hod_approved_date": cqi.updated_at.isoformat(),

@@ -615,7 +615,8 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
                 "cqiStatus": cqi_record.status if cqi_record else None,
                 "cqiIsLocked": cqi_record.is_locked if cqi_record else False,
                 "rootCause": cqi_record.root_cause if cqi_record else None,
-                "remedialPlan": cqi_record.remedial_plan if cqi_record else None,
+                "implementedInBatch": cqi_record.implemented_in_batch.name if cqi_record and cqi_record.implemented_in_batch else None,
+                "actionTaken": cqi_record.action_taken_description if cqi_record else None,
             }
         )
 
@@ -625,7 +626,6 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
                     "peoId": _format_peo_code(peo),
                     "peoUuid": str(peo.id),
                     "rootCause": cqi_record.root_cause if cqi_record else None,
-                    "remedialPlan": cqi_record.remedial_plan if cqi_record else None,
                     "cqiStatus": cqi_status or "Open",
                     "hodApprovedBy": cqi_record.submitted_by.full_name if cqi_record and cqi_record.submitted_by else None,
                     "hodApprovedDate": (
@@ -633,7 +633,10 @@ def calculate_peo_report(program_id: str, year: int, batch_id: str | None = None
                         if cqi_record and (cqi_record.updated_at or cqi_record.created_at)
                         else None
                     ),
-                    "cqiPending": not bool(cqi_record and (cqi_record.root_cause or cqi_record.remedial_plan)),
+                    "cqiPending": not bool(cqi_record and cqi_record.root_cause),
+                    "implementedInBatch": cqi_record.implemented_in_batch.name if cqi_record and cqi_record.implemented_in_batch else None,
+                    "actionTaken": cqi_record.action_taken_description if cqi_record else None,
+                    "resultingAttainment": cqi_record.resulting_attainment if cqi_record else None,
                 }
             )
 

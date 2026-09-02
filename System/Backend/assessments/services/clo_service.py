@@ -15,7 +15,7 @@ from academic_structure.models import (
     Course as AcademicCourse,
     Semester as AcademicSemester,
 )
-from obe.services import get_students_for_batch
+from obe.services import get_students_for_batch, get_students_enrolled_in_course
 
 class CLOService:
 
@@ -526,8 +526,8 @@ class CLOService:
 
         students = (
             list(
-                get_students_for_batch(
-                    session.batch
+                get_students_enrolled_in_course(
+                    session
                 )
             )
             if session

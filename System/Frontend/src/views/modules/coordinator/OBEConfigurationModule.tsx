@@ -158,9 +158,10 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   const [gas, setGas] = useState<GA[]>([]);
   const [exitSurveyQuestions, setExitSurveyQuestions] = useState<ExitSurveyQuestion[]>([]);
   const [surveyQuestions, setSurveyQuestions] = useState<SurveyQuestion[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'peo' | 'ga' | 'clo'>('peo');
   const [editingItem, setEditingItem] = useState<any>(null);
+   const [activeFormTab, setActiveFormTab] = useState<'definition' | 'employer' | 'alumni'>('definition');
   const [alumniSurveyDrafts, setAlumniSurveyDrafts] = useState<SurveyQuestionDraft[]>([]);
   const [employerSurveyDrafts, setEmployerSurveyDrafts] = useState<SurveyQuestionDraft[]>([]);
   const [formData, setFormData] = useState({
@@ -1063,6 +1064,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       alumni_survey_question_text: '',
       exit_survey_question_text: ''
     });
+    setActiveFormTab('definition');
     setIsModalOpen(true);
   };
 
@@ -2308,264 +2310,325 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white"
-          >
-            <div className="p-10">
-              <h3 className="text-2xl font-black text-gray-900 mb-2">
-                {editingItem ? 'Edit' : 'Add'} {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
-              </h3>
-              <p className="text-gray-400 text-sm mb-8">Fill in the details for the {modalType === 'clo' ? 'course learning outcome' : 'program objective'}.</p>
-              
-              <form onSubmit={handleSaveItem} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Title / Short Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.title}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    placeholder={`e.g. ${modalType === 'clo' ? 'Design Principles' : 'Fundamental Knowledge'}`}
-                    className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Order Number</label>
-                    <input
-                      type="number"
-                      required
-                      value={formData.order_number}
-                      onChange={(e) => setFormData({...formData, order_number: parseInt(e.target.value)})}
-                      className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+            className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-white"
+           >
+              <div className="p-6 overflow-y-auto flex-1">
+               <h3 className="text-2xl font-black text-gray-900 mb-2">
+                 {editingItem ? 'Edit' : 'Add'} {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
+               </h3>
+               <p className="text-gray-400 text-sm mb-8">Fill in the details for the {modalType === 'clo' ? 'course learning outcome' : 'program objective'}.</p>
+               
+               <form onSubmit={handleSaveItem} className="space-y-6">
+
+                 {/* Tab Navigation (PEO only) */}
+                 {modalType === 'peo' && (
+                   <div className="flex gap-2 mb-2 border-b border-gray-200">
+                     <button
+                       type="button"
+                       onClick={() => setActiveFormTab('definition')}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-t-xl font-black text-sm transition-all ${
+                         activeFormTab === 'definition'
+                           ? 'bg-indigo-600 text-white'
+                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                       }`}
+                     >
+                       <Target size={14} /> PO Definition
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => setActiveFormTab('employer')}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-t-xl font-black text-sm transition-all ${
+                         activeFormTab === 'employer'
+                           ? 'bg-emerald-600 text-white'
+                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                       }`}
+                     >
+                       <Briefcase size={14} /> Employer Questions
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => setActiveFormTab('alumni')}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-t-xl font-black text-sm transition-all ${
+                         activeFormTab === 'alumni'
+                           ? 'bg-indigo-600 text-white'
+                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                       }`}
+                     >
+                       <GraduationCap size={14} /> Alumni Questions
+                     </button>
+                   </div>
+                 )}
+
+                 {/* === SECTION 1: PO Definition === */}
+                 {(modalType !== 'peo' || activeFormTab === 'definition') && (
+                   <div className="border border-indigo-100 rounded-3xl p-5 bg-indigo-50/30">
+                   <div className="flex items-center gap-2 mb-4">
+                     <Target className="h-5 w-5 text-indigo-600" />
+                     <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">
+                       {modalType === 'peo' ? 'Program Outcome Definition' : modalType === 'clo' ? 'CLO Definition' : 'GA Definition'}
+                     </h4>
+                   </div>
+
+                   {/* Title */}
+                   <div>
+                     <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Title / Short Name</label>
+                     <input
+                       type="text"
+                       required
+                       value={formData.title}
+                       onChange={(e) => setFormData({...formData, title: e.target.value})}
+                       placeholder={`e.g. ${modalType === 'clo' ? 'Design Principles' : 'Fundamental Knowledge'}`}
+                       className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
                     />
-                  </div>
-                  {(modalType === 'clo' || modalType === 'ga' || modalType === 'peo') && (
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Threshold (%)</label>
-                      <input
-                        type="number"
-                        required
-                        value={formData.kpi_target}
-                        onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
-                        placeholder="e.g., 70"
-                        className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                      />
-                    </div>
-                  )}
-                  {modalType === 'clo' && (
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Bloom Level</label>
-                      <select
-                        required
-                        value={formData.bloom_level}
-                        onChange={(e) => setFormData({...formData, bloom_level: e.target.value})}
-                        className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
-                      >
-                        <option value="K1">K1 - Remembering</option>
-                        <option value="K2">K2 - Understanding</option>
-                        <option value="K3">K3 - Applying</option>
-                        <option value="K4">K4 - Analyzing</option>
-                        <option value="K5">K5 - Evaluating</option>
-                        <option value="K6">K6 - Creating</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
-                  <textarea
-                    required
-                    value={formData.description}
-                    onChange={(e) => {
-                      const newDescription = e.target.value;
-                      const alumniAutoQuestion = `${ALUMNI_TEMPLATE_PREFIX} ${newDescription}`;
-                      const exitAutoQuestion = `I am confident in ${newDescription}`;
-                      const useAlumniDefault =
-                        formData.alumni_survey_question_text === '' ||
-                        formData.alumni_survey_question_text.startsWith(ALUMNI_TEMPLATE_PREFIX);
-                      const useExitDefault =
-                        formData.exit_survey_question_text === '' ||
-                        formData.exit_survey_question_text.startsWith('I am confident in ');
-                      if (modalType === 'peo') {
-                        setAlumniSurveyDrafts(prev => autoSyncDraftDefault(prev, newDescription, 'ALUMNI'));
-                        setEmployerSurveyDrafts(prev => autoSyncDraftDefault(prev, newDescription, 'EMPLOYER'));
-                      }
-                      setFormData({
-                        ...formData,
-                        description: newDescription,
-                        alumni_survey_question_text: useAlumniDefault ? alumniAutoQuestion : formData.alumni_survey_question_text,
-                        exit_survey_question_text: useExitDefault ? exitAutoQuestion : formData.exit_survey_question_text,
-                      });
-                    }}
-                    placeholder="Provide a detailed description..."
-                    className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-                  />
-                </div>
+                   </div>
 
-                {modalType === 'peo' && (
-                  <div className="space-y-5 pt-2">
-                    {/* Alumni Survey Questions */}
-                    <div className="border border-indigo-100 rounded-3xl p-5 bg-indigo-50/30">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center">
-                            <GraduationCap size={18} />
-                          </div>
-                          <div>
-                            <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Alumni Survey Questions</h4>
-                            <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions for alumni respondents mapped to this Program Outcome.</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => appendDraftQuestion(setAlumniSurveyDrafts, editingItem || null, false)}
-                            className="flex items-center gap-1.5 px-3 py-2 bg-white text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-all"
-                          >
-                            <Plus size={14} /> Add PO Question
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {alumniSurveyDrafts.filter(d => !d._deleted).length === 0 && (
-                          <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
-                            No Alumni questions. Click "Add PO Question" to add one.
-                          </p>
-                        )}
-                        {alumniSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
-                          <div key={draft._tempId} className="bg-white rounded-2xl p-4 border border-indigo-100 shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase tracking-wider">
-                                  Alumni Q{idx + 1}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleDraftLock(setAlumniSurveyDrafts, draft._tempId!)}
-                                  className={`p-1.5 rounded-lg transition-all ${
-                                    draft.is_locked
-                                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                  }`}
-                                  title={draft.is_locked ? 'Unlock question (editable by alumni)' : 'Lock question (prevents alumni-side edits)'}
-                                >
-                                  {draft.is_locked ? <Lock size={14} /> : <Unlock size={14} />}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => removeDraftQuestion(setAlumniSurveyDrafts, draft._tempId!)}
-                                  className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all"
-                                  title="Delete question"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </div>
-                            {renderDraftQuestionEditor(draft, setAlumniSurveyDrafts, 'ALUMNI')}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                   {/* Order + KPI/Bloom */}
+                   <div className="grid grid-cols-2 gap-4 mt-4">
+                     <div>
+                       <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Order Number</label>
+                       <input
+                         type="number"
+                         required
+                         value={formData.order_number}
+                         onChange={(e) => setFormData({...formData, order_number: parseInt(e.target.value)})}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                       />
+                     </div>
+                     {(modalType === 'clo' || modalType === 'ga' || modalType === 'peo') && (
+                       <div>
+                         <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">KPI Threshold (%)</label>
+                         <input
+                           type="number"
+                           required
+                           value={formData.kpi_target}
+                           onChange={(e) => setFormData({...formData, kpi_target: parseFloat(e.target.value)})}
+                           placeholder="e.g., 70"
+                           className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                         />
+                       </div>
+                     )}
+                     {modalType === 'clo' && (
+                       <div>
+                         <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Bloom Level</label>
+                         <select
+                           required
+                           value={formData.bloom_level}
+                           onChange={(e) => setFormData({...formData, bloom_level: e.target.value})}
+                           className="w-full bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all"
+                         >
+                           <option value="K1">K1 - Remembering</option>
+                           <option value="K2">K2 - Understanding</option>
+                           <option value="K3">K3 - Applying</option>
+                           <option value="K4">K4 - Analyzing</option>
+                           <option value="K5">K5 - Evaluating</option>
+                           <option value="K6">K6 - Creating</option>
+                         </select>
+                       </div>
+                     )}
+                   </div>
 
-                    {/* Employer Survey Questions */}
-                    <div className="border border-emerald-100 rounded-3xl p-5 bg-emerald-50/30">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
-                            <Briefcase size={18} />
-                          </div>
-                          <div>
-                            <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Employer Survey Questions</h4>
-                            <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions asked to employers of graduates, mapped to this Program Outcome.</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => appendDraftQuestion(setEmployerSurveyDrafts, editingItem || null, false)}
-                            className="flex items-center gap-1.5 px-3 py-2 bg-white text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200 hover:bg-emerald-50 transition-all"
-                          >
-                            <Plus size={14} /> Add PO Question
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {employerSurveyDrafts.filter(d => !d._deleted).length === 0 && (
-                          <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
-                            No Employer questions. Click "Add PO Question" to add one.
-                          </p>
-                        )}
-                        {employerSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
-                          <div key={draft._tempId} className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg uppercase tracking-wider">
-                                  Employer Q{idx + 1}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleDraftLock(setEmployerSurveyDrafts, draft._tempId!)}
-                                  className={`p-1.5 rounded-lg transition-all ${
-                                    draft.is_locked
-                                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                  }`}
-                                  title={draft.is_locked ? 'Unlock question' : 'Lock question'}
-                                >
-                                  {draft.is_locked ? <Lock size={14} /> : <Unlock size={14} />}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => removeDraftQuestion(setEmployerSurveyDrafts, draft._tempId!)}
-                                  className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all"
-                                  title="Delete question"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </div>
-                            {renderDraftQuestionEditor(draft, setEmployerSurveyDrafts, 'EMPLOYER')}
-                          </div>
-                        ))}
-                      </div>
+                   {/* Description */}
+                   <div className="mt-4">
+                     <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Description</label>
+                     <textarea
+                       required
+                       value={formData.description}
+                       onChange={(e) => {
+                         const newDescription = e.target.value;
+                         const alumniAutoQuestion = `${ALUMNI_TEMPLATE_PREFIX} ${newDescription}`;
+                         const exitAutoQuestion = `I am confident in ${newDescription}`;
+                         const useAlumniDefault =
+                           formData.alumni_survey_question_text === '' ||
+                           formData.alumni_survey_question_text.startsWith(ALUMNI_TEMPLATE_PREFIX);
+                         const useExitDefault =
+                           formData.exit_survey_question_text === '' ||
+                           formData.exit_survey_question_text.startsWith('I am confident in ');
+                         if (modalType === 'peo') {
+                           setAlumniSurveyDrafts(prev => autoSyncDraftDefault(prev, newDescription, 'ALUMNI'));
+                           setEmployerSurveyDrafts(prev => autoSyncDraftDefault(prev, newDescription, 'EMPLOYER'));
+                         }
+                         setFormData({
+                           ...formData,
+                           description: newDescription,
+                           alumni_survey_question_text: useAlumniDefault ? alumniAutoQuestion : formData.alumni_survey_question_text,
+                           exit_survey_question_text: useExitDefault ? exitAutoQuestion : formData.exit_survey_question_text,
+                         });
+                       }}
+                       placeholder="Provide a detailed description..."
+                       className="w-full h-32 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+                     />
                     </div>
                   </div>
                 )}
 
-                {modalType === 'ga' && (
-                  <div>
-                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Exit Survey Question</label>
-                    <textarea
-                      required
-                      value={formData.exit_survey_question_text}
-                      onChange={(e) => setFormData({...formData, exit_survey_question_text: e.target.value})}
-                      placeholder="Enter the exit survey question for this GA..."
-                      className="w-full h-24 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-                    />
-                    <p className="text-xs text-gray-500 mt-2">This question will be shown to students during exit survey.</p>
-                  </div>
-                )}
-                <div className="flex gap-4 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="flex-1 bg-gray-100 text-gray-500 px-6 py-4 rounded-2xl font-black hover:bg-gray-200 transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
-                  >
-                    Save {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
-                  </button>
-                </div>
-              </form>
-            </div>
+                 {/* === SECTION 2: Employer Questions === */}
+                  {modalType === 'peo' && activeFormTab === 'employer' && (
+                   <div className="border border-emerald-100 rounded-3xl p-5 bg-emerald-50/30">
+                     <div className="flex items-center justify-between mb-4">
+                       <div className="flex items-center gap-2">
+                         <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
+                           <Briefcase size={18} />
+                         </div>
+                         <div>
+                           <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Employer Survey Questions</h4>
+                           <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions asked to employers of graduates, mapped to this Program Outcome.</p>
+                         </div>
+                       </div>
+                       <div className="flex gap-2">
+                         <button
+                           type="button"
+                           onClick={() => appendDraftQuestion(setEmployerSurveyDrafts, editingItem || null, false)}
+                           className="flex items-center gap-1.5 px-3 py-2 bg-white text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200 hover:bg-emerald-50 transition-all"
+                         >
+                           <Plus size={14} /> Add PO Question
+                         </button>
+                       </div>
+                     </div>
+                     <div className="space-y-3">
+                       {employerSurveyDrafts.filter(d => !d._deleted).length === 0 && (
+                         <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
+                           No Employer questions. Click "Add PO Question" to add one.
+                         </p>
+                       )}
+                       {employerSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
+                         <div key={draft._tempId} className="bg-white rounded-2xl p-4 border border-emerald-100 shadow-sm">
+                           <div className="flex items-center justify-between mb-2">
+                             <div className="flex items-center gap-2">
+                               <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg uppercase tracking-wider">
+                                 Employer Q{idx + 1}
+                               </span>
+                             </div>
+                             <div className="flex items-center gap-1.5">
+                               <button
+                                 type="button"
+                                 onClick={() => toggleDraftLock(setEmployerSurveyDrafts, draft._tempId!)}
+                                 className={`p-1.5 rounded-lg transition-all ${
+                                   draft.is_locked
+                                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                     : 'bg-gray-100 text-gray-500 hover:gray-200'
+                                 }`}
+                                 title={draft.is_locked ? 'Unlock question' : 'Lock question'}
+                               >
+                                 {draft.is_locked ? <Lock size={14} /> : <Unlock size={14} />}
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => removeDraftQuestion(setEmployerSurveyDrafts, draft._tempId!)}
+                                 className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all"
+                                 title="Delete question"
+                               >
+                                 <Trash2 size={14} />
+                               </button>
+                             </div>
+                           </div>
+                           {renderDraftQuestionEditor(draft, setEmployerSurveyDrafts, 'EMPLOYER')}
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+
+                  {/* === SECTION 3: Alumni Questions === */}
+                  {modalType === 'peo' && activeFormTab === 'alumni' && (
+                   <div className="border border-indigo-100 rounded-3xl p-5 bg-indigo-50/30">
+                     <div className="flex items-center justify-between mb-4">
+                       <div className="flex items-center gap-2">
+                       <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center">
+                         <GraduationCap size={18} />
+                       </div>
+                       <div>
+                         <h4 className="font-black text-gray-900 text-sm uppercase tracking-wider">Alumni Survey Questions</h4>
+                         <p className="text-[11px] text-gray-500 mt-0.5">PO-specific questions for alumni respondents mapped to this Program Outcome.</p>
+                       </div>
+                       </div>
+                       <div className="flex gap-2">
+                         <button
+                           type="button"
+                           onClick={() => appendDraftQuestion(setAlumniSurveyDrafts, editingItem || null, false)}
+                           className="flex items-center gap-1.5 px-3 py-2 bg-white text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-all"
+                         >
+                           <Plus size={14} /> Add PO Question
+                         </button>
+                       </div>
+                     </div>
+                     <div className="space-y-3">
+                       {alumniSurveyDrafts.filter(d => !d._deleted).length === 0 && (
+                         <p className="text-xs italic text-gray-400 text-center py-6 bg-white rounded-2xl border border-dashed border-gray-200">
+                           No Alumni questions. Click "Add PO Question" to add one.
+                         </p>
+                       )}
+                       {alumniSurveyDrafts.filter(d => !d._deleted).map((draft, idx) => (
+                         <div key={draft._tempId} className="bg-white rounded-2xl p-4 border border-indigo-100 shadow-sm">
+                           <div className="flex items-center justify-between mb-2">
+                             <div className="flex items-center gap-2">
+                               <span className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase tracking-wider">
+                                 Alumni Q{idx + 1}
+                               </span>
+                             </div>
+                             <div className="flex items-center gap-1.5">
+                               <button
+                                 type="button"
+                                 onClick={() => toggleDraftLock(setAlumniSurveyDrafts, draft._tempId!)}
+                                 className={`p-1.5 rounded-lg transition-all ${
+                                   draft.is_locked
+                                     ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                     : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                 }`}
+                                 title={draft.is_locked ? 'Unlock question (editable by alumni)' : 'Lock question (prevents alumni-side edits)'}
+                               >
+                                 {draft.is_locked ? <Lock size={14} /> : <Unlock size={14} />}
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => removeDraftQuestion(setAlumniSurveyDrafts, draft._tempId!)}
+                                 className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all"
+                                 title="Delete question"
+                               >
+                                 <Trash2 size={14} />
+                               </button>
+                             </div>
+                           </div>
+                           {renderDraftQuestionEditor(draft, setAlumniSurveyDrafts, 'ALUMNI')}
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+
+                 {modalType === 'ga' && (
+                   <div>
+                     <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Exit Survey Question</label>
+                     <textarea
+                       required
+                       value={formData.exit_survey_question_text}
+                       onChange={(e) => setFormData({...formData, exit_survey_question_text: e.target.value})}
+                       placeholder="Enter the exit survey question for this GA..."
+                       className="w-full h-24 bg-gray-50 border-none rounded-2xl px-6 py-4 font-bold text-gray-700 focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+                     />
+                     <p className="text-xs text-gray-500 mt-2">This question will be shown to students during exit survey.</p>
+                   </div>
+                 )}
+
+                 {/* Sticky Buttons */}
+                 <div className="sticky bottom-0 bg-white border-t border-gray-200 pt-4 mt-2">
+                   <div className="flex gap-4">
+                   <button
+                     type="button"
+                     onClick={() => setIsModalOpen(false)}
+                     className="flex-1 bg-gray-100 text-gray-500 px-6 py-4 rounded-2xl font-black hover:bg-gray-200 transition-all"
+                   >
+                     Cancel
+                   </button>
+                   <button
+                     type="submit"
+                     className="flex-1 bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
+                   >
+                     Save {modalType === 'peo' ? 'PO' : modalType.toUpperCase()}
+                   </button>
+                   </div>
+                 </div>
+               </form>
+             </div>
           </motion.div>
         </div>
       )}

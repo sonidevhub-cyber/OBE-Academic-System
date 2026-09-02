@@ -17,6 +17,7 @@ from assessments.models import (
     INTERNAL_ASSESSMENT_TYPES,
 )
 from assessments.services.clo_service import CLOService
+from core.models.course import Course
 from .models import SemesterCLOMasterCache, CourseCLOMasterEntry
 
 
@@ -137,9 +138,17 @@ def sync_stale_clo_master_cache(
     ).filter(
         Q(assessment_status="ASSESSMENT_DONE")
         | Q(internal_complete_awaiting_final=True)
-    )
+    ).select_related('course')
+    # valid_course_ids here comes from CurriculumVersionCourse which only
+    # lists Compulsory courses. Keep elective/selective sessions even when
+    # not in that whitelist since they are registered dynamically via
+    # StudentElectiveEnrollment.
     if valid_course_ids:
-        reportable_sessions = reportable_sessions.filter(course__id__in=valid_course_ids)
+        reportable_sessions = [
+            s for s in reportable_sessions
+            if s.course_id in valid_course_ids
+            or s.course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+        ]
 
     for session in reportable_sessions:
         if force or session_needs_clo_cache_sync(session, master_cache):
@@ -174,7 +183,10 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
         expected_courses_count = 0
         valid_course_ids = []
         if curriculum:
-            # Use version_courses (through CurriculumVersionCourse) which has semester_no
+            # Use version_courses (through CurriculumVersionCourse) which has semester_no.
+            # This list only contains Compulsory courses; Elective/Selective are
+            # registered dynamically via StudentElectiveEnrollment so we never
+            # gate them against this list.
             semester_courses = curriculum.version_courses.filter(
                 semester_no=semester.number if semester else None,
                 is_active=True
@@ -182,8 +194,10 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
             expected_courses_count = semester_courses.count()
             valid_course_ids = [cvc.course.id for cvc in semester_courses]
 
-            # Check if this course is actually in the curriculum version's valid courses
-            if course.id not in valid_course_ids:
+            # Elective/Selective courses live outside CurriculumVersionCourse
+            # so skip the whitelist check for those offering types.
+            is_elective_offering = course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+            if not is_elective_offering and course.id not in valid_course_ids:
                 return  # Don't add this course if it's not in the curriculum for this semester
         # If no curriculum version, proceed without valid course check
 
@@ -231,15 +245,26 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
             # finalized assessments yet). Use StudentCLOScore simple
             # ratio so pending caches still get a baseline.
             # ----------------------------------------------------------
+            from obe.services import _get_enrolled_student_ids_for_course_session
+            enrolled_ids = _get_enrolled_student_ids_for_course_session(instance)
+            enrolled_str_ids = {str(sid) for sid in enrolled_ids}
+
             student_clo_scores = StudentCLOScore.objects.filter(
                 course_session=instance
             ).select_related('student', 'clo', 'clo__course')
-            if curriculum:
+            # Skip the curriculum_version whitelist filter for
+            # Elective/Selective offerings — they live outside
+            # CurriculumVersionCourse so their CLO rows may carry
+            # a different curriculum_version or NULL.
+            is_elective_offering = course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+            if curriculum and not is_elective_offering:
                 student_clo_scores = student_clo_scores.filter(
                     clo__curriculum_version=curriculum
                 )
 
             for score in student_clo_scores:
+                if str(score.student_id) not in enrolled_str_ids:
+                    continue
                 kpi = score.clo.kpi_target
                 is_achieved = score.attainment >= kpi
                 entry_key = (score.clo_id, score.student_id)
@@ -281,7 +306,11 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
                     assessment_type__in=assessment_types
                 )
 
-            if curriculum:
+            # Elective/Selective courses are registered dynamically and may not have
+            # their CLO rows attached to this specific batch curriculum_version.
+            # Drop the curriculum whitelist filter for those offering types.
+            is_elective_offering = course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+            if curriculum and not is_elective_offering:
                 course_clos = list(
                     CLO.objects.filter(
                         course=course,
@@ -384,8 +413,15 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
             master_cache=master_cache,
             is_active=True
         )
+        # valid_course_ids here = CurriculumVersionCourse (Compulsory only).
+        # Expand the filter so Elective/Selective sessions with entries also
+        # advance total_courses_finalized; otherwise the cache shows
+        # not-fully-compiled and coordinator reports miss the elective column.
         if valid_course_ids:
-            finalized_entries_query = finalized_entries_query.filter(course__id__in=valid_course_ids)
+            finalized_entries_query = finalized_entries_query.filter(
+                Q(course__id__in=valid_course_ids)
+                | Q(course__offering_type__in=(Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE))
+            )
         finalized_course_sessions = finalized_entries_query.values_list('course_session_id', flat=True).distinct()
         final_count = finalized_course_sessions.count()
 

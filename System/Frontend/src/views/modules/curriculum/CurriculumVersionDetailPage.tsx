@@ -25,9 +25,14 @@ import {
   Edit,
   Trash2,
   UserPlus,
-  Layers,
+   Layers,
+   X,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import {
+  electivesApi,
+  CourseOfferingType,
+} from '../../../api/electivesService';
 
 interface CurriculumVersionDetailPageProps {
   id?: string;
@@ -133,12 +138,16 @@ const CurriculumVersionDetailPage: React.FC<
   const [editingCourse, setEditingCourse] =
   useState<any>(null);
   const [editCourseData, setEditCourseData] = useState({
-  name: "",
-  code: "",
-  credit_hours: "",
-  course_type: "",
-  semester_no: "",
-});
+    name: "",
+    code: "",
+    credit_hours: "",
+    course_type: "",
+    semester_no: "",
+    offering_type: "COMPULSORY",
+    parent_course_id: "" as string | null,
+    selective_group_id: "" as string | null,
+    elective_group_id: "" as string | null,
+  });
   const [syncing, setSyncing] = useState(false);
 
   const [activeTab, setActiveTab] =
@@ -181,13 +190,29 @@ const CurriculumVersionDetailPage: React.FC<
     semester_no: 1,
   });
 
-  const [newCourseData, setNewCourseData] = useState({
+  const [newCourseData, setNewCourseData] = useState<{
+    name: string;
+    code: string;
+    credit_hours: number;
+    course_type: string;
+    parent_course_id: string;
+    offering_type: CourseOfferingType;
+    selective_group_id: string | null;
+    elective_group_id: string | null;
+    eligibility_rules: Array<{ student_attribute_field: string; student_attribute_value: string }>;
+  }>({
     name: '',
     code: '',
     credit_hours: 3,
     course_type: 'LECTURE',
     parent_course_id: '',
+    offering_type: 'COMPULSORY',
+    selective_group_id: null,
+    elective_group_id: null,
+    eligibility_rules: [],
   });
+
+  const [activeSelectiveGroupId, setActiveSelectiveGroupId] = useState<string | null>(null);
 
   /* ============================================================
      CREATE VERSION
@@ -1515,11 +1540,15 @@ const CurriculumVersionDetailPage: React.FC<
   setEditingCourse(course);
 
   setEditCourseData({
-    name: course.course_name || "",
-    code: course.course_code || "",
+    name: course.course_name || course.name || "",
+    code: course.course_code || course.code || "",
     credit_hours: course.credit_hours ?? "",
     course_type: course.course_type || "",
     semester_no: course.semester_no ?? "",
+    offering_type: course.offering_type || "COMPULSORY",
+    parent_course_id: course.parent_course_id || course.parent_course || null,
+    selective_group_id: course.selective_group_id || null,
+    elective_group_id: course.elective_group_id || null,
   });
 };
 const handleUpdateCourse = async (
@@ -1537,13 +1566,16 @@ const handleUpdateCourse = async (
     return;
   }
 
-  const payload = {
+  const payload: any = {
     name: editCourseData.name,
     code: editCourseData.code,
     credit_hours: Number(editCourseData.credit_hours),
     course_type: editCourseData.course_type,
     semester_no: Number(editCourseData.semester_no),
-    batch_id: activeBatch?.id,
+    offering_type: editCourseData.offering_type,
+    parent_course: editCourseData.parent_course_id || null,
+    elective_group_id: editCourseData.offering_type === "ELECTIVE" ? editCourseData.elective_group_id || null : null,
+    selective_group_id: editCourseData.offering_type === "SELECTIVE" ? editCourseData.selective_group_id || null : null,
   };
 
   console.log("🔥 UPDATE PAYLOAD:", payload);
@@ -1553,11 +1585,10 @@ const handleUpdateCourse = async (
   try {
     setSubmitting(true);
 
-    const response =await curriculumService.updateCourse(
-        version.id,
-        editingCourse.id,
-        payload
-      );
+    const response = await curriculumService.updateCourseFields(
+      editingCourse.course || editingCourse.id,
+      payload
+    );
 
     console.log("✅ UPDATE API RESPONSE:", response);
 
@@ -1781,10 +1812,14 @@ const handleUpdateCourse = async (
   };
 
   /* ============================================================
-     ADD COURSE
-  ============================================================ */
+     LOAD GROUPS FOR MODAL
+     ============================================================ */
 
-  const handleAddCourse = async () => {
+  /* ============================================================
+     ADD COURSE
+     ============================================================ */
+
+   const handleAddCourse = async (keepOpen: boolean = false) => {
     if (!version) return;
 
     const action = async () => {
@@ -1843,22 +1878,38 @@ const handleUpdateCourse = async (
           return;
         }
 
+        let resolvedSelectiveGroupId: string | null =
+          newCourseData.selective_group_id &&
+          newCourseData.selective_group_id !== '__NEW__'
+            ? String(newCourseData.selective_group_id)
+            : activeSelectiveGroupId;
+
+        const isCreatingNewGroup =
+          newCourseData.offering_type === 'SELECTIVE' &&
+          !resolvedSelectiveGroupId;
+
+        const createCoursePayload: any = {
+          name: newCourseData.name,
+          code: newCourseData.code,
+          credit_hours: newCourseData.credit_hours,
+          course_type: newCourseData.course_type,
+          program_id: version.program,
+          semester_no: newCourse.semester_no,
+           parent_course: newCourseData.parent_course_id || undefined,
+           offering_type: newCourseData.offering_type,
+           curriculum_version_id: version.id || undefined,
+         };
+
+        if (newCourseData.offering_type === 'ELECTIVE' && newCourseData.elective_group_id) {
+          createCoursePayload.elective_group_id = newCourseData.elective_group_id;
+        }
+
+        if (newCourseData.offering_type === 'SELECTIVE' && resolvedSelectiveGroupId) {
+          createCoursePayload.selective_group_id = resolvedSelectiveGroupId;
+        }
+
         const createCourseResponse =
-          await curriculumService.createCourse({
-            name: newCourseData.name,
-            code: newCourseData.code,
-            credit_hours:
-              newCourseData.credit_hours,
-            course_type:
-              newCourseData.course_type,
-            program_id:
-              version.program,
-            semester_no:
-              newCourse.semester_no,
-            parent_course:
-              newCourseData.parent_course_id ||
-              undefined,
-          });
+          await curriculumService.createCourse(createCoursePayload);
 
         const createdCourse =
           createCourseResponse.data?.data ||
@@ -1866,6 +1917,18 @@ const handleUpdateCourse = async (
 
         const courseIdToAdd =
           createdCourse.id;
+
+       // Capture auto-created selective_group_id from backend response
+       if (
+         newCourseData.offering_type === 'SELECTIVE' &&
+         !resolvedSelectiveGroupId &&
+         createdCourse.selective_group_id
+       ) {
+         resolvedSelectiveGroupId = String(
+           createdCourse.selective_group_id
+         );
+         setActiveSelectiveGroupId(resolvedSelectiveGroupId);
+       }
 
        if (!courseIdToAdd) {
   throw new Error(
@@ -1893,30 +1956,79 @@ await curriculumService.addCourseToVersion(
   activeBatch?.id
 );
 
-        toast.success(
-          'Course added successfully!'
-        );
+// ----------------------------------------------------
+// Create eligibility rules if SELECTIVE and rules exist
+// ----------------------------------------------------
 
-        setShowAddCourseModal(false);
-
-        setNewCourse({
-          semester_no:
-            activeBatchMode === 'progressive' &&
-            activeBatchCurrentSemester
-              ? activeBatchCurrentSemester
-              : 1,
+if (
+  newCourseData.offering_type === 'SELECTIVE' &&
+  resolvedSelectiveGroupId &&
+  newCourseData.eligibility_rules.length > 0
+) {
+  for (const rule of newCourseData.eligibility_rules) {
+    if (
+      rule.student_attribute_field.trim() &&
+      rule.student_attribute_value.trim()
+    ) {
+      try {
+        await electivesApi.createEligibilityRule({
+          selective_group_id: resolvedSelectiveGroupId,
+          course_id: String(courseIdToAdd),
+          student_attribute_field: rule.student_attribute_field.trim(),
+          student_attribute_value: rule.student_attribute_value.trim(),
         });
+      } catch (ruleErr: any) {
+        console.warn('Eligibility rule creation failed:', ruleErr);
+      }
+    }
+  }
+}
 
-        setNewCourseData({
-          name: '',
-          code: '',
-          credit_hours: 3,
-          course_type: 'LECTURE',
-          parent_course_id: '',
-        });
+         toast.success(
+           'Course added successfully!'
+         );
 
-        await fetchVersion();
-        await loadAllCourses();
+         if (keepOpen || newCourseData.offering_type === 'SELECTIVE') {
+           // Keep modal open for adding more courses to the same selective group
+           setNewCourseData({
+             name: '',
+             code: '',
+             credit_hours: 3,
+             course_type: 'LECTURE',
+             parent_course_id: '',
+             offering_type: newCourseData.offering_type,
+             selective_group_id: null,
+             elective_group_id: null,
+             eligibility_rules: [],
+           });
+         } else {
+          setShowAddCourseModal(false);
+
+          setNewCourse({
+            semester_no:
+              activeBatchMode === 'progressive' &&
+              activeBatchCurrentSemester
+                ? activeBatchCurrentSemester
+                : 1,
+          });
+
+          setNewCourseData({
+            name: '',
+            code: '',
+            credit_hours: 3,
+            course_type: 'LECTURE',
+            parent_course_id: '',
+            offering_type: 'COMPULSORY',
+            selective_group_id: null,
+            elective_group_id: null,
+            eligibility_rules: [],
+          });
+
+          setActiveSelectiveGroupId(null);
+         }
+
+         await fetchVersion();
+         await loadAllCourses();
       } catch (err: any) {
         toast.error(
           err.response?.data?.message ||
@@ -2940,16 +3052,17 @@ await curriculumService.addCourseToVersion(
       {showAddCourseModal &&
         canEditCurrentBatch && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col">
+              <div className="p-6 pb-4 flex-shrink-0">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center">
+                  <Plus className="w-5 h-5 mr-2 text-blue-600" />
+                  Add Course to Semester{' '}
+                  {newCourse.semester_no}
+                </h2>
+              </div>
 
-              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-                <Plus className="w-5 h-5 mr-2 text-blue-600" />
-
-                Add Course to Semester{' '}
-                {newCourse.semester_no}
-              </h2>
-
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto px-6">
+                <div className="space-y-4 pb-4">
 
                 {/* COURSE TYPE */}
 
@@ -3232,8 +3345,13 @@ await curriculumService.addCourseToVersion(
                           ...prev,
                           parent_course_id:
                             '',
+                          selective_group_id: null,
+                          elective_group_id: null,
+                          eligibility_rules: [],
                         })
                       );
+
+                      setActiveSelectiveGroupId(null);
                     }}
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   />
@@ -3262,45 +3380,116 @@ await curriculumService.addCourseToVersion(
                     )}
                 </div>
 
-                {/* BUTTONS */}
+                 {/* COURSE OFFERING TYPE */}
 
-                <div className="flex space-x-3 pt-4">
+                 <div className="space-y-3 pt-2 border-t border-gray-100">
+                   <label className="block text-sm font-medium text-gray-700 mb-1">
+                     Course Offering Type
+                   </label>
 
-                  <button
-                    onClick={() =>
-                      setShowAddCourseModal(
-                        false
-                      )
-                    }
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
-                  >
-                    Cancel
-                  </button>
+                   <select
+                      value={newCourseData.offering_type}
+                      onChange={(e) => {
+                        const newType = e.target.value as CourseOfferingType;
+                        setNewCourseData((prev) => ({
+                          ...prev,
+                          offering_type: newType,
+                          elective_group_id: null,
+                          selective_group_id: null,
+                          eligibility_rules: [],
+                        }));
+                        if (newType !== 'SELECTIVE') {
+                          setActiveSelectiveGroupId(null);
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                     <option value="COMPULSORY">
+                       Compulsory — All students auto-enrolled
+                     </option>
+                     <option value="ELECTIVE">
+                       Elective — Standalone optional (students pick 0..N)
+                     </option>
+                     <option value="SELECTIVE">
+                       Selective — Mandatory choose-exactly-one from group
+                     </option>
+                   </select>
+                 </div>
 
-                  <button
-                    onClick={
-                      handleAddCourse
-                    }
-                    disabled={
-                      submitting ||
-                      !newCourseData.name ||
-                      !newCourseData.code ||
-                      !newCourseData.credit_hours
-                    }
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-400 shadow-md flex items-center justify-center"
-                  >
+                {/* CONDITIONAL: SELECTIVE */}
+                 {newCourseData.offering_type === 'SELECTIVE' && (
+                   <div className="space-y-3">
+                     <div className="bg-amber-50 p-3 rounded-lg flex items-start space-x-2">
+                       <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                       <p className="text-xs text-amber-700">
+                         This is a Selective course. The system will auto-create a
+                         selective group for this course. Add multiple courses to
+                         the same group by keeping the form open and clicking "Add Course"
+                         for each course.
+                       </p>
+                     </div>
+                     <p className="text-xs text-gray-500">
+                       Students MUST select exactly one course from the selective
+                       group you create.
+                     </p>
+                   </div>
+                 )}
+
+                <div className="px-6 pb-6 pt-2 border-t border-gray-100 flex-shrink-0">
+                  <div className="flex space-x-3">
+
+                   <button
+                     onClick={() =>
+                       setShowAddCourseModal(false)
+                     }
+                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+                   >
+                     Cancel
+                   </button>
+
+                   {newCourseData.offering_type === 'SELECTIVE' && (
+                   <button
+                     onClick={() => handleAddCourse(true)}
+                     disabled={
+                       submitting ||
+                       !newCourseData.name ||
+                       !newCourseData.code ||
+                       !newCourseData.credit_hours
+                     }
+                     className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium disabled:bg-gray-400 shadow-md flex items-center justify-center"
+                   >
+                    {submitting ? (
+                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      'Add Course'
+                    )}
+                   </button>
+                   )}
+
+                   <button
+                     onClick={() => handleAddCourse(false)}
+                     disabled={
+                       submitting ||
+                       !newCourseData.name ||
+                       !newCourseData.code ||
+                       !newCourseData.credit_hours
+                     }
+                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-400 shadow-md flex items-center justify-center"
+                   >
                     {submitting ? (
                       <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
                       'Add to Version'
                     )}
-                  </button>
+                   </button>
 
                 </div>
+                </div>
+              </div>
+              </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
       {/* ========================================================
           MAIN CONTENT
@@ -3334,19 +3523,21 @@ await curriculumService.addCourseToVersion(
                       semester_no: semesterToUse,
                     });
 
-                    setNewCourseData({
-                      name: '',
-                      code: '',
-                      credit_hours: 3,
-                      course_type:
-                        'LECTURE',
-                      parent_course_id:
-                        '',
-                    });
+                     setNewCourseData({
+                       name: '',
+                       code: '',
+                       credit_hours: 3,
+                       course_type: 'LECTURE',
+                       parent_course_id: '',
+                       offering_type: 'COMPULSORY',
+                       selective_group_id: null,
+                       elective_group_id: null,
+                       eligibility_rules: [],
+                     });
 
-                    setShowAddCourseModal(
-                      true
-                    );
+                     setActiveSelectiveGroupId(null);
+
+                     setShowAddCourseModal(true);
                   }}
                   className="flex items-center px-4 py-2 border border-dashed border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors text-sm font-semibold"
                 >
@@ -4175,7 +4366,85 @@ await curriculumService.addCourseToVersion(
 
       <form onSubmit={handleUpdateCourse}>
 
+        {/* Course Type */}
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Course Type
+          </label>
+
+          <select
+            value={editCourseData.course_type}
+            onChange={(e) =>
+              setEditCourseData({
+                ...editCourseData,
+                course_type: e.target.value,
+              })
+            }
+            className="w-full border border-gray-300 rounded-lg px-3 py-2"
+          >
+            <option value="LECTURE">Theory (Lecture)</option>
+            <option value="LAB">Practical (Lab)</option>
+          </select>
+        </div>
+
+        {/* Parent Course (only shown when course_type is LAB) */}
+
+        {editCourseData.course_type === "LAB" && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Parent Theory Course
+            </label>
+
+            <select
+              value={editCourseData.parent_course_id || ""}
+              onChange={(e) =>
+                setEditCourseData({
+                  ...editCourseData,
+                  parent_course_id: e.target.value || null,
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+            >
+              <option value="">Select Theory Course...</option>
+
+              {(() => {
+                const versionCourses =
+                  version.courses_by_semester
+                    ? Object.values(version.courses_by_semester).flat()
+                    : [];
+
+                const versionCourseIds = new Set(
+                  versionCourses.map((vc: any) => vc.course)
+                );
+
+                const versionLabParentIds = new Set(
+                  versionCourses
+                    .filter((vc: any) => vc.course_type === "LAB")
+                    .map((vc: any) => vc.parent_course)
+                );
+
+                return allCourses
+                  .filter(
+                    (c: any) =>
+                      c.course_type === "LECTURE" &&
+                      Number(c.semester_number) ===
+                        Number(editCourseData.semester_no) &&
+                      versionCourseIds.has(c.id) &&
+                      !versionLabParentIds.has(c.id)
+                  )
+                  .map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ));
+              })()}
+            </select>
+          </div>
+        )}
+
         {/* Course Name */}
+
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Course Name
@@ -4195,70 +4464,53 @@ await curriculumService.addCourseToVersion(
           />
         </div>
 
-        {/* Course Code */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Course Code
-          </label>
+        {/* Course Code + Credit Hours */}
 
-          <input
-            type="text"
-            value={editCourseData.code}
-            onChange={(e) =>
-              setEditCourseData({
-                ...editCourseData,
-                code: e.target.value,
-              })
-            }
-            className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            required
-          />
-        </div>
+        <div className="flex space-x-4 mb-4">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Course Code
+            </label>
 
-        {/* Credit Hours */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Credit Hours
-          </label>
+            <input
+              type="text"
+              value={editCourseData.code}
+              onChange={(e) =>
+                setEditCourseData({
+                  ...editCourseData,
+                  code: e.target.value,
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+              required
+            />
+          </div>
 
-          <input
-            type="number"
-            value={editCourseData.credit_hours}
-            onChange={(e) =>
-              setEditCourseData({
-                ...editCourseData,
-                credit_hours: e.target.value,
-              })
-            }
-            className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            required
-          />
-        </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Credit Hours
+            </label>
 
-        {/* Course Type */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Course Type
-          </label>
-
-          <select
-            value={editCourseData.course_type}
-            onChange={(e) =>
-              setEditCourseData({
-                ...editCourseData,
-                course_type: e.target.value,
-              })
-            }
-            className="w-full border border-gray-300 rounded-lg px-3 py-2"
-          >
-            <option value="">Select Type</option>
-            <option value="LECTURE">Lecture</option>
-            <option value="LAB">Lab</option>
-          </select>
+            <input
+              type="number"
+              min="1"
+              max="6"
+              value={editCourseData.credit_hours}
+              onChange={(e) =>
+                setEditCourseData({
+                  ...editCourseData,
+                  credit_hours: e.target.value,
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+              required
+            />
+          </div>
         </div>
 
         {/* Semester */}
-        <div className="mb-5">
+
+        <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Semester
           </label>
@@ -4278,7 +4530,37 @@ await curriculumService.addCourseToVersion(
           />
         </div>
 
+        {/* Course Offering Type */}
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Course Offering Type
+          </label>
+
+          <select
+            value={editCourseData.offering_type}
+            onChange={(e) =>
+              setEditCourseData({
+                ...editCourseData,
+                offering_type: e.target.value as any,
+              })
+            }
+            className="w-full border border-gray-300 rounded-lg px-3 py-2"
+          >
+            <option value="COMPULSORY">
+              Compulsory — All students auto-enrolled
+            </option>
+            <option value="ELECTIVE">
+              Elective — Standalone optional (students pick 0..N)
+            </option>
+            <option value="SELECTIVE">
+              Selective — Mandatory choose-exactly-one from group
+            </option>
+          </select>
+        </div>
+
         {/* Buttons */}
+
         <div className="flex justify-end gap-3">
 
           <button

@@ -124,6 +124,9 @@ def _create_retake_assessments_from_snapshot(retake, snapshot_data):
         existing = Assessment.objects.filter(
             course_retake=retake,
             assessment_type=ass_data["assessment_type"],
+            title=ass_data["title"],
+            total_marks=ass_data["total_marks"],
+            weightage=ass_data["weightage"],
         ).first()
         if existing:
             continue
@@ -153,6 +156,19 @@ def _create_retake_assessments_from_snapshot(retake, snapshot_data):
                 clo_id=q_data.get("clo_id"),
             ))
         Question.objects.bulk_create(question_objects)
+
+    created_count = Assessment.objects.filter(course_retake=retake).count()
+    expected_count = len(snapshot_data.get("assessments", []))
+    if created_count != expected_count:
+        logger.error(
+            f"[Retake Signals] Mismatch for retake {retake.id}: "
+            f"expected {expected_count} assessments, created {created_count}. "
+            f"Check for duplicate-type assessments in original course."
+        )
+    else:
+        logger.info(
+            f"[Retake Signals] Successfully created {created_count} retake assessments for retake {retake.id}"
+        )
 
 
 @receiver(post_save, sender="retake.CourseRetake")

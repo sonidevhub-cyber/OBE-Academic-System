@@ -87,7 +87,7 @@ const AlumniTab: React.FC = () => {
     }
     setBatchStudentsLoading(true);
     try {
-      const res = await studentService.getAllStudents({ batch: batch.id, role: 'alumni' } as any);
+      const res = await studentService.getAllStudents({ batch: batch.id, role: 'alumni', page_size: 500 } as any);
       const payload = res.data;
       const list = Array.isArray(payload)
         ? payload

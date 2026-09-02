@@ -195,7 +195,8 @@ class CourseCLOReportView(APIView):
         order_number_to_clo = {clo.order_number: clo for clo in clos}
 
         # Pre-fetch question and mark data for assessment mapping / effectiveness
-        students = list(get_students_for_batch(session.batch))
+        from ..services import get_students_enrolled_in_course
+        students = list(get_students_enrolled_in_course(session))
         questions = list(
             Question.objects.filter(assessment__in=assessments)
             .select_related('assessment', 'clo')

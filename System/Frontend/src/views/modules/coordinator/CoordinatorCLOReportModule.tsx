@@ -182,7 +182,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
       const row: any[] = [idx + 1, student.reg_no, student.name];
       courseColumns.forEach(({ course, clo }) => {
         const score = student.courses?.[course.course_id]?.[clo.clo_code];
-        row.push(score ? `${score.score.toFixed(1)}%` : '-');
+        row.push(score ? `${score.score.toFixed(1)}%` : 'N/A');
       });
       rows.push(row);
     });
@@ -276,16 +276,23 @@ const CoordinatorCLOReportModule: React.FC = () => {
               const student = report.students[R - 8];
               const course = courseColumns[C - 3];
               const score = student?.courses?.[course.course.course_id]?.[course.clo.clo_code];
+              const isEnrolled = score !== null && score !== undefined;
               const achieved = score?.achieved;
+              let fillRgb = 'F3F4F6';
+              let fontRgb = '9CA3AF';
+              if (isEnrolled) {
+                fillRgb = achieved ? 'DCFCE7' : 'FEE2E2';
+                fontRgb = achieved ? '166534' : '991B1B';
+              }
               cell.s = {
                 fill: {
                   fgColor: {
-                    rgb: achieved ? 'DCFCE7' : 'FEE2E2',
+                    rgb: fillRgb,
                   },
                 },
                 font: {
                   color: {
-                    rgb: achieved ? '166534' : '991B1B',
+                    rgb: fontRgb,
                   },
                   bold: true,
                 },
@@ -692,9 +699,13 @@ const CoordinatorCLOReportModule: React.FC = () => {
                         course.clos.map((clo) => {
                           const courseData = student.courses[course.course_id];
                           const cloData = courseData ? courseData[clo.clo_code] : null;
+                          const isEnrolled = cloData !== null && cloData !== undefined;
+                          const cellClass = isEnrolled
+                            ? (cloData!.achieved ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')
+                            : 'bg-gray-50 text-gray-400 italic';
                           return (
-                            <td key={`${student.sr_no}-${course.course_id}-${clo.clo_id}`} className={`px-3 py-2 text-center border border-gray-100 font-bold ${cloData ? (cloData.achieved ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700') : 'text-gray-400'}`}>
-                              {cloData ? `${cloData.score}%` : '-'}
+                            <td key={`${student.sr_no}-${course.course_id}-${clo.clo_id}`} className={`px-3 py-2 text-center border border-gray-100 font-bold ${cellClass}`}>
+                              {isEnrolled ? `${cloData!.score}%` : 'N/A'}
                             </td>
                           );
                         })

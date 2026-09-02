@@ -10,7 +10,7 @@ from core.models import Batch, Semester, Program
 from students.models import Student
 from ..models import GA, CLOGAMapping, CourseSession, CourseGAScore, GACQIRecord, GACQIResubmissionHistory, StudentCLOScore, ExitSurveyQuestion, ExitSurveyCycle, ExitSurveyResponse, ExitSurveyTemplate, get_ga_indirect_score, CourseFeedbackGAScore, GAReport, GAMasterCache, StudentGAEntry
 from ..serializers import GASerializer, CLOGAMappingSerializer, CourseGAScoreSerializer, GACQIRecordSerializer, GACQIResubmissionHistorySerializer, CourseSessionSerializer, ExitSurveyQuestionSerializer, ExitSurveyCycleSerializer, ExitSurveyResponseSerializer
-from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions, calculate_weighted_ga_score
+from ..services import calculate_ga_attainment_semester_cohort, calculate_ga_attainment_cumulative_cohort, calculate_ga_attainment_semester_student, calculate_ga_attainment_cumulative_student, check_and_trigger_ga_cqi, calculate_all_course_ga_scores, calculate_semester_ga_report, get_students_for_batch, get_effective_course_sessions, calculate_weighted_ga_score, _get_enrolled_student_ids_for_course_session
 from django.utils import timezone
 from retake.report_access_wrapper import get_ga_report_with_invalidation_check
 
@@ -516,20 +516,19 @@ class GACQIRecordDetailView(APIView):
         if not is_coordinator:
             return Response({'error': 'Only coordinators can update root cause/remedial plan'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Save history if there are changes to root_cause or remedial_plan
-        if 'root_cause' in request.data or 'remedial_plan' in request.data:
+        # Save history if there are changes to root_cause
+        if 'root_cause' in request.data:
             GACQIResubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 hod_comment_snapshot=cqi.hod_comment,
                 status_at_time=cqi.status
             )
 
         serializer = GACQIRecordSerializer(cqi, data=request.data, partial=True)
         if serializer.is_valid():
-            # If status is being set to PENDING, or if root/plan are provided and it was SENT_BACK
-            if request.data.get('status') == 'PENDING' or ((request.data.get('root_cause') or cqi.root_cause) and (request.data.get('remedial_plan') or cqi.remedial_plan) and cqi.status == 'SENT_BACK'):
+            # If status is being set to PENDING, or if root cause is provided and it was SENT_BACK
+            if request.data.get('status') == 'PENDING' or ((request.data.get('root_cause') or cqi.root_cause) and cqi.status == 'SENT_BACK'):
                 serializer.validated_data['status'] = 'PENDING'
                 serializer.validated_data['submitted_by'] = request.user
             serializer.save()
@@ -577,7 +576,6 @@ class GACQICreateView(APIView):
             GACQIResubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 hod_comment_snapshot=cqi.hod_comment,
                 status_at_time=cqi.status
             )
@@ -623,7 +621,6 @@ class GACQIApproveView(APIView):
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )
@@ -664,7 +661,6 @@ class GACQIRejectView(APIView):
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )
@@ -1044,6 +1040,12 @@ class BatchGAReportView(APIView):
                     if str(session.course_id) in allowed_course_ids
                 ]
             session_ids = [cs.id for cs in course_sessions]
+
+            # Pre-compute enrolled student IDs per session to prevent
+            # lab/theory cross-contribution and avoid N*M queries
+            session_enrolled_ids = {}
+            for session in course_sessions:
+                session_enrolled_ids[session.id] = _get_enrolled_student_ids_for_course_session(session)
             
             # Get all mappings for these courses and GAs
             mappings = CLOGAMapping.objects.filter(
@@ -1084,6 +1086,10 @@ class BatchGAReportView(APIView):
                     total_weight = Decimal('0')
                     
                     for session in course_sessions:
+                        enrolled_ids = session_enrolled_ids.get(session.id, set())
+                        if student_obj.student_id not in enrolled_ids:
+                            continue
+
                         key = (session.course_id, ga.id)
                         session_mappings = mappings_by_course_ga.get(key, [])
                         
@@ -1319,6 +1325,7 @@ class BatchGAReportView(APIView):
             course_session_id__in=all_session_ids_for_courses,
             ga_id__in=ga_ids_for_report,
             is_active=True,
+            is_stale=False,
         ).select_related('course_session')
         
         # Group by (session_id, ga_id)
@@ -1337,7 +1344,7 @@ class BatchGAReportView(APIView):
         for cf_score in all_feedback_scores:
             feedback_score_map[(cf_score.course_id, cf_score.ga_id)] = cf_score
         
-        enrolled_students_count = get_students_for_batch(batch).count()
+        from obe.services import get_students_enrolled_in_course
         
         response_items = []
         for ga_row in ga_report_rows:
@@ -1353,7 +1360,10 @@ class BatchGAReportView(APIView):
             for session in all_sessions_for_courses:
                 score = course_ga_score_map.get((session.id, ga.id))
                 course_ga_score = float(score.score) if score else None
-                enrolled_students = score.enrolled_students if score else enrolled_students_count
+                if score:
+                    enrolled_students = score.enrolled_students
+                else:
+                    enrolled_students = len(get_students_enrolled_in_course(session)) if session else get_students_for_batch(batch).count()
 
                 # Get Course Feedback (Indirect) score from prefetched map
                 cf_score = None
@@ -2045,7 +2055,6 @@ class GACQICloseView(APIView):
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { departmentService, courseService } from '../../../api/apiService';
 import obeService from '../../../api/obeService';
+import electivesApi, { ElectiveGroup } from '../../../api/electivesService';
 
 interface CourseModalProps {
   isOpen: boolean;
@@ -10,6 +11,9 @@ interface CourseModalProps {
   preSelectedDepartment?: number;
   preSelectedSemester?: number;
   canDefineCLO?: boolean;
+  batchUuid?: string;
+  semesterUuid?: string;
+  programUuid?: string;
 }
 
 interface Department {
@@ -57,7 +61,10 @@ const CourseModal: React.FC<CourseModalProps> = ({
   editingCourse,
   preSelectedDepartment,
   preSelectedSemester,
-  canDefineCLO = false
+  canDefineCLO = false,
+  batchUuid,
+  semesterUuid,
+  programUuid,
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'clos' | 'mapping'>('details');
 
@@ -66,21 +73,10 @@ const CourseModal: React.FC<CourseModalProps> = ({
     return t === 'LAB' ? 'LAB' : 'LECTURE';
   };
 
-  useEffect(() => {
-    // Keep course_type consistent if editingCourse or external code sets a non-normalized value.
-      setFormData((prev) => {
-      const normalized = normalizeCourseType(prev.course_type);
-      const isLAB = normalized === 'LAB';
-
-      // If switching away from LAB, clear parent_course to avoid sending mismatched values.
-      return {
-        ...prev,
-        course_type: normalized,
-        parent_course: isLAB ? prev.parent_course : ''
-      };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingCourse]);
+  const normalizeOfferingType = (v: any) => {
+    const t = String(v || '').trim().toUpperCase();
+    return t === 'ELECTIVE' ? 'ELECTIVE' : 'COMPULSORY';
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -88,6 +84,8 @@ const CourseModal: React.FC<CourseModalProps> = ({
     description: '',
     credits: 3,
     course_type: 'LECTURE',
+    offering_type: 'COMPULSORY',
+    elective_group_id: '',
     parent_course: '',
     department: preSelectedDepartment || '',
     semester: preSelectedSemester || ''
@@ -101,8 +99,29 @@ const CourseModal: React.FC<CourseModalProps> = ({
   const [departments, setDepartments] = useState<Department[]>([]);
   const [semesters, setSemesters] = useState<Semester[]>([]);
   const [parentCourseOptions, setParentCourseOptions] = useState<CourseOption[]>([]);
+  const [electiveGroups, setElectiveGroups] = useState<ElectiveGroup[]>([]);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const normalized = normalizeCourseType(prev.course_type);
+      const offeringNormalized = normalizeOfferingType(prev.offering_type);
+      const isLAB = normalized === 'LAB';
+      const isELECTIVE = offeringNormalized === 'ELECTIVE';
+      return {
+        ...prev,
+        course_type: normalized,
+        offering_type: offeringNormalized,
+        parent_course: isLAB ? prev.parent_course : '',
+        elective_group_id: isELECTIVE ? prev.elective_group_id : '',
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingCourse]);
 
   useEffect(() => {
     if (isOpen) {
@@ -117,6 +136,12 @@ const CourseModal: React.FC<CourseModalProps> = ({
   }, [isOpen, preSelectedDepartment]);
 
   useEffect(() => {
+    if (isOpen && batchUuid && (semesterUuid || formData.semester)) {
+      fetchElectiveGroups();
+    }
+  }, [isOpen, batchUuid, semesterUuid, formData.semester]);
+
+  useEffect(() => {
     if (editingCourse) {
       setFormData({
         name: editingCourse.name || '',
@@ -124,6 +149,8 @@ const CourseModal: React.FC<CourseModalProps> = ({
         description: editingCourse.description || '',
         credits: editingCourse.credits || 3,
         course_type: normalizeCourseType(editingCourse.course_type),
+        offering_type: normalizeOfferingType(editingCourse.offering_type || editingCourse.offeringType),
+        elective_group_id: editingCourse.elective_group_id || editingCourse.electiveGroupId || '',
         parent_course:
           editingCourse.parent_course ||
           editingCourse.parent_course_details?.course_id ||
@@ -139,12 +166,17 @@ const CourseModal: React.FC<CourseModalProps> = ({
         description: '',
         credits: 3,
         course_type: 'LECTURE',
+        offering_type: 'COMPULSORY',
+        elective_group_id: '',
         parent_course: '',
         department: preSelectedDepartment || '',
         semester: preSelectedSemester || ''
       });
       setCloInputs([{ clo_number: 1, description: '', bloom_level: 'Remember' }]);
       setMappingInputs([]);
+      setElectiveGroups([]);
+      setShowNewGroup(false);
+      setNewGroupName('');
       setActiveTab('details');
     }
   }, [editingCourse, preSelectedDepartment, preSelectedSemester]);
@@ -154,6 +186,42 @@ const CourseModal: React.FC<CourseModalProps> = ({
       fetchParentCourses(Number(formData.semester));
     }
   }, [isOpen, formData.semester]);
+
+  const fetchElectiveGroups = async () => {
+    if (!batchUuid) return;
+    setGroupsLoading(true);
+    try {
+      const params: any = { batch_id: batchUuid };
+      if (semesterUuid) params.semester_id = semesterUuid;
+      const res = await electivesApi.getElectiveGroups(params);
+      const payload = res.data as any;
+      setElectiveGroups(Array.isArray(payload) ? payload : payload?.results || []);
+    } catch (e) {
+      console.error('Failed to load elective groups', e);
+      setElectiveGroups([]);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!batchUuid || !newGroupName.trim()) return;
+    try {
+      const payload: any = {
+        group_name: newGroupName.trim(),
+        batch_id: batchUuid,
+      };
+      if (semesterUuid) payload.semester_id = semesterUuid;
+      const res = await electivesApi.createElectiveGroup(payload);
+      const created: any = res.data;
+      setElectiveGroups((prev) => [...prev, created]);
+      setFormData((prev) => ({ ...prev, elective_group_id: String(created.id) }));
+      setNewGroupName('');
+      setShowNewGroup(false);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to create elective group');
+    }
+  };
 
   const fetchDepartments = async () => {
     try {
@@ -275,6 +343,13 @@ const CourseModal: React.FC<CourseModalProps> = ({
         [name]: normalized,
         parent_course: normalized === 'LAB' ? prev.parent_course : ''
       }));
+    } else if (name === 'offering_type') {
+      const normalized = normalizeOfferingType(value);
+      setFormData(prev => ({
+        ...prev,
+        [name]: normalized,
+        elective_group_id: normalized === 'ELECTIVE' ? prev.elective_group_id : ''
+      }));
     } else {
       setFormData(prev => ({
         ...prev,
@@ -292,8 +367,12 @@ const CourseModal: React.FC<CourseModalProps> = ({
       const courseData = {
         ...formData,
         credits: Number(formData.credits),
+        credit_hours: Number(formData.credits),
         department: Number(formData.department),
         semester: Number(formData.semester),
+        semester_no: Number(formData.semester),
+        program_id: programUuid || '',
+        semester_id: semesterUuid || '',
         parent_course: formData.course_type === 'LAB' && formData.parent_course ? Number(formData.parent_course) : null
       };
 
@@ -455,7 +534,7 @@ const CourseModal: React.FC<CourseModalProps> = ({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Course Type *
+                    Mode *
                   </label>
                   <select
                     name="course_type"
@@ -468,6 +547,94 @@ const CourseModal: React.FC<CourseModalProps> = ({
                     <option value="LAB">Lab</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Offering Type *
+                  </label>
+                  <select
+                    name="offering_type"
+                    value={formData.offering_type}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="COMPULSORY">Compulsory</option>
+                    <option value="ELECTIVE">Elective</option>
+                  </select>
+                </div>
+
+                {formData.offering_type === 'ELECTIVE' && batchUuid && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Elective Group
+                    </label>
+                    {!showNewGroup ? (
+                      <div className="flex gap-2">
+                        <select
+                          name="elective_group_id"
+                          value={formData.elective_group_id}
+                          onChange={handleInputChange}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                          disabled={groupsLoading}
+                        >
+                          <option value="">None / Open Elective</option>
+                          {electiveGroups.map((grp) => (
+                            <option key={grp.id} value={grp.id}>
+                              {grp.group_name}
+                              {grp.course_count !== undefined ? ` (${grp.course_count} courses)` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setShowNewGroup(true)}
+                          className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm whitespace-nowrap"
+                        >
+                          + Create Group
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          placeholder="Group name, e.g. AI/ML Elective"
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCreateGroup}
+                          disabled={!newGroupName.trim() || groupsLoading}
+                          className="px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 text-sm"
+                        >
+                          Save Group
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNewGroup(false);
+                            setNewGroupName('');
+                          }}
+                          className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {formData.elective_group_id && (
+                      <p className="text-xs text-emerald-700 mt-1">
+                        Part of a mutually-exclusive group — students can select at most one course from this group.
+                      </p>
+                    )}
+                    {formData.offering_type === 'ELECTIVE' && !formData.elective_group_id && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Open elective — not grouped. Students can select this alongside other open electives (subject to max_electives_allowed).
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">

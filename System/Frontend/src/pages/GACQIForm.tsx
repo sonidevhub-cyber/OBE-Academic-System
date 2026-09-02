@@ -1,23 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import obeService, { GACQIRecord, GACQIResubmissionHistory } from '../api/obeService';
+import obeService, { GACQIRecord, GACQIResubmissionHistory, Batch } from '../api/obeService';
 
 const GACQIForm: React.FC = () => {
   const { cqiId } = useParams<{ cqiId: string }>();
   const [cqi, setCqi] = useState<GACQIRecord | null>(null);
   const [history, setHistory] = useState<GACQIResubmissionHistory[]>([]);
   const [rootCause, setRootCause] = useState('');
-  const [remedialPlan, setRemedialPlan] = useState('');
-  const [hodComment, setHodComment] = useState('');
+  const [hodActionPlan, setHodActionPlan] = useState('');
+  const [implementedInBatch, setImplementedInBatch] = useState('');
+  const [actionTaken, setActionTaken] = useState('');
+  const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Mock user role for demonstration
-  const [userRole, setUserRole] = useState<'coordinator' | 'hod'>('coordinator'); // can be 'coordinator' or 'hod'
 
   useEffect(() => {
     if (cqiId) {
       loadCQIData();
+    } else {
+      obeService.getAllBatches({ alumni_feedback: 'all' }).then(setBatches).catch(() => setBatches([]));
     }
   }, [cqiId]);
 
@@ -27,38 +28,14 @@ const GACQIForm: React.FC = () => {
     try {
       const historyData = await obeService.getGACQIHistory(cqiId);
       setHistory(historyData);
-      // For demonstration, create a mock CQI if needed
-      setCqi({
-        id: cqiId,
-        ga: '1',
-        ga_title: 'GA-1: Problem Solving',
-        ga_code: 'GA-1',
-        batch: '1',
-        batch_name: 'Batch 2021-2025',
-        cqi_level: 'SEMESTER',
-        semester: 5,
-        attainment_value: 55.0,
-        kpi_threshold_at_trigger: 60.0,
-        root_cause: '',
-        remedial_plan: '',
-        hod_comment: '',
-        status: 'PENDING',
-        submitted_by: null,
-        approved_by: null,
-        is_audit_visible: true,
-        is_locked: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        history: [],
-        issue_statement: null,
-        hod_action_plan: null,
-        triggered_at: null,
-        saved_by_hod: null,
-        saved_at: null,
-        is_active: true,
-      });
-      setRootCause('');
-      setRemedialPlan('');
+      const record = await obeService.getGACQIRecord(cqiId);
+      setCqi(record);
+      setRootCause(record.issue_statement || record.root_cause || '');
+      setHodActionPlan(record.hod_action_plan || '');
+      setImplementedInBatch(record.implemented_in_batch || '');
+      setActionTaken(record.action_taken_description || '');
+      const batchesData = await obeService.getAllBatches({ alumni_feedback: 'all' });
+      setBatches(batchesData);
     } catch (err) {
       console.error(err);
       setError('Failed to load CQI data');
@@ -67,64 +44,34 @@ const GACQIForm: React.FC = () => {
     }
   };
 
-  const handleSubmit = async () => {
-    if (!rootCause || !remedialPlan) {
-      setError('Please fill out all required fields');
+  const handleSaveAndClose = async () => {
+    if (!cqiId || !cqi) {
+      setError('No CQI record found');
+      return;
+    }
+    if (!implementedInBatch) {
+      setError('Implementation Batch is required');
+      return;
+    }
+    if (actionTaken.trim().length < 20) {
+      setError('Action Taken must be at least 20 characters');
       return;
     }
     try {
       setLoading(true);
-      if (cqiId && cqi) {
-        // Update existing CQI
-        await obeService.updateGACQIRecord(cqiId, {
-          root_cause: rootCause,
-          remedial_plan: remedialPlan,
-        });
-      } else {
-        // Create new CQI (for demonstration)
-        await obeService.createGACQI({
-          root_cause: rootCause,
-          remedial_plan: remedialPlan,
-        } as Partial<GACQIRecord>);
-      }
-      alert('CQI submitted successfully');
+      await obeService.updateGACQIRecord(cqiId, {
+        root_cause: rootCause || undefined,
+        hod_action_plan: hodActionPlan || undefined,
+      });
+      await obeService.closeGACQI(cqiId, {
+        implemented_in_batch: implementedInBatch,
+        action_taken_description: actionTaken.trim(),
+      });
+      alert('CQI saved and closed successfully');
       loadCQIData();
     } catch (err) {
       console.error(err);
-      setError('Failed to submit CQI');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleApprove = async () => {
-    if (!cqiId) return;
-    try {
-      setLoading(true);
-      await obeService.approveGACQI(cqiId);
-      alert('CQI approved');
-      loadCQIData();
-    } catch (err) {
-      console.error(err);
-      setError('Failed to approve CQI');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!cqiId || !hodComment) {
-      setError('Please enter a rejection comment');
-      return;
-    }
-    try {
-      setLoading(true);
-      await obeService.rejectGACQI(cqiId, hodComment);
-      alert('CQI rejected');
-      loadCQIData();
-    } catch (err) {
-      console.error(err);
-      setError('Failed to reject CQI');
+      setError('Failed to save and close CQI');
     } finally {
       setLoading(false);
     }
@@ -135,7 +82,7 @@ const GACQIForm: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-6">GA-Level CQI Form</h1>
-      
+
       {cqi && (
         <div className="mb-6 p-4 bg-gray-50 border rounded-lg">
           <div className="flex flex-wrap gap-4">
@@ -194,98 +141,85 @@ const GACQIForm: React.FC = () => {
         </ul>
       </div>
 
-      {userRole === 'coordinator' && (
-        <div className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Root Cause
-            </label>
-            <textarea
-                className="w-full p-3 border rounded-lg"
-                rows={4}
-                value={rootCause}
-                onChange={(e) => setRootCause(e.target.value)}
-                placeholder="Describe the root cause of the GA-level deficiency..."
-                disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
-              />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Remedial Plan
-            </label>
-            <textarea
-              className="w-full p-3 border rounded-lg"
-              rows={4}
-              value={remedialPlan}
-              onChange={(e) => setRemedialPlan(e.target.value)}
-              placeholder="Describe the remedial action plan..."
-              disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
-            />
-          </div>
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
-            onClick={handleSubmit}
-            disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
-          >
-            Submit CQI
-          </button>
+      {/* Single consolidated CQI form */}
+      <div className="space-y-4 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Issue Statement (Root Cause) <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            className={`w-full p-3 border rounded-lg ${
+              cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            rows={4}
+            value={rootCause}
+            onChange={(e) => setRootCause(e.target.value)}
+            placeholder="Describe the root cause of the GA-level deficiency..."
+            disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
+          />
         </div>
-      )}
 
-      {userRole === 'hod' && (
-        <div className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Root Cause
-            </label>
-            <textarea
-              className="w-full p-3 border rounded-lg bg-gray-50"
-              rows={4}
-              value={cqi?.root_cause || ''}
-              disabled
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Remedial Plan
-            </label>
-            <textarea
-              className="w-full p-3 border rounded-lg bg-gray-50"
-              rows={4}
-              value={cqi?.remedial_plan || ''}
-              disabled
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Rejection Comment (if applicable)
-            </label>
-            <textarea
-              className="w-full p-3 border rounded-lg"
-              rows={3}
-              value={hodComment}
-              onChange={(e) => setHodComment(e.target.value)}
-              placeholder="Enter rejection comment..."
-            />
-          </div>
-          <div className="flex gap-4">
-            <button
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
-              onClick={handleApprove}
-              disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
-            >
-              Approve
-            </button>
-            <button
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400"
-              onClick={handleReject}
-              disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
-            >
-              Reject
-            </button>
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            HOD Action Plan <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            className={`w-full p-3 border rounded-lg ${
+              cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            rows={4}
+            value={hodActionPlan}
+            onChange={(e) => setHodActionPlan(e.target.value)}
+            placeholder="Describe the action plan to address the root cause..."
+            disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.status === 'CLOSED_IMPLEMENTED' || cqi?.is_locked}
+          />
         </div>
-      )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Implementation Batch <span className="text-red-600">*</span>
+          </label>
+          <select
+            className={`w-full p-3 border rounded-lg ${
+              cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            value={implementedInBatch}
+            onChange={(e) => setImplementedInBatch(e.target.value)}
+            disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.status === 'CLOSED_IMPLEMENTED' || cqi?.is_locked}
+          >
+            <option value="">Select the batch where actions were implemented</option>
+            {batches.map((batch) => (
+              <option key={batch.id} value={batch.id}>
+                {batch.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Action Taken Description <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            className={`w-full p-3 border rounded-lg ${
+              cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            rows={4}
+            value={actionTaken}
+            onChange={(e) => setActionTaken(e.target.value)}
+            placeholder="Describe the corrective actions implemented, interventions applied, teaching strategies revised, resources added, etc. (minimum 20 characters)"
+            disabled={cqi?.status === 'FULLY_APPROVED' || cqi?.status === 'CLOSED_IMPLEMENTED' || cqi?.is_locked}
+          />
+        </div>
+
+        <button
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400"
+          onClick={handleSaveAndClose}
+          disabled={loading || cqi?.status === 'FULLY_APPROVED' || cqi?.is_locked}
+        >
+          {loading ? 'Saving...' : 'Save & Close CQI'}
+        </button>
+      </div>
 
       {/* Resubmission History */}
       {history.length > 0 && (
@@ -301,10 +235,6 @@ const GACQIForm: React.FC = () => {
                 <div className="mb-2">
                   <strong>Root Cause:</strong>
                   <p className="mt-1 text-sm">{item.root_cause_snapshot}</p>
-                </div>
-                <div>
-                  <strong>Remedial Plan:</strong>
-                  <p className="mt-1 text-sm">{item.remedial_plan_snapshot}</p>
                 </div>
                 {item.hod_comment_snapshot && (
                   <div className="mt-2">

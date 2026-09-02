@@ -9,6 +9,7 @@ import {
   Award,
   Target,
   CheckCircle2,
+  BookOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -28,8 +29,9 @@ import {
 import StudentFeedbackPopup from "../pages/StudentFeedbackPopup";
 import StudentResults from "../pages/StudentResults";
 import StudentRetakeHistory from "../../features/retake/StudentRetakeHistory";
+import StudentElectiveSelection from "../modules/student/StudentElectiveSelection";
 
-type TabId = "dashboard" | "results" | "retakes";
+type TabId = "dashboard" | "results" | "retakes" | "electives";
 
 const ModularStudentDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -246,6 +248,11 @@ const ModularStudentDashboard: React.FC = () => {
       id: "dashboard" as TabId,
       label: "Dashboard",
       icon: LayoutDashboard,
+    },
+    {
+      id: "electives" as TabId,
+      label: "Elective Selection",
+      icon: BookOpen,
     },
     {
       id: "results" as TabId,
@@ -888,6 +895,15 @@ const ModularStudentDashboard: React.FC = () => {
                       </div>
                     )}
 
+                  </div>
+                )}
+
+                {/* ==============================
+                    ELECTIVES
+                ============================== */}
+                {activeTab === "electives" && (
+                  <div className="space-y-6">
+                    <StudentElectiveSelection />
                   </div>
                 )}
 

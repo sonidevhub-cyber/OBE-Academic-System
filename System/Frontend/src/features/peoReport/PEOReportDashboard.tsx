@@ -7,14 +7,8 @@ import { Download, LoaderCircle } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
 import { useAuth } from '../../context/AuthContext';
-import {
-  getPEOReport,
-  getPEOCQIRecord,
-  upsertPEOCQI,
-  submitPEOCQIRecord,
-  updatePEOCQIRecord,
-} from './peoReportApi';
-import type { PEOReportData, PEOReportMatrixItem, PEOCQIRecord } from './types';
+import { getPEOReport } from './peoReportApi';
+import type { PEOReportData } from './types';
 import PEOEmploymentAnalytics from './PEOEmploymentAnalytics';
 import PEOAttainmentChart from './PEOAttainmentChart';
 import PEOMatrixTable from './POReportMatrixTable';
@@ -44,14 +38,6 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
 
-  // Modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [currentRow, setCurrentRow] = useState<PEOReportMatrixItem | null>(null);
-  const [currentCQIRecord, setCurrentCQIRecord] = useState<PEOCQIRecord | null>(null);
-  const [rootCause, setRootCause] = useState("");
-  const [remedialPlan, setRemedialPlan] = useState("");
-  const [saving, setSaving] = useState(false);
-
   const currentRole = currentUser?.effective_role || currentUser?.active_role || currentUser?.role;
   const canDownloadPdf = isSAC || currentRole === 'hod';
 
@@ -64,14 +50,15 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       .map((row, index) => ({
         peoId: row.peoCode || `PO-${index + 1}`,
         rootCause: row.rootCause || null,
-        remedialPlan: row.remedialPlan || null,
         cqiStatus:
           row.cqiStatus === 'APPROVED' || row.cqiStatus === 'CLOSED_IMPLEMENTED' || row.cqiIsLocked
             ? 'Closed'
             : 'Open',
         hodApprovedBy: reportData.signatures.hodApprovedBy,
         hodApprovedDate: reportData.signatures.hodApprovedDate,
-        cqiPending: !row.rootCause && !row.remedialPlan,
+        cqiPending: !row.rootCause,
+        implementedInBatch: row.implementedInBatch || null,
+        actionTaken: row.actionTaken || null,
       }));
   };
 
@@ -174,7 +161,8 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
         'PO',
         'CQI Status',
         'Identified Weakness',
-        'Corrective Action Plan',
+        'Implemented On',
+        'Action Taken',
         'Approved By',
         'Approved Date',
       ]],
@@ -183,11 +171,12 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
             section.peoId,
             section.cqiStatus,
             section.rootCause || 'Pending HOD submission',
-            section.remedialPlan || 'Pending HOD submission',
+            section.implementedInBatch || '-',
+            section.actionTaken || '-',
             section.hodApprovedBy || 'Pending HOD approval',
             section.hodApprovedDate || '-',
           ])
-        : [['-', 'No CQI records', 'No CQI records are available yet for this cycle.', '-', '-', '-']],
+        : [['-', 'No CQI records', 'No CQI records are available yet for this cycle.', '-', '-', '-', '-']],
       theme: 'grid',
       styles: {
         fontSize: 6.5,
@@ -205,11 +194,12 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       },
       columnStyles: {
         0: { cellWidth: 20 },
-        1: { cellWidth: 20, halign: 'center' },
-        2: { cellWidth: 68 },
-        3: { cellWidth: 82 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 32 },
+        1: { cellWidth: 18, halign: 'center' },
+        2: { cellWidth: 58 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 42 },
+        5: { cellWidth: 28 },
+        6: { cellWidth: 30 },
       },
       margin: { left: marginX, right: marginX, bottom: 12 },
     });
@@ -247,7 +237,7 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
     };
   }, [programId, year, batchId]);
 
-  const handleDownloadPdf = async () => {
+   const handleDownloadPdf = async () => {
     if (!reportData) {
       toast.error('No report data to export');
       return;
@@ -256,6 +246,16 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
     const chartImage = chartRef.current?.toBase64Image();
     if (!chartImage) {
       toast.error('Chart snapshot is not ready yet');
+      return;
+    }
+
+    const cqiSections = getCqiSectionsForPdf();
+    const missingActionPlan = cqiSections.some(
+      (section) => section.cqiPending && !section.rootCause
+    );
+
+    if (missingActionPlan) {
+      toast.error('Please fill in the root cause for the triggered CQI records before exporting.');
       return;
     }
 
@@ -268,89 +268,6 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       toast.error('Failed to download PO report PDF');
     } finally {
       setPdfLoading(false);
-    }
-  };
-
-  const handleTriggerCQI = async (row: PEOReportMatrixItem) => {
-    setCurrentRow(row);
-    setRootCause('');
-    setRemedialPlan('');
-    setCurrentCQIRecord(null);
-    setModalOpen(true);
-    
-    if (row.cqiRecordId) {
-      getPEOCQIRecord(row.cqiRecordId).then(record => {
-        setCurrentCQIRecord(record);
-        setRootCause(record.root_cause || '');
-        setRemedialPlan(record.remedial_plan || '');
-      }).catch(err => {
-        console.error('Failed to load CQI record:', err);
-        toast.error('Failed to load CQI record');
-      });
-    }
-  };
-
-  const handleSaveCQI = async () => {
-    if (!currentRow || !batchId) {
-      return;
-    }
-    if (!rootCause.trim()) {
-      toast.error('Root cause is required');
-      return;
-    }
-    if (remedialPlan.trim().length < 10) {
-      toast.error('Remedial plan must be at least 10 characters');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      let record;
-      if (currentCQIRecord) {
-        record = await updatePEOCQIRecord(currentCQIRecord.id, {
-          root_cause: rootCause.trim(),
-          remedial_plan: remedialPlan.trim(),
-        });
-      } else {
-        record = await upsertPEOCQI({
-          peo: currentRow.peoId,
-          batch: batchId,
-          root_cause: rootCause.trim(),
-          remedial_plan: remedialPlan.trim(),
-          attainment_value: currentRow.combinedAttainmentPercentage || undefined,
-          kpi_threshold_at_trigger: currentRow.targetPercentage || undefined,
-        });
-      }
-      setCurrentCQIRecord(record);
-      toast.success('CQI record saved!');
-      // Refresh report data
-      const data = await getPEOReport(programId, year, batchId);
-      setReportData(data);
-      setModalOpen(false);
-    } catch (err) {
-      console.error('Failed to save CQI:', err);
-      toast.error('Failed to save CQI');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSubmitCQI = async () => {
-    if (!currentCQIRecord) return;
-    setSaving(true);
-    try {
-      const record = await submitPEOCQIRecord(currentCQIRecord.id);
-      setCurrentCQIRecord(record);
-      toast.success('CQI record submitted!');
-      // Refresh report data
-      const data = await getPEOReport(programId, year, batchId);
-      setReportData(data);
-      setModalOpen(false);
-    } catch (err) {
-      console.error('Failed to submit CQI:', err);
-      toast.error('Failed to submit CQI');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -447,8 +364,6 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       <PEOMatrixTable
         matrix={reportData.matrix}
         indirectWeightConfig={reportData.indirectWeightConfig}
-        onTriggerCQI={handleTriggerCQI}
-        canManageCQI={canDownloadPdf}
       />
 
       {/* Then chart */}
@@ -468,95 +383,6 @@ const PEOReportDashboard: React.FC<PEOReportDashboardProps> = ({
       <PEOEmploymentAnalytics stats={reportData.employmentStats} />
 
       <PEOEmployerComments comments={reportData.employerComments || []} />
-
-      {/* CQI Modal */}
-      {modalOpen && currentRow && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-xl font-bold text-gray-900">
-                  PO CQI: {currentRow.description.substring(0, 50)}... • {batchName}
-                </h3>
-                {currentCQIRecord?.status === 'APPROVED' && (
-                  <span className="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-700">
-                    View Only
-                  </span>
-                )}
-              </div>
-              {currentCQIRecord && (
-                <p className="mt-2 text-sm text-gray-500">
-                  {currentCQIRecord.submitted_by?.full_name || currentCQIRecord.submitted_by?.name ? `Saved by ${currentCQIRecord.submitted_by.full_name || currentCQIRecord.submitted_by.name} • ${currentCQIRecord.status}` : ''}
-                </p>
-              )}
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Identified Weakness
-                </label>
-                <textarea
-                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
-                    currentCQIRecord?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                  }`}
-                  rows={3}
-                  value={rootCause}
-                  onChange={(e) => setRootCause(e.target.value)}
-                  disabled={currentCQIRecord?.is_locked}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Corrective Action Plan <span className="text-red-600">*</span>
-                </label>
-                <textarea
-                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
-                    currentCQIRecord?.is_locked ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                  }`}
-                  rows={4}
-                  value={remedialPlan}
-                  onChange={(e) => setRemedialPlan(e.target.value)}
-                  disabled={currentCQIRecord?.is_locked}
-                  placeholder="Enter corrective action plan here..."
-                />
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={() => setModalOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                {currentCQIRecord?.is_locked ? 'Close' : 'Cancel'}
-              </button>
-              {!currentCQIRecord?.is_locked && (
-                <button
-                  onClick={handleSaveCQI}
-                  disabled={saving}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 rounded-lg transition-colors flex items-center gap-2"
-                >
-                  {saving ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  Save CQI Record
-                </button>
-              )}
-              {!currentCQIRecord?.is_locked && currentCQIRecord?.id && (
-                <button
-                  onClick={handleSubmitCQI}
-                  disabled={saving}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 rounded-lg transition-colors flex items-center gap-2"
-                >
-                  {saving ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  Submit & Lock
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

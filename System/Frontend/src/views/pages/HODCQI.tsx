@@ -26,8 +26,6 @@ interface HODCQIProps {
   mode?: "clo" | "ga";
 }
 
-type BatchCategory = "ongoing" | "graduated";
-
 const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
   const [activeTab, setActiveTab] = useState<"clo" | "ga">(mode || "clo");
 
@@ -37,7 +35,6 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
   const [cloComments, setCloComments] = useState<{ [key: string]: string }>({});
 
   const [gaBatches, setGaBatches] = useState<Batch[]>([]);
-  const [batchCategory, setBatchCategory] = useState<BatchCategory>("ongoing");
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   const [gaReportData, setGaReportData] =
     useState<GAReportItem[] | ReadinessResponse | BatchGAReportResponse | null>(null);
@@ -47,6 +44,15 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
   const [submitting, setSubmitting] = useState(false);
   const [localComment, setLocalComment] = useState<{ [key: string]: string }>({});
 
+  const [editingCqiId, setEditingCqiId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    root_cause: '',
+    hod_action_plan: '',
+    implemented_in_batch: '',
+    action_taken_description: '',
+  });
+  const [savingClose, setSavingClose] = useState(false);
+  const [editingCqiStatus, setEditingCqiStatus] = useState<string>("");
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closingCqiId, setClosingCqiId] = useState<string | null>(null);
   const [closeForm, setCloseForm] = useState({
@@ -126,6 +132,25 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
           },
           {}
         );
+        if (programId && selectedBatchId) {
+          try {
+            const statusRow = await obeService.getGAStatusRow(programId, selectedBatchId);
+            for (const row of statusRow) {
+              const gaId = String(row.ga_id);
+              if (row.cqi_record_id && !cqiByGaId[gaId]) {
+                try {
+                  const fullRecord = await obeService.getGACQIRecord(row.cqi_record_id);
+                  if (!cqiByGaId[gaId]) cqiByGaId[gaId] = [];
+                  cqiByGaId[gaId].push(fullRecord);
+                } catch (err) {
+                  console.error("Failed to fetch CQI record:", err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Failed to fetch GA status row:", err);
+          }
+        }
         const items: GAReportItem[] = data.cohort_summary.map((summary: any) => ({
           ga_id: summary.ga_id,
           ga_code: summary.ga_code,
@@ -195,9 +220,86 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
     }
   };
 
-  const openCloseModal = (cqiId: string) => {
-    setClosingCqiId(cqiId);
-    setCloseForm({ implemented_in_batch: "", action_taken_description: "" });
+  const openEditForm = (cqi: GACQIRecord) => {
+    setEditingCqiId(cqi.id);
+    setEditingCqiStatus(cqi.status);
+    setEditForm({
+      root_cause: cqi.root_cause || cqi.issue_statement || '',
+      hod_action_plan: cqi.hod_action_plan || '',
+      implemented_in_batch: cqi.implemented_in_batch || '',
+      action_taken_description: cqi.action_taken_description || '',
+    });
+  };
+
+  const handleSaveAndClose = async () => {
+    if (!editingCqiId) return;
+    if (!editForm.implemented_in_batch) {
+      toast.error("Please select the batch where actions were implemented");
+      return;
+    }
+    if (!editForm.action_taken_description.trim()) {
+      toast.error("Please describe the action taken (mandatory)");
+      return;
+    }
+    setSavingClose(true);
+    try {
+      await obeService.updateGACQIRecord(editingCqiId, {
+        root_cause: editForm.root_cause || undefined,
+        hod_action_plan: editForm.hod_action_plan || undefined,
+      });
+      await obeService.closeGACQI(editingCqiId, {
+        implemented_in_batch: editForm.implemented_in_batch,
+        action_taken_description: editForm.action_taken_description.trim(),
+      });
+      toast.success("GA CQI saved and closed successfully");
+      setEditingCqiId(null);
+      fetchGaReport();
+    } catch (error: any) {
+      console.error(error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        "Failed to save and close CQI";
+      toast.error(msg);
+    } finally {
+      setSavingClose(false);
+    }
+  };
+
+  const handleSaveCQI = async () => {
+    if (!editingCqiId) return;
+    if (editForm.hod_action_plan.trim().length < 20) {
+      toast.error("HOD Action Plan must be at least 20 characters");
+      return;
+    }
+    setSavingClose(true);
+    try {
+      await obeService.saveGACQI(editingCqiId, {
+        hod_action_plan: editForm.hod_action_plan.trim(),
+        issue_statement: editForm.root_cause || editForm.hod_action_plan || undefined,
+      });
+      toast.success("CQI saved. You can now close the loop.");
+      setEditingCqiId(null);
+      setEditingCqiStatus("");
+      fetchGaReport();
+    } catch (error: any) {
+      console.error(error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        "Failed to save CQI";
+      toast.error(msg);
+    } finally {
+      setSavingClose(false);
+    }
+  };
+
+  const openCloseModal = (cqi: GACQIRecord) => {
+    setClosingCqiId(cqi.id);
+    setCloseForm({
+      implemented_in_batch: cqi.implemented_in_batch || "",
+      action_taken_description: cqi.action_taken_description || "",
+    });
     setCloseModalOpen(true);
   };
 
@@ -217,7 +319,7 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
         implemented_in_batch: closeForm.implemented_in_batch,
         action_taken_description: closeForm.action_taken_description.trim(),
       });
-      toast.success("GA CQI closed successfully — attainment auto-pulled");
+      toast.success("GA CQI closed successfully");
       setCloseModalOpen(false);
       setClosingCqiId(null);
       fetchGaReport();
@@ -307,12 +409,17 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
 
   const filteredGaBatches = useMemo(
     () =>
-      gaBatches.filter((batch) =>
-        batchCategory === "graduated"
-          ? batch.status === "graduated"
-          : batch.status === "active"
-      ),
-    [batchCategory, gaBatches]
+      gaBatches
+        .filter((batch) => batch.status === "graduated")
+        .sort((a, b) =>
+          String(b.name || '').localeCompare(String(a.name || ''))
+        ),
+    [gaBatches]
+  );
+
+  const implementationBatches = useMemo(
+    () => gaBatches.filter((batch) => batch.status === "active"),
+    [gaBatches]
   );
 
   useEffect(() => {
@@ -413,27 +520,10 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                   report calculation.
                 </p>
               </div>
-              <div className="grid w-full gap-3 sm:grid-cols-2 md:max-w-[520px]">
-                <div>
-                  <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                    Batch Category
-                  </label>
-                  <select
-                    className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0"
-                    value={batchCategory}
-                    onChange={(e) => {
-                      setBatchCategory(e.target.value as BatchCategory);
-                      setSelectedBatchId("");
-                      setGaReportData(null);
-                    }}
-                  >
-                    <option value="ongoing">Ongoing</option>
-                    <option value="graduated">Graduated</option>
-                  </select>
-                </div>
+               <div className="grid w-full gap-3 md:max-w-[300px]">
                 <div>
                 <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                  Select Batch
+                  Select Alumni Batch
                 </label>
                 <select
                   className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0"
@@ -562,20 +652,20 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                   Needs CQI
                                 </span>
                               )}
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-700">
-                              {cqi?.resulting_attainment !== null &&
-                              cqi?.resulting_attainment !== undefined ? (
-                                <div>
-                                  <span className="font-bold">
-                                    {Number(cqi.resulting_attainment).toFixed(1)}%
-                                  </span>
-                                  {cqi.implemented_in_batch_name && (
-                                    <div className="text-xs text-gray-500">
-                                      Batch: {cqi.implemented_in_batch_name}
-                                    </div>
-                                  )}
-                                </div>
+                                </td>
+                             <td className="px-4 py-4 text-sm text-gray-700">
+                               {cqi?.resulting_attainment !== null &&
+                               cqi?.resulting_attainment !== undefined ? (
+                                 <div>
+                                   <span className="font-bold">
+                                     {Number(cqi.resulting_attainment).toFixed(1)}%
+                                   </span>
+                                   {cqi.implemented_in_batch_name && (
+                                     <div className="text-xs text-gray-500">
+                                       Batch: {cqi.implemented_in_batch_name}
+                                     </div>
+                                   )}
+                                 </div>
                               ) : cqi?.status === "CLOSED_IMPLEMENTED" ? (
                                 "—"
                               ) : cqi ? (
@@ -601,14 +691,14 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                     )}
                                   </button>
                                 )}
-                                {cqi && canCloseCqi(cqi) && (
+                                {cqi && (
                                   <button
                                     type="button"
-                                    onClick={() => openCloseModal(cqi.id)}
-                                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 shadow"
+                                    onClick={() => openEditForm(cqi)}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 shadow"
                                   >
                                     <CheckCheck className="h-4 w-4" />
-                                    Close
+                                    Manage CQI
                                   </button>
                                 )}
                                 {cqi?.status === "CLOSED_IMPLEMENTED" && (
@@ -629,15 +719,15 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                       Root Cause
                                     </p>
                                     <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                                      {cqi.root_cause || "—"}
+                                      {cqi.root_cause || cqi.issue_statement || "—"}
                                     </p>
                                   </div>
                                   <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-100">
                                     <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
-                                      Remedial Plan
+                                      HOD Action Plan
                                     </p>
                                     <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                                      {cqi.remedial_plan || cqi.hod_action_plan || "—"}
+                                      {cqi.hod_action_plan || "—"}
                                     </p>
                                   </div>
 
@@ -738,9 +828,21 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                               <CheckCircle className="inline h-4 w-4 mr-1" />
                                               Approve
                                             </button>
-                                          </div>
-                                        )}
-                                    </div>
+                                           </div>
+                                         )}
+                                         {cqi.status === "SAVED" && isHod && (
+                                           <div className="flex gap-3">
+                                             <button
+                                               type="button"
+                                               onClick={() => openCloseModal(cqi)}
+                                               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 shadow"
+                                             >
+                                               <CheckCheck className="inline h-4 w-4 mr-1" />
+                                               Close CQI
+                                             </button>
+                                           </div>
+                                         )}
+                                       </div>
 
                                     {expandedHistory === cqi.id ? (
                                       <div className="mt-4 rounded-xl bg-gray-50 p-4">
@@ -773,14 +875,14 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                                       {historyItem.root_cause_snapshot}
                                                     </div>
                                                   )}
-                                                  {historyItem.remedial_plan_snapshot && (
-                                                    <div>
-                                                      <span className="font-semibold">
-                                                        Remedial Plan:
-                                                      </span>{" "}
-                                                      {historyItem.remedial_plan_snapshot}
-                                                    </div>
-                                                  )}
+                                                   {historyItem.hod_comment_snapshot && (
+                                                     <div>
+                                                       <span className="font-semibold">
+                                                         HOD Comment:
+                                                       </span>{" "}
+                                                       {historyItem.hod_comment_snapshot}
+                                                     </div>
+                                                   )}
                                                 </div>
                                               </div>
                                             )
@@ -801,6 +903,141 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
               </div>
             </div>
           )}
+        </div>
+       )}
+
+      {editingCqiId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-xl font-bold text-gray-900">
+                Manage GA-CQI{" "}
+                <span className="text-sm font-medium text-gray-500">
+                  (Status: {editingCqiStatus})
+                </span>
+              </h3>
+            </div>
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                  Issue Statement
+                </label>
+                <textarea
+                  className={`w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition-all focus:border-indigo-500 ${
+                    editingCqiStatus === "SAVED" ? "cursor-not-allowed" : ""
+                  }`}
+                  rows={3}
+                  value={editForm.root_cause}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      root_cause: e.target.value,
+                    }))
+                  }
+                  disabled={editingCqiStatus === "SAVED"}
+                  placeholder="Auto-filled issue statement (editable before saving)"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                  HOD Action Plan <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className={`w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition-all focus:border-indigo-500 resize-none`}
+                  rows={4}
+                  value={editForm.hod_action_plan}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      hod_action_plan: e.target.value,
+                    }))
+                  }
+                  placeholder="Enter your action plan here... (minimum 20 characters)"
+                />
+              </div>
+
+              {editingCqiStatus === "SAVED" && (
+                <>
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                      Implementation Batch <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-emerald-500 focus:ring-0"
+                      value={editForm.implemented_in_batch}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({
+                          ...prev,
+                          implemented_in_batch: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">
+                        Select the batch where actions were implemented
+                      </option>
+                      {implementationBatches.map((batch) => (
+                        <option key={batch.id} value={batch.id}>
+                          {batch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
+                      Action Taken Description <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition-all focus:border-emerald-500"
+                      rows={6}
+                      placeholder="Describe the corrective actions implemented, interventions applied, teaching strategies revised, resources added, faculty development conducted, etc."
+                      value={editForm.action_taken_description}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({
+                          ...prev,
+                          action_taken_description: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCqiId(null);
+                  setEditingCqiStatus("");
+                }}
+                disabled={savingClose}
+                className="rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-300 disabled:opacity-70"
+              >
+                Cancel
+              </button>
+              {editingCqiStatus !== "SAVED" && (
+                <button
+                  type="button"
+                  onClick={handleSaveCQI}
+                  disabled={savingClose}
+                  className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {savingClose ? "Saving..." : "Save CQI"}
+                </button>
+              )}
+              {editingCqiStatus === "SAVED" && (
+                <button
+                  type="button"
+                  onClick={handleSaveAndClose}
+                  disabled={savingClose}
+                  className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {savingClose ? "Closing..." : "Confirm Close & Save"}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -840,7 +1077,7 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                   <option value="">
                     Select the batch where actions were implemented
                   </option>
-                  {gaBatches.map((batch) => (
+                  {implementationBatches.map((batch) => (
                     <option key={batch.id} value={batch.id}>
                       {batch.name}
                     </option>

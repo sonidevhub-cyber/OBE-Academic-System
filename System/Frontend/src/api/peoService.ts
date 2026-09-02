@@ -45,7 +45,6 @@ export interface PEOCQISubmissionHistory {
   id: string;
   cqi_record: string;
   root_cause_snapshot: string | null;
-  remedial_plan_snapshot: string | null;
   status_at_time: string;
   submitted_at: string;
 }
@@ -59,10 +58,9 @@ export interface PEOCQIRecord {
   batch: string;
   batch_name: string;
   attainment_value: number | null;
-  kpi_threshold_at_trigger: number | null;
-  root_cause: string | null;
-  remedial_plan: string | null;
-  status: 'DRAFT' | 'APPROVED' | 'OPEN' | 'CLOSED_IMPLEMENTED';
+   kpi_threshold_at_trigger: number | null;
+   root_cause: string | null;
+   status: 'DRAFT' | 'APPROVED' | 'OPEN' | 'CLOSED_IMPLEMENTED';
   submitted_by: any | null;
   is_locked: boolean;
   created_at: string;
@@ -110,7 +108,7 @@ class PEOService {
     return response.data;
   }
 
-  async createPEOCQI(data: { peo: string; batch: string; root_cause?: string; remedial_plan?: string }): Promise<PEOCQIRecord> {
+  async createPEOCQI(data: { peo: string; batch: string; root_cause?: string }): Promise<PEOCQIRecord> {
     const response = await api.post('/obe/peo-cqi/create/', data);
     return response.data;
   }

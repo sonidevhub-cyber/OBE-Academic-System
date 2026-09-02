@@ -9,6 +9,7 @@ from assessments.models import Assessment, StudentQuestionMark
 from .models import CourseSession, GAMasterCache, StudentGAEntry, CLOGAMapping, StudentCLOScore, GA
 from students.models import Student
 from .reporting import invalidate_cached_scores_for_course_session, invalidate_ga_reports_for_batch
+from .services import _get_enrolled_student_ids_for_course_session
 
 
 def _invalidate_course_session_ga_cache(course_session: CourseSession):
@@ -155,6 +156,12 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
             user__is_active=True,
         ).select_related('user')
 
+        # Pre-compute enrolled student IDs per session to avoid N*M queries
+        # and prevent lab/theory cross-contribution via enrollment gating
+        session_enrolled_ids = {}
+        for session in course_sessions:
+            session_enrolled_ids[session.id] = _get_enrolled_student_ids_for_course_session(session)
+
         # Get all mappings for these courses and GAs
         mappings = CLOGAMapping.objects.filter(
             clo__course__in=[cs.course_id for cs in course_sessions],
@@ -193,6 +200,10 @@ def update_ga_master_cache(sender, instance, created, **kwargs):
                 total_weight = Decimal('0')
 
                 for session in course_sessions:
+                    enrolled_ids = session_enrolled_ids.get(session.id, set())
+                    if student_obj.student_id not in enrolled_ids:
+                        continue
+
                     key = (session.course_id, ga.id)
                     session_mappings = mappings_by_course_ga.get(key, [])
 

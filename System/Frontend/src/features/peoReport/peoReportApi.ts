@@ -61,7 +61,6 @@ export async function upsertPEOCQI(
     peo: string;
     batch: string;
     root_cause?: string;
-    remedial_plan?: string;
     attainment_value?: number;
     kpi_threshold_at_trigger?: number;
   },
@@ -81,7 +80,6 @@ export async function updatePEOCQIRecord(
   cqiId: string,
   payload: Partial<{
     root_cause: string;
-    remedial_plan: string;
   }>,
 ): Promise<PEOCQIRecord> {
   const response = await api.patch(`obe/peo-cqi/${cqiId}/`, payload);
@@ -90,5 +88,16 @@ export async function updatePEOCQIRecord(
 
 export async function submitPEOCQIRecord(cqiId: string): Promise<PEOCQIRecord> {
   const response = await api.post(`obe/peo-cqi/${cqiId}/submit/`);
+  return response.data;
+}
+
+export async function closePEOCQIRecord(
+  cqiId: string,
+  payload: {
+    implemented_in_batch: string;
+    action_taken_description: string;
+  },
+): Promise<PEOCQIRecord> {
+  const response = await api.post(`obe/peo-cqi/${cqiId}/close/`, payload);
   return response.data;
 }

@@ -1,6 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import * as XLSX from 'xlsx';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx-js-style';
 import { api } from '../../api/api';
+import { pdf } from '@react-pdf/renderer';
+import { toast } from 'react-hot-toast';
+import {
+  Download,
+  FileSpreadsheet,
+  FileText,
+  LoaderCircle,
+} from 'lucide-react';
+import CourseReportPDF from './CourseReportPDF';
+import ExportChoiceModal from '../../components/reports/ExportChoiceModal';
 import {
   PieChart,
   Pie,
@@ -128,22 +138,12 @@ const compareCloCode = (a: string, b: string) => {
 const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) => {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetchReport();
   }, [courseId, batchId, semesterId]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const fetchReport = async () => {
     setLoading(true);
@@ -236,13 +236,14 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     return formatMarks(weightedScore);
   };
 
-  // COMPLETE DYNAMIC EXCEL EXPORT (MANUAL MATRIX BUILDER)
   const handleExportExcel = () => {
-    setShowExportMenu(false);
-    if (!reportData) return;
+    if (!reportData || !tableReportStudents.length) {
+      toast.error('No data to export');
+      return;
+    }
+    setExporting(true);
+    try {
     const studentsToExport = tableReportStudents;
-    if (!studentsToExport.length) return;
-
     const processedGroups = (reportData.type_groups || []).map((group) => {
       const typeKey = group.type.toLowerCase();
       if (typeKey === 'quiz' || typeKey === 'assignment') {
@@ -252,9 +253,9 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     });
 
     // 1. First Header Row
-    const row1: string[] = ["#", "Student Name"];
+    const row1: string[] = ["#", "Student Name", "Registration No."];
     // 2. Second Header Row
-    const row2: string[] = ["", ""];
+    const row2: string[] = ["", "", ""];
 
     processedGroups.forEach((group) => {
       let groupColCount = 0;
@@ -283,7 +284,8 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     const studentRows = studentsToExport.map((student) => {
       const rowData: (string | number)[] = [
         student.count,
-        student.name
+        student.name,
+        student.registration_number || student.custom_id || ''
       ];
 
       processedGroups.forEach((group) => {
@@ -317,7 +319,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     });
 
     // 4. Class CLO Summary Row
-    const classCloRow: (string | number)[] = ["", "Class CLO %"];
+    const classCloRow: (string | number)[] = ["", "", "Class CLO %"];
     processedGroups.forEach((group) => {
       (group.assessments || []).forEach((ass) => {
         (ass.clos || []).forEach((clo) => {
@@ -341,12 +343,62 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "OBE Report");
     XLSX.writeFile(workbook, `OBE_Complete_Report_${courseId}_Sem_${semesterId}.xlsx`);
+    toast.success('Excel report exported');
+    setExportModalOpen(false);
+  } catch (err) {
+    console.error('Excel export failed:', err);
+    toast.error('Failed to export Excel');
+  } finally {
+    setExporting(false);
+  }
   };
 
-  // ISOLATED PRINT / PDF
-  const handleExportPDF = () => {
-    setShowExportMenu(false);
-    window.print();
+  const handleExportPDF = async () => {
+    setExporting(true);
+    try {
+      const processedGroups = (reportData?.type_groups || []).map((group) => {
+        const typeKey = group.type.toLowerCase();
+        if (typeKey === 'quiz' || typeKey === 'assignment') {
+          return { ...group, assessments: (group.assessments || []).slice(0, 3) };
+        }
+        return group;
+      });
+
+      const allCloCodes = Object.keys(reportData?.class_clo_attainment || {}).sort(compareCloCode);
+
+      const doc = (
+        <CourseReportPDF
+          courseCode={reportData?.course?.code}
+          courseName={reportData?.course?.name}
+          semesterNumber={reportData?.semester?.number}
+          batchName={reportData?.course?.code}
+          totalStudents={totalStudents}
+          passedStudents={passedStudents}
+          failedStudents={failedStudents}
+          overallPercentage={overallPercentage}
+          overallGpa={overallGPA}
+          typeGroups={processedGroups}
+          students={tableReportStudents}
+          classCloAttainment={reportData?.class_clo_attainment || {}}
+          allCloCodes={allCloCodes}
+        />
+      );
+
+      const blob = await pdf(doc).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Course_Report_${courseId}_Sem_${semesterId}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('Course report PDF exported');
+      setExportModalOpen(false);
+    } catch (err) {
+      console.error('PDF export failed:', err);
+      toast.error('Failed to export PDF');
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (loading) return <div className="text-center py-12 text-blue-900 font-semibold text-lg">Loading Report Data...</div>;
@@ -414,8 +466,21 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
     .reduce(
     (acc: Record<string, ClassCloAttainment>, [cloCode, value]) => {
       const kpi = Number(value?.kpi ?? 60);
-      const totalAllStudents = allReportStudents.length;
-      const passedCount = allReportStudents.filter((student) => {
+
+      const studentsWithCloData = allReportStudents.filter((student) => {
+        if (student.is_retake && student.retake_display_cells) {
+          const retakeCloCells = Object.entries(student.retake_display_cells).filter(([key]) =>
+            key.endsWith(`:${cloCode}`)
+          );
+          if (retakeCloCells.length > 0) return true;
+        }
+        const cloEntry = student.clo_attainment?.[cloCode];
+        return cloEntry != null && cloEntry.percentage != null && !isNaN(Number(cloEntry.percentage));
+      });
+
+      const totalEligible = studentsWithCloData.length;
+
+      const passedCount = studentsWithCloData.filter((student) => {
         if (student.is_retake && student.retake_display_cells) {
           const retakeCloCells = Object.entries(student.retake_display_cells).filter(([key]) =>
             key.endsWith(`:${cloCode}`)
@@ -435,7 +500,7 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
         return percentage >= kpi;
       }).length;
 
-      const percentage = totalAllStudents > 0 ? Number(((passedCount / totalAllStudents) * 100).toFixed(2)) : 0;
+      const percentage = totalEligible > 0 ? Number(((passedCount / totalEligible) * 100).toFixed(2)) : 0;
 
       acc[cloCode] = {
         ...value,
@@ -641,34 +706,24 @@ const OBEReport: React.FC<OBEReportProps> = ({ courseId, batchId, semesterId }) 
           )}
         </div>
 
-        {/* EXPORT DROPDOWN */}
-        <div className="relative no-print" ref={dropdownRef}>
-          <button
-            onClick={() => setShowExportMenu(!showExportMenu)}
-            className="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-5 py-2.5 rounded-md shadow-sm transition-all duration-200 flex items-center gap-2"
-          >
-            <span>📥</span> Export Report
-            <span className="text-xs ml-1">▼</span>
-          </button>
-
-          {showExportMenu && (
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-blue-100 py-1 z-50">
-              <button
-                onClick={handleExportPDF}
-                className="w-full text-left px-4 py-2.5 text-sm font-medium text-blue-950 hover:bg-blue-50 flex items-center gap-2 transition-colors"
-              >
-                <span>📄</span> Export PDF
-              </button>
-              <button
-                onClick={handleExportExcel}
-                className="w-full text-left px-4 py-2.5 text-sm font-medium text-blue-950 hover:bg-blue-50 flex items-center gap-2 transition-colors border-t border-gray-100"
-              >
-                <span>📊</span> Export Excel (.xlsx)
-              </button>
-            </div>
-          )}
-        </div>
+        {/* EXPORT BUTTON */}
+        <button
+          onClick={() => setExportModalOpen(true)}
+          className="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-5 py-2.5 rounded-md shadow-sm transition-all duration-200 flex items-center gap-2 no-print"
+        >
+          <Download size={16} /> Export Report
+        </button>
       </div>
+
+      <ExportChoiceModal
+        open={exportModalOpen}
+        title="Export Course Report"
+        description="Choose a professional PDF or a formatted Excel workbook."
+        exporting={exporting}
+        onClose={() => setExportModalOpen(false)}
+        onPdf={handleExportPDF}
+        onExcel={handleExportExcel}
+      />
 
       {/* Main Report Table */}
       <div className="overflow-x-auto bg-white rounded-lg shadow-sm border border-blue-200">

@@ -58,11 +58,17 @@ export interface PEOCQIRecord {
   peo_title?: string | null;
   batch?: string;
   batch_id: string;
-  root_cause: string | null;
-  remedial_plan: string | null;
-  status: string;
+   root_cause: string | null;
+   status: string;
   is_locked: boolean;
   submitted_by: any;
+  implemented_in_batch?: string | null;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
+  resulting_attainment?: number | null;
+  closed_by?: any | null;
+  closed_by_name?: string | null;
+  closed_at?: string | null;
 }
 
 export interface PEOReportMatrixItem {
@@ -79,9 +85,10 @@ export interface PEOReportMatrixItem {
   status: 'Achieved' | 'CQI Triggered';
   cqiRecordId: string | null;
   cqiStatus: string | null;
-  cqiIsLocked: boolean;
-  rootCause?: string | null;
-  remedialPlan?: string | null;
+   cqiIsLocked: boolean;
+   rootCause?: string | null;
+   implementedInBatch?: string | null;
+  actionTaken?: string | null;
 }
 
 export interface PEOQuestionBreakdownItem {
@@ -102,11 +109,12 @@ export interface PEOReportQuestionBreakdown {
 export interface PEOCQISection {
   peoId: string;
   rootCause: string | null;
-  remedialPlan: string | null;
   cqiStatus: 'Closed' | 'Open';
   hodApprovedBy: string | null;
   hodApprovedDate: string | null;
   cqiPending: boolean;
+  implementedInBatch?: string | null;
+  actionTaken?: string | null;
 }
 
 export interface PEOReportSignatures {

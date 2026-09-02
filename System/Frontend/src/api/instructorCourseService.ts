@@ -1,11 +1,13 @@
 import { api } from './api';
+import { CourseOfferingType } from './electivesService';
 
 export interface InstructorCourse {
   allocation_id: number;
   course_id: number | string;
   course_name: string;
   course_code: string;
-  course_type?: string; 
+  course_type?: string;
+  offering_type?: CourseOfferingType;
   course_description?: string;
   credits?: number;
   semester_id?: number | string;

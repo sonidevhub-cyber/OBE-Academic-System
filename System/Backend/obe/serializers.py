@@ -150,7 +150,7 @@ class CourseGAScoreSerializer(serializers.ModelSerializer):
 class GACQIResubmissionHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = GACQIResubmissionHistory
-        fields = ['id', 'cqi_record', 'root_cause_snapshot', 'remedial_plan_snapshot', 'hod_comment_snapshot', 'status_at_time', 'submitted_at']
+        fields = ['id', 'cqi_record', 'root_cause_snapshot', 'hod_comment_snapshot', 'status_at_time', 'submitted_at']
         read_only_fields = ['id', 'submitted_at']
 
 
@@ -202,7 +202,7 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'ga', 'ga_title', 'ga_code', 'batch', 'batch_name', 'cqi_level', 'semester',
             'attainment_value', 'kpi_threshold_at_trigger',
-            'root_cause', 'remedial_plan', 'hod_comment', 'status',
+            'root_cause', 'hod_comment', 'status',
             'submitted_by', 'approved_by', 'is_audit_visible', 'is_locked',
             'created_at', 'updated_at', 'history', 'contributing_courses',
             'issue_statement', 'hod_action_plan', 'triggered_at', 
@@ -222,7 +222,7 @@ class GACQIRecordSerializer(serializers.ModelSerializer):
 class PEOCQISubmissionHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PEOCQISubmissionHistory
-        fields = ['id', 'cqi_record', 'root_cause_snapshot', 'remedial_plan_snapshot', 'status_at_time', 'submitted_at']
+        fields = ['id', 'cqi_record', 'root_cause_snapshot', 'status_at_time', 'submitted_at']
         read_only_fields = ['id', 'submitted_at']
 
 
@@ -267,7 +267,7 @@ class PEOCQIRecordSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'peo', 'peo_title', 'peo_code', 'batch', 'batch_name',
             'attainment_value', 'kpi_threshold_at_trigger',
-            'root_cause', 'remedial_plan', 'status',
+            'root_cause', 'status',
             'submitted_by', 'is_locked',
             'created_at', 'updated_at', 'history', 'contributing_gas',
             'implemented_in_batch', 'implemented_in_batch_name',

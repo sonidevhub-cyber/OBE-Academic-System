@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { FaTasks, FaUsers } from "react-icons/fa";
 import { toast } from "react-toastify";
 import { InstructorCourse } from "../../api/instructorCourseService";
+import { electivesApi, CourseOfferingType } from "../../api/electivesService";
 import CQI from "./CQI";
 // Nayi alag file import karein jo aapne banai hai edit/history ke liye
 import EditAssessmentView from "./EditAssessmentView";
@@ -13,6 +14,8 @@ const TaskIcon = FaTasks as unknown as React.FC<any>;
 type Student = {
   student_id: string;
   name: string;
+  registration_number?: string;
+  custom_id?: string;
 };
 
 type CLO = {
@@ -227,6 +230,7 @@ const ManageClass: React.FC<Props> = ({
   ]);
 
   const [students, setStudents] = useState<Student[]>([]);
+  const [studentLoading, setStudentLoading] = useState(false);
   const [clos, setClos] = useState<CLO[]>([]);
   const [marks, setMarks] = useState<{ [key: string]: number | string }>({});
   const [checkedCQI, setCheckedCQI] = useState(false);
@@ -493,10 +497,23 @@ const handleTypeChange = (value: string) => {
   useEffect(() => {
     if (!batchId) return;
 
-    api.get(`students/?batch=${batchId}&page_size=500`)
-      .then(res => {
+    const normalizedOfferingType: CourseOfferingType | null = (() => {
+      const raw: any =
+        selectedCourse?.offering_type ??
+        (selectedCourse as any)?.course_offering_type ??
+        null;
+      if (!raw) return null;
+      const up = String(raw).toUpperCase();
+      if (up === 'COMPULSORY' || up === 'ELECTIVE' || up === 'SELECTIVE') return up;
+      return null;
+    })();
+
+    const loadStudents = async () => {
+      setStudentLoading(true);
+      try {
+        const res = await api.get(`students/?batch=${batchId}&page_size=500`);
         const data = res.data;
-        let studentList = [];
+        let studentList: any[] = [];
         if (Array.isArray(data)) {
           studentList = data;
         } else if (data?.results) {
@@ -506,29 +523,84 @@ const handleTypeChange = (value: string) => {
         } else if (data?.students) {
           studentList = data.students;
         }
-        const filteredStudents = retakeStudentIdSet.size > 0
-          ? studentList.filter((student: any) => {
+
+        const applyEnrollmentFilter = async (students: any[]) => {
+          try {
+            const enrollmentsRes = await electivesApi.getSACEnrollments({
+              batch: batchId,
+              semester: semesterNumber,
+            });
+            const allEnrollments = enrollmentsRes.data.all_enrollments || [];
+            const courseEnrollments = allEnrollments.filter(
+              (e: any) => String(e.course_id) === String(courseId)
+            );
+
+            const resolvedOffering: CourseOfferingType | null = (() => {
+              if (normalizedOfferingType) return normalizedOfferingType;
+              const fromEnrollment = courseEnrollments[0]?.course_offering_type;
+              if (!fromEnrollment) return null;
+              const up = String(fromEnrollment).toUpperCase();
+              if (up === 'COMPULSORY' || up === 'ELECTIVE' || up === 'SELECTIVE') return up as CourseOfferingType;
+              return null;
+            })();
+
+            if (courseEnrollments.length === 0) {
+              if (resolvedOffering === 'COMPULSORY' || resolvedOffering === null) {
+                return { studentList: students, enrolledStudentIds: new Set<string>() };
+              }
+              return { studentList: [], enrolledStudentIds: new Set<string>() };
+            }
+
+            const enrolledStudentIds = new Set<string>(
+              courseEnrollments.map((e: any) => String(e.student_id))
+            );
+
+            const filteredByEnrollment = students.filter((student: any) => {
               const possibleIds = [
                 String(student.student_id || ''),
                 String(student.id || ''),
               ];
-              return (
-                possibleIds.some((id) => retakeStudentIdSet.has(id))
-              );
-            })
-          : studentList;
+              return possibleIds.some((id) => enrolledStudentIds.has(id));
+            });
 
-        // Sort students by registration number (increasing order)
+            return { studentList: filteredByEnrollment, enrolledStudentIds };
+          } catch (err) {
+            console.warn('[ManageClass] Enrollment filter failed, falling back safely:', err);
+            if (normalizedOfferingType === 'ELECTIVE' || normalizedOfferingType === 'SELECTIVE') {
+              return { studentList: [], enrolledStudentIds: new Set<string>() };
+            }
+            return { studentList: students, enrolledStudentIds: new Set<string>() };
+          }
+        };
+
+        const { studentList: enrollmentFilteredStudents } = await applyEnrollmentFilter(studentList);
+
+        const filteredStudents = retakeStudentIdSet.size > 0
+          ? enrollmentFilteredStudents.filter((student: any) => {
+              const possibleIds = [
+                String(student.student_id || ''),
+                String(student.id || ''),
+              ];
+              return possibleIds.some((id) => retakeStudentIdSet.has(id));
+            })
+          : enrollmentFilteredStudents;
+
         const sortedStudents = [...filteredStudents].sort((a: any, b: any) => {
-          const regA = a.registration_number || a.custom_id || '';
-          const regB = b.registration_number || b.custom_id || '';
-          return regA.localeCompare(regB);
+          const regA = a.registration_number || a.custom_id || a.student_id || '';
+          const regB = b.registration_number || b.custom_id || b.student_id || '';
+          return regA.localeCompare(regB, undefined, { numeric: true });
         });
 
         setStudents(sortedStudents);
-      })
-      .catch(() => setStudents([]));
-  }, [batchId, retakeStudentId, retakeStudentIds]);
+      } catch {
+        setStudents([]);
+      } finally {
+        setStudentLoading(false);
+      }
+    };
+
+    loadStudents();
+  }, [batchId, retakeStudentId, retakeStudentIds, courseId, selectedCourse, semesterNumber]);
 
   const loadAssessmentHistory = async () => {
     if (!isRetakeMode || !primaryRetakeStudentId || !courseId || !batchId || !semesterNumber) {
@@ -738,6 +810,7 @@ const handleTypeChange = (value: string) => {
   const handleSubmit = async () => {
     try {
       if (saving) return;
+      setSaving(true);
 
       // CREATE MODE VALIDATIONS
       if (!isRetakeMode) {
@@ -825,19 +898,36 @@ const handleTypeChange = (value: string) => {
           const sId = s.student_id || (s as any).id;
           if (type === "sessional") {
             const key = `${sId}-0`;
+            const entered = marks[key];
+            if (entered === undefined || entered === "" || entered === null) return;
             payload.push({
               student_id: sId,
               question_id: backendQuestions[0].id,
-              marks: Number(marks[key] || 0)
+              marks: Number(entered) || 0
             });
           } else {
+            const hasAnyMark = questions.some((_, index) => {
+              const key = `${sId}-${index}`;
+              const entered = marks[key];
+              return entered !== undefined && entered !== "" && entered !== null;
+            });
+            if (!hasAnyMark) return;
             questions.forEach((q, index) => {
               const key = `${sId}-${index}`;
-              payload.push({
-                student_id: sId,
-                question_id: backendQuestions[index].id,
-                marks: Number(marks[key] || 0)
-              });
+              const entered = marks[key];
+              if (entered === undefined || entered === "" || entered === null) {
+                payload.push({
+                  student_id: sId,
+                  question_id: backendQuestions[index].id,
+                  marks: 0
+                });
+              } else {
+                payload.push({
+                  student_id: sId,
+                  question_id: backendQuestions[index].id,
+                  marks: Number(entered) || 0
+                });
+              }
             });
           }
         });
@@ -936,7 +1026,7 @@ const handleTypeChange = (value: string) => {
 
         response = await api.post(
           `assessments/${res.data.assessment_id}/enter-marks/`,
-          buildMarksPayload(students, res.data.questions)
+          buildMarksPayload(marksTableStudents, res.data.questions)
         );
 
         if (response?.data?.trigger_cqi && lastAssessmentId) {
@@ -1355,12 +1445,19 @@ const handleTypeChange = (value: string) => {
                   )}
                 </div>
 
-                {/* STUDENTS MARKS INPUT TABLE */}
-                <div className="overflow-auto mt-5">
-                  <table className="w-full border">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border p-2">Student</th>
+                 {/* STUDENTS MARKS INPUT TABLE */}
+                 <div className="overflow-auto mt-5 relative">
+                   {studentLoading && marksTableStudents.length === 0 && (
+                     <div className="absolute inset-0 bg-white bg-opacity-70 flex items-center justify-center z-10">
+                       <div className="text-sm font-medium text-gray-500">Loading students...</div>
+                     </div>
+                   )}
+                   <table className="w-full border">
+                     <thead>
+                       <tr className="bg-gray-100">
+                         <th className="border p-2">Sr. No.</th>
+                         <th className="border p-2">Registration No.</th>
+                         <th className="border p-2">Student</th>
                         {type === "sessional" ? (
                           <th className="border p-2">Obtained Marks (out of {totalMarks || 0})</th>
                         ) : questions.length > 0 ? (
@@ -1381,18 +1478,21 @@ const handleTypeChange = (value: string) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {marksTableStudents.map(student => {
+                      {marksTableStudents.map((student, index) => {
                         const sId = student.student_id || (student as any).id;
                         let total = 0;
 
                         if (type === "sessional") {
                           const key = `${sId}-0`;
-                          const rawVal = marks[key] ?? 0;
-                          const value = rawVal === "" ? "" : Number(rawVal);
-                          total = Number(value) || 0;
+                          const entered = marks[key];
+                          const hasMark = entered !== undefined && entered !== "" && entered !== null;
+                          const value = hasMark ? Number(entered) : "";
+                          total = hasMark ? Number(value) : 0;
 
                           return (
                             <tr key={sId}>
+                              <td className="border p-2 text-center font-semibold">{index + 1}</td>
+                              <td className="border p-2 text-center font-mono text-xs">{student.registration_number || student.custom_id || student.student_id || '-'}</td>
                               <td className="border p-2 font-medium">{student.name}</td>
                               <td className="border p-2 text-center">
                                 <input
@@ -1416,22 +1516,30 @@ const handleTypeChange = (value: string) => {
                                 />
                               </td>
                               <td className="border p-2 font-bold text-green-700 bg-green-50 text-center">
-                                {total}
+                                {hasMark ? total : "N/A"}
                               </td>
                             </tr>
                           );
                         }
 
-                        return (
-                          <tr key={sId}>
-                            <td className="border p-2 font-medium">{student.name}</td>
+                        const allMarks = questions.map((_, index) => {
+                          const key = `${sId}-${index}`;
+                          const entered = marks[key];
+                          const hasMark = entered !== undefined && entered !== "" && entered !== null;
+                          const value = hasMark ? Number(entered) : "";
+                          total += hasMark ? Number(value) : 0;
+                          return { key, hasMark, value };
+                        });
+                        const hasAnyMark = allMarks.some(m => m.hasMark);
+
+                          return (
+                            <tr key={sId}>
+                              <td className="border p-2 text-center font-semibold">{index + 1}</td>
+                              <td className="border p-2 text-center font-mono text-xs">{student.registration_number || student.custom_id || student.student_id || '-'}</td>
+                              <td className="border p-2 font-medium">{student.name}</td>
                             {questions.length > 0 ? (
                               questions.map((q, index) => {
-                                const key = `${sId}-${index}`;
-                                const rawVal = marks[key] ?? 0;
-                                const value = rawVal === "" ? "" : Number(rawVal);
-                                total += Number(value) || 0;
-
+                                const { hasMark, value } = allMarks[index];
                                 return (
                                   <td key={index} className="border p-2 text-center">
                                     <input
@@ -1443,13 +1551,13 @@ const handleTypeChange = (value: string) => {
                                       onChange={(e) => {
                                         const valStr = e.target.value;
                                         if (valStr === "") {
-                                          handleMarksChange(key, "");
+                                          handleMarksChange(`${sId}-${index}`, "");
                                           return;
                                         }
                                         const val = Number(valStr);
                                         const maxAllowed = q.marks || Number(totalMarks) || 100;
                                         if (val <= maxAllowed) {
-                                          handleMarksChange(key, valStr);
+                                          handleMarksChange(`${sId}-${index}`, valStr);
                                         }
                                       }}
                                     />
@@ -1463,13 +1571,13 @@ const handleTypeChange = (value: string) => {
                                   min={0}
                                   max={Number(totalMarks) || 100}
                                   className="border w-24 text-center p-1 rounded font-semibold focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                                  value={marks[`${sId}-0`] ?? 0}
+                                  value={marks[`${sId}-0`] ?? ""}
                                   onChange={(e) => handleMarksChange(`${sId}-0`, e.target.value)}
                                 />
                               </td>
                             )}
                             <td className="border p-2 font-bold text-green-700 bg-green-50 text-center">
-                              {total}
+                              {hasAnyMark ? total : "N/A"}
                             </td>
                           </tr>
                         );

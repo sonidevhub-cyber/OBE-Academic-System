@@ -39,6 +39,8 @@ interface CQITriggerRow {
   detail: string;
   reason: string;
   remedy: string;
+  implemented_on?: string | null;
+  action_taken?: string | null;
 }
 
 interface VisionMissionPDFRow {
@@ -50,6 +52,8 @@ interface VisionMissionPDFRow {
   status: string;
   cqi_action_required: boolean;
   hod_action_plan: string;
+  implemented_in_batch_name?: string | null;
+  action_taken_description?: string | null;
 }
 
 interface VisionMissionPDFData {
@@ -361,12 +365,16 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
           <Text style={styles.vmHeaderCell}>Attainment</Text>
           <Text style={styles.vmHeaderCell}>Status</Text>
           <Text style={styles.vmHeaderWideCell}>HOD CQI Action Plan</Text>
+          <Text style={styles.vmHeaderCell}>Implemented On</Text>
+          <Text style={styles.vmWideCell}>Action Taken</Text>
         </View>
         {rows.length === 0 ? (
           <View style={styles.vmRow}>
             <Text style={styles.vmWideCell}>No approved keywords available</Text>
             <Text style={styles.vmCell}>-</Text>
             <Text style={styles.vmCell}>-</Text>
+            <Text style={styles.vmCell}>-</Text>
+            <Text style={styles.vmWideCell}>-</Text>
             <Text style={styles.vmCell}>-</Text>
             <Text style={styles.vmWideCell}>-</Text>
           </View>
@@ -384,6 +392,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
               <Text style={styles.vmWideCell}>
                 {row.cqi_action_required ? row.hod_action_plan || 'Pending HOD action plan' : 'No CQI action required'}
               </Text>
+              <Text style={styles.vmCell}>{row.implemented_in_batch_name || '-'}</Text>
+              <Text style={styles.vmWideCell}>{row.action_taken_description || '-'}</Text>
             </View>
           ))
         )}
@@ -497,6 +507,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
     <Text style={styles.thWide}>Detail</Text>
     <Text style={styles.thWide}>Reason</Text>
     <Text style={styles.thWide}>Remedy</Text>
+    <Text style={styles.th}>Implemented On</Text>
+    <Text style={styles.thWide}>Action Taken</Text>
   </View>
 
   {cloCqiRows.length === 0 ? (
@@ -504,6 +516,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
       <Text style={styles.tdWide}>No CLO CQI entries found</Text>
       <Text style={styles.tdWide}>All visible CLOs meet target</Text>
       <Text style={styles.tdWide}>-</Text>
+      <Text style={styles.tdWide}>-</Text>
+      <Text style={styles.td}>-</Text>
       <Text style={styles.tdWide}>-</Text>
     </View>
   ) : (
@@ -513,6 +527,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
         <Text style={styles.tdWide}>{row.detail}</Text>
         <Text style={styles.tdWide}>{row.reason}</Text>
         <Text style={styles.tdWide}>{row.remedy}</Text>
+        <Text style={styles.td}>{row.implemented_on || '-'}</Text>
+        <Text style={styles.tdWide}>{row.action_taken || '-'}</Text>
       </View>
     ))
   )}
@@ -554,17 +570,21 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
         <View style={styles.content}>
           <Text style={styles.sectionTitle}>GA CQI Details</Text>
           <View style={styles.table}>
-            <View style={styles.tableRowHeader}>
+             <View style={styles.tableRowHeader}>
               <Text style={styles.thWide}>Item</Text>
               <Text style={styles.thWide}>Detail</Text>
               <Text style={styles.thWide}>Reason</Text>
               <Text style={styles.thWide}>Remedy</Text>
+              <Text style={styles.th}>Implemented On</Text>
+              <Text style={styles.thWide}>Action Taken</Text>
             </View>
             {gaCqiRows.length === 0 ? (
               <View style={styles.tableRow}>
                 <Text style={styles.tdWide}>No GA CQI entries found</Text>
                 <Text style={styles.tdWide}>All GAs meet target</Text>
                 <Text style={styles.tdWide}>-</Text>
+                <Text style={styles.tdWide}>-</Text>
+                <Text style={styles.td}>-</Text>
                 <Text style={styles.tdWide}>-</Text>
               </View>
             ) : (
@@ -574,6 +594,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
                   <Text style={styles.tdWide}>{row.detail}</Text>
                   <Text style={styles.tdWide}>{row.reason}</Text>
                   <Text style={styles.tdWide}>{row.remedy}</Text>
+                  <Text style={styles.td}>{row.implemented_on || '-'}</Text>
+                  <Text style={styles.tdWide}>{row.action_taken || '-'}</Text>
                 </View>
               ))
             )}
@@ -622,12 +644,16 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
               <Text style={styles.thWide}>Detail</Text>
               <Text style={styles.thWide}>Reason</Text>
               <Text style={styles.thWide}>Remedy</Text>
+              <Text style={styles.th}>Implemented On</Text>
+              <Text style={styles.thWide}>Action Taken</Text>
             </View>
             {peoCqiRows.length === 0 ? (
               <View style={styles.tableRow}>
                 <Text style={styles.tdWide}>No PO CQI entries found</Text>
                 <Text style={styles.tdWide}>All POs meet target</Text>
                 <Text style={styles.tdWide}>-</Text>
+                <Text style={styles.tdWide}>-</Text>
+                <Text style={styles.td}>-</Text>
                 <Text style={styles.tdWide}>-</Text>
               </View>
             ) : (
@@ -637,6 +663,8 @@ const OBEReportPDF: React.FC<OBEReportPDFProps> = ({
                   <Text style={styles.tdWide}>{row.detail}</Text>
                   <Text style={styles.tdWide}>{row.reason}</Text>
                   <Text style={styles.tdWide}>{row.remedy}</Text>
+                  <Text style={styles.td}>{row.implemented_on || '-'}</Text>
+                  <Text style={styles.tdWide}>{row.action_taken || '-'}</Text>
                 </View>
               ))
             )}

@@ -584,7 +584,6 @@ class GACQIRecord(models.Model):
     attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     root_cause = models.TextField(blank=True, null=True)
-    remedial_plan = models.TextField(blank=True, null=True)
     hod_comment = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='NOT_TRIGGERED')
     submitted_by = models.ForeignKey(
@@ -672,7 +671,6 @@ class PEOCQIRecord(models.Model):
     attainment_value = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     kpi_threshold_at_trigger = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     root_cause = models.TextField(blank=True, null=True)
-    remedial_plan = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
     submitted_by = models.ForeignKey(
         'core.CustomUser',
@@ -721,7 +719,6 @@ class PEOCQISubmissionHistory(models.Model):
         related_name='history'
     )
     root_cause_snapshot = models.TextField(blank=True, null=True)
-    remedial_plan_snapshot = models.TextField(blank=True, null=True)
     status_at_time = models.CharField(max_length=30)
     submitted_at = models.DateTimeField(auto_now_add=True)
 
@@ -773,7 +770,6 @@ class GACQIResubmissionHistory(models.Model):
         related_name='history'
     )
     root_cause_snapshot = models.TextField(blank=True, null=True)
-    remedial_plan_snapshot = models.TextField(blank=True, null=True)
     hod_comment_snapshot = models.TextField(blank=True, null=True)
     status_at_time = models.CharField(max_length=30)
     submitted_at = models.DateTimeField(auto_now_add=True)
@@ -1819,7 +1815,7 @@ class PEOKeywordMapping(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=(
+                condition=(
                     Q(mission_keyword__isnull=False, vision_keyword__isnull=True)
                     | Q(mission_keyword__isnull=True, vision_keyword__isnull=False)
                 ),

@@ -5,8 +5,6 @@ import type { PEOIndirectWeightConfig, PEOQuestionBreakdownItem, PEOReportMatrix
 interface PEOMatrixTableProps {
   matrix: PEOReportMatrixItem[];
   indirectWeightConfig?: PEOIndirectWeightConfig;
-  onTriggerCQI?: (row: PEOReportMatrixItem) => void;
-  canManageCQI?: boolean;
 }
 
 const statusStyles: Record<PEOReportMatrixItem['status'], string> = {
@@ -42,8 +40,6 @@ const sourceLabel = (source?: string) => (source === 'Employer Survey' ? 'Employ
 const PEOMatrixTable: React.FC<PEOMatrixTableProps> = ({
   matrix,
   indirectWeightConfig,
-  onTriggerCQI,
-  canManageCQI = true,
 }) => {
   const [expandedRows, setExpandedRows] = React.useState<Record<string, boolean>>({});
   const effectiveWeights = React.useMemo(
@@ -186,22 +182,21 @@ const PEOMatrixTable: React.FC<PEOMatrixTableProps> = ({
                         {displayStatus}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-sm border border-gray-200 whitespace-nowrap">
-                      {row.status === 'CQI Triggered' && onTriggerCQI && canManageCQI ? (
-                        <button
-                          onClick={() => onTriggerCQI(row)}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                            row.cqiStatus === 'APPROVED'
-                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                              : 'bg-rose-600 text-white hover:bg-rose-700'
-                          }`}
-                        >
-                          {row.cqiStatus === 'APPROVED' ? 'View CQI' : 'Trigger CQI'}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
+                     <td className="px-3 py-2 text-sm border border-gray-200 whitespace-nowrap">
+                       {row.status === 'CQI Triggered' ? (
+                         <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase ${
+                           row.cqiStatus === 'APPROVED' || row.cqiStatus === 'CLOSED_IMPLEMENTED' || row.cqiIsLocked
+                             ? 'bg-emerald-100 text-emerald-700'
+                             : 'bg-amber-100 text-amber-800'
+                         }`}>
+                           {row.cqiStatus === 'APPROVED' || row.cqiStatus === 'CLOSED_IMPLEMENTED' || row.cqiIsLocked
+                             ? 'Closed'
+                             : 'In Progress'}
+                         </span>
+                       ) : (
+                         <span className="text-xs text-gray-400">-</span>
+                       )}
+                     </td>
                   </tr>
                   {isExpanded && (
                     <tr>

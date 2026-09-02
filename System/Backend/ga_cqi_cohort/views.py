@@ -225,7 +225,7 @@ class GACQIAdvisoryExportView(APIView):
             cqi_level='CUMULATIVE',
             is_active=True,
             status__in=['SAVED', 'CLOSED_IMPLEMENTED'],
-        ).select_related('ga', 'saved_by_hod')
+        ).select_related('ga', 'saved_by_hod', 'closed_by', 'implemented_in_batch')
         
         serializer = GACQICohortSerializer(cqi_records, many=True)
         
@@ -253,7 +253,7 @@ class GACQIAdvisoryExportPDFView(APIView):
             cqi_level='CUMULATIVE',
             is_active=True,
             status__in=['SAVED', 'CLOSED_IMPLEMENTED'],
-        ).select_related('ga', 'saved_by_hod')
+        ).select_related('ga', 'saved_by_hod', 'closed_by', 'implemented_in_batch')
         
         html_content = f"""
         <html>
@@ -285,6 +285,9 @@ class GACQIAdvisoryExportPDFView(APIView):
                         <th>Saved At</th>
                         <th>Closed By</th>
                         <th>Closed At</th>
+                        <th>Implemented On</th>
+                        <th>Action Taken</th>
+                        <th>Resulting Attainment</th>
                     </tr>
         """
         
@@ -303,6 +306,9 @@ class GACQIAdvisoryExportPDFView(APIView):
                         <td>{record.saved_at.strftime('%Y-%m-%d %H:%M:%S') if record.saved_at else 'N/A'}</td>
                         <td>{escape(record.closed_by.full_name if record.closed_by else 'N/A')}</td>
                         <td>{record.closed_at.strftime('%Y-%m-%d %H:%M:%S') if record.closed_at else 'N/A'}</td>
+                        <td>{escape(record.implemented_in_batch.name if record.implemented_in_batch else '-')}</td>
+                        <td>{escape(record.action_taken_description or '-')}</td>
+                        <td>{record.resulting_attainment if record.resulting_attainment is not None else '-'}</td>
                     </tr>
             """
             

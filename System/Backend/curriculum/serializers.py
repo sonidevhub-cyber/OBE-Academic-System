@@ -36,6 +36,30 @@ class CurriculumVersionCourseSerializer(
         source="course.course_type"
     )
 
+    offering_type = serializers.ReadOnlyField(
+        source="course.offering_type"
+    )
+
+    elective_group_id = serializers.UUIDField(
+        source="course.elective_group.id", read_only=True, allow_null=True
+    )
+
+    elective_group_name = serializers.CharField(
+        source="course.elective_group.group_name", read_only=True, allow_null=True
+    )
+
+    selective_group_id = serializers.UUIDField(
+        source="course.selective_group.id", read_only=True, allow_null=True
+    )
+
+    selective_group_name = serializers.CharField(
+        source="course.selective_group.group_name", read_only=True, allow_null=True
+    )
+
+    parent_course_id = serializers.UUIDField(
+        source="course.parent_course.id", read_only=True, allow_null=True
+    )
+
     credit_hours = serializers.ReadOnlyField(
         source="course.credit_hours"
     )
@@ -50,9 +74,15 @@ class CurriculumVersionCourseSerializer(
             "course_code",
             "course_name",
             "course_type",
+            "offering_type",
             "credit_hours",
             "semester_no",
             "is_active",
+            "elective_group_id",
+            "elective_group_name",
+            "selective_group_id",
+            "selective_group_name",
+            "parent_course_id",
         ]
 
         read_only_fields = [

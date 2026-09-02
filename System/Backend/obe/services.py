@@ -87,6 +87,72 @@ def get_students_for_batch(batch: Batch):
     )
 
 
+def _get_enrolled_student_ids_for_course_session(course_session: CourseSession) -> set:
+    """
+    Return the set of student UUIDs actually enrolled in the course_session's course.
+
+    Compulsory courses: all students in the batch count.
+    Elective/Selective courses: only students with an active StudentElectiveEnrollment row.
+    """
+    from core.models.course import Course
+    course = course_session.course
+    offering_type = getattr(course, 'offering_type', Course.OFFERING_COMPULSORY)
+
+    if offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+        all_ids = get_students_for_batch(course_session.batch).values_list('student_id', flat=True)
+        return set(all_ids)
+
+    try:
+        from electives.models import StudentElectiveEnrollment
+        enrolled_ids = StudentElectiveEnrollment.objects.filter(
+            course=course,
+            batch=course_session.batch,
+            semester=course_session.semester,
+            is_active=True,
+        ).values_list('student_id', flat=True)
+        return set(enrolled_ids)
+    except Exception:
+        return set()
+
+
+def get_students_enrolled_in_course(course_session: CourseSession):
+    """
+    Return Student queryset filtered to only students actually enrolled in
+    this course_session's course. Compulsory courses keep the full batch roster.
+    """
+    enrolled_ids = _get_enrolled_student_ids_for_course_session(course_session)
+    if not enrolled_ids:
+        return Student.objects.none()
+    return get_students_for_batch(course_session.batch).filter(student_id__in=enrolled_ids)
+
+
+def is_student_enrolled_in_course_session(student: Student, course_session: CourseSession) -> bool:
+    """
+    Check whether a student is enrolled in a specific course_session's course.
+
+    Compulsory: always True.
+    Elective/Selective: requires active StudentElectiveEnrollment row.
+    """
+    from core.models.course import Course
+    course = course_session.course
+    offering_type = getattr(course, 'offering_type', Course.OFFERING_COMPULSORY)
+
+    if offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+        return True
+
+    try:
+        from electives.models import StudentElectiveEnrollment
+        return StudentElectiveEnrollment.objects.filter(
+            student=student,
+            course=course,
+            batch=course_session.batch,
+            semester=course_session.semester,
+            is_active=True,
+        ).exists()
+    except Exception:
+        return False
+
+
 def get_effective_course_sessions(
     batch: Batch,
     *,
@@ -171,9 +237,9 @@ def calculate_course_ga_score(course_session: CourseSession, ga: GA, assessment_
     total_score = Decimal('0.00')
     total_weight = Decimal('0.00')
 
-    students = list(get_students_for_batch(course_session.batch))
+    students = list(get_students_enrolled_in_course(course_session))
     enrolled_students_count = len(students)
-    logger.info(f"[calculate_course_ga_score] Found {enrolled_students_count} enrolled students")
+    logger.info(f"[calculate_course_ga_score] Found {enrolled_students_count} enrolled students (course offering_type={getattr(course_session.course, 'offering_type', 'COMPULSORY')})")
 
     # Pre-fetch all active retakes for this course and either failed_batch OR current_batch
     from retake.models import CourseRetake
@@ -400,8 +466,8 @@ def calculate_all_course_ga_scores(course_session: CourseSession, assessment_typ
                 logger.info(f"[calculate_all_course_ga_scores] Added ga score={score.score} for ga=GA-{ga.order_number}")
 
         # Now calculate StudentCLOScores
-        students = list(get_students_for_batch(course_session.batch))
-        logger.info(f"[calculate_all_course_ga_scores] Found {len(students)} students for StudentCLOScore calculation")
+        students = list(get_students_enrolled_in_course(course_session))
+        logger.info(f"[calculate_all_course_ga_scores] Found {len(students)} students for StudentCLOScore calculation (course offering_type={getattr(course_session.course, 'offering_type', 'COMPULSORY')})")
 
         # Get all active CLOs for this course, filtered by the batch's curriculum version
         all_clos = CLO.objects.filter(
@@ -687,7 +753,9 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
     total_weight = Decimal('0')
 
     for session in course_sessions:
-        # Get CLO-GA mappings for this course
+        if not is_student_enrolled_in_course_session(student, session):
+            continue
+
         mappings = CLOGAMapping.objects.filter(
             clo__course=session.course,
             ga=ga,
@@ -696,7 +764,6 @@ def calculate_ga_attainment_semester_student(student: Student, semester: Semeste
         )
 
         for mapping in mappings:
-            # Get student's score on this CLO
             student_clo_score = StudentCLOScore.objects.filter(
                 student=student,
                 clo=mapping.clo,
@@ -779,6 +846,9 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
     total_weight = Decimal('0')
 
     for session in course_sessions:
+        if not is_student_enrolled_in_course_session(student, session):
+            continue
+
         session_mappings = mappings_by_course.get(session.course_id, [])
         
         for mapping in session_mappings:
@@ -991,7 +1061,6 @@ def get_teacher_ga_context(course_id: str, batch_id: str = None):
             remedy_text = (
                 warning_record.remedy_text
                 or warning_record.hod_action_plan
-                or warning_record.remedial_plan
                 or None
             )
 
@@ -1025,7 +1094,6 @@ def get_teacher_ga_context(course_id: str, batch_id: str = None):
             ),
             'cqi_status': warning_record.status if warning_record else None,
             'hod_action_plan': warning_record.hod_action_plan if warning_record else None,
-            'remedial_plan': warning_record.remedial_plan if warning_record else None,
             'recommended_remedy': remedy_text
         }
 
@@ -1345,7 +1413,6 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
 
     gas = GA.objects.filter(program=batch.program, is_active=True)
     reports = []
-    total_eligible_students = get_students_for_batch(batch).count()
     target_curriculum_version = batch.curriculum_version
 
     course_sessions = get_effective_course_sessions(
@@ -1359,8 +1426,6 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
             session for session in course_sessions
             if str(session.course_id) in allowed_course_ids
         ]
-
-    enrolled_students_count = get_students_for_batch(batch).count()
 
     for ga in gas:
         direct_score = calculate_ga_attainment_semester_cohort(batch, semester, ga)
@@ -1399,13 +1464,14 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
 
             course_feedback_score = None
             course_feedback_coverage = None
+            course_enrolled_count = score_obj.enrolled_students if score_obj else len(_get_enrolled_student_ids_for_course_session(session))
             if total_weight > 0:
                 course_feedback_score = round(total_weighted_score / total_weight, 2)
                 respondent_count = responses.filter(course_id=session.course_id).values('student').distinct().count()
                 course_feedback_coverage = round(
-                    (Decimal(str(respondent_count)) / Decimal(str(total_eligible_students))) * Decimal('100'),
+                    (Decimal(str(respondent_count)) / Decimal(str(course_enrolled_count))) * Decimal('100'),
                     2
-                ) if total_eligible_students > 0 else Decimal('0')
+                ) if course_enrolled_count > 0 else Decimal('0')
                 cf_scores.append(course_feedback_score)
                 cf_coverages.append(course_feedback_coverage)
 
@@ -1414,7 +1480,7 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
                 'course_name': session.course.name,
                 'course_ga_score': float(score_obj.score) if score_obj else None,
                 'course_feedback_score': float(course_feedback_score) if course_feedback_score is not None else None,
-                'enrolled_students': score_obj.enrolled_students if score_obj else enrolled_students_count,
+                'enrolled_students': course_enrolled_count,
                 'semester': session.semester.number if session.semester else None,
                 'credits': session.course.credit_hours,
                 'assessment_status': session.assessment_status,

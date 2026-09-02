@@ -904,20 +904,19 @@ class GACQIRecordDetailView(APIView):
         if not is_coordinator:
             return Response({'error': 'Only coordinators can update root cause/remedial plan'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Save history if there are changes to root_cause or remedial_plan
-        if 'root_cause' in request.data or 'remedial_plan' in request.data:
+        # Save history if there are changes to root_cause
+        if 'root_cause' in request.data:
             GACQIResubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 hod_comment_snapshot=cqi.hod_comment,
                 status_at_time=cqi.status
             )
 
         serializer = GACQIRecordSerializer(cqi, data=request.data, partial=True)
         if serializer.is_valid():
-            # If status is being set to PENDING, or if root/plan are provided and it was SENT_BACK
-            if request.data.get('status') == 'PENDING' or ((request.data.get('root_cause') or cqi.root_cause) and (request.data.get('remedial_plan') or cqi.remedial_plan) and cqi.status == 'SENT_BACK'):
+            # If status is being set to PENDING, or if root cause is provided and it was SENT_BACK
+            if request.data.get('status') == 'PENDING' or ((request.data.get('root_cause') or cqi.root_cause) and cqi.status == 'SENT_BACK'):
                 serializer.validated_data['status'] = 'PENDING'
                 serializer.validated_data['submitted_by'] = request.user
             serializer.save()
@@ -965,7 +964,6 @@ class GACQICreateView(APIView):
             GACQIResubmissionHistory.objects.create(
                 cqi_record=cqi,
                 root_cause_snapshot=cqi.root_cause,
-                remedial_plan_snapshot=cqi.remedial_plan,
                 hod_comment_snapshot=cqi.hod_comment,
                 status_at_time=cqi.status
             )
@@ -1011,7 +1009,6 @@ class GACQIApproveView(APIView):
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )
@@ -1052,7 +1049,6 @@ class GACQIRejectView(APIView):
         GACQIResubmissionHistory.objects.create(
             cqi_record=cqi,
             root_cause_snapshot=cqi.root_cause,
-            remedial_plan_snapshot=cqi.remedial_plan,
             hod_comment_snapshot=cqi.hod_comment,
             status_at_time=cqi.status
         )

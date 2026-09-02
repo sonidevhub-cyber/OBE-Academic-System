@@ -9,7 +9,8 @@ from curriculum.models import CurriculumVersion
 from core.responses import api_response
 from django.db import transaction
 from django.core.exceptions import ValidationError
-from assessments.workflows import derive_batch_semester_status
+from assessments.workflows import sync_course_session_workflow_from_assessments
+from obe.models import CourseSession
 
 from core.models import Course, Semester, Batch
 from obe.models import CLO
@@ -178,33 +179,35 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     except Exception:
                         semester_numbers.add(batch.current_semester)
 
-                for semester_no in semester_numbers or {batch.current_semester}:
-                    semester = Semester.objects.filter(program=batch.program, number=semester_no).first()
-                    if not semester:
+                blocked_courses = []
+
+                for item in allocations_data:
+                    course_id = item.get('course')
+                    if not course_id:
                         continue
-                    semester_status = derive_batch_semester_status(batch, semester)
-                    if semester_status in ['RESULT_RECEIVED', 'FINALIZED']:
-                        raise ValidationError("This semester is read-only because results have been received or finalized.")
-                    if semester_status == 'AWAITING_EXTERNAL_RESULT':
-                        incoming_course_ids = {
-                            str(item.get('course'))
-                            for item in allocations_data
-                            if item.get('course')
-                        }
-                        existing_course_ids = set(
-                            TeacherAllocation.objects.filter(
-                                curriculum_version=version,
-                                batch=batch,
-                                semester_no=semester_no,
-                                status='active',
-                                is_active=True,
-                            ).values_list('course_id', flat=True)
-                        )
-                        existing_course_ids = {str(course_id) for course_id in existing_course_ids}
-                        if incoming_course_ids != existing_course_ids:
-                            raise ValidationError(
-                                "This semester is awaiting external results. Instructor reassignment is allowed, but course allocation changes are locked."
-                            )
+                    try:
+                        vc = version.version_courses.get(course_id=course_id)
+                        sem_no = vc.semester_no
+                    except Exception:
+                        sem_no = batch.current_semester
+                    sem = Semester.objects.filter(
+                        program=batch.program, number=sem_no
+                    ).first()
+                    if sem:
+                        session = CourseSession.objects.filter(
+                            course_id=course_id, batch=batch, semester=sem, is_active=True
+                        ).first()
+                        if session:
+                            session = sync_course_session_workflow_from_assessments(session)
+                            if session.assessment_status == 'ASSESSMENT_DONE':
+                                blocked_courses.append(str(course_id))
+                                continue
+
+                if blocked_courses:
+                    raise ValidationError(
+                        "Cannot reassign instructors for the following course(s) because their results have already been received: "
+                        + ", ".join(blocked_courses)
+                    )
                 
                 # Auto-sync if version is empty (Option A support)
                 if not version.version_courses.exists():
@@ -224,6 +227,7 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                             new_course_ids.append(str(course_id))
                     
                     # Now, mark existing active allocations for courses NOT in new list as inactive
+                    # (but skip locked courses whose results have been received)
                     existing_active = TeacherAllocation.objects.filter(
                         curriculum_version=version,
                         batch=batch,
@@ -233,11 +237,26 @@ class TeacherAllocationViewSet(viewsets.ModelViewSet):
                     )
                     
                     for alloc in existing_active:
-                        if str(alloc.course.id) not in new_course_ids:
-                            print("Marking old allocation as inactive:", alloc.course.name, alloc.id)
-                            alloc.status = 'changed'
-                            alloc.is_active = False
-                            alloc.save()
+                        if str(alloc.course.id) in new_course_ids:
+                            continue
+                        # Check if this course's results have been received (per-course lock)
+                        alloc_sem_no = alloc.semester_no
+                        alloc_sem = Semester.objects.filter(
+                            program=batch.program, number=alloc_sem_no
+                        ).first()
+                        if alloc_sem:
+                            alloc_session = CourseSession.objects.filter(
+                                course=alloc.course, batch=batch,
+                                semester=alloc_sem, is_active=True
+                            ).first()
+                            if alloc_session:
+                                alloc_session = sync_course_session_workflow_from_assessments(alloc_session)
+                                if alloc_session.assessment_status == 'ASSESSMENT_DONE':
+                                    continue
+                        print("Marking old allocation as inactive:", alloc.course.name, alloc.id)
+                        alloc.status = 'changed'
+                        alloc.is_active = False
+                        alloc.save()
                     
                     # Now process new allocations
                     for data in allocations_data:

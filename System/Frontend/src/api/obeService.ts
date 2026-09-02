@@ -169,9 +169,8 @@ export interface GACQIRecord {
   semester: number | null;
   attainment_value: number | null;
   kpi_threshold_at_trigger: number | null;
-  root_cause: string | null;
-  remedial_plan: string | null;
-  hod_comment: string | null;
+   root_cause: string | null;
+   hod_comment: string | null;
   status: 'NOT_TRIGGERED' | 'PENDING_HOD_INPUT' | 'SAVED' | 'EXPORTED' | 'PENDING' | 'SENT_BACK' | 'FULLY_APPROVED' | 'APPROVED' | 'OPEN' | 'CLOSED_IMPLEMENTED';
   submitted_by: any | null;
   approved_by: any | null;
@@ -201,7 +200,6 @@ export interface GACQIResubmissionHistory {
   id: string;
   cqi_record: string;
   root_cause_snapshot: string | null;
-  remedial_plan_snapshot: string | null;
   hod_comment_snapshot: string | null;
   status_at_time: string;
   submitted_at: string;
@@ -266,9 +264,8 @@ export interface InterimAlert {
   saved_at?: string | null;
   cqi_level?: 'SEMESTER' | 'CUMULATIVE' | null;
   cqi_status?: string | null;
-  hod_action_plan?: string | null;
-  remedial_plan?: string | null;
-  recommended_remedy?: string | null;
+   hod_action_plan?: string | null;
+   recommended_remedy?: string | null;
 }
 
 export interface CourseInfo {

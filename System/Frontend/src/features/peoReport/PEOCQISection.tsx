@@ -46,14 +46,6 @@ const PEOCQISectionComponent: React.FC<PEOCQISectionProps> = ({ sections }) => {
                 {section.rootCause || 'Pending HOD submission'}
               </p>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-                Corrective Action Plan
-              </p>
-              <p className="text-slate-700">
-                {section.remedialPlan || 'Pending HOD submission'}
-              </p>
-            </div>
           </div>
 
           <div className="mt-4 text-sm text-slate-600">

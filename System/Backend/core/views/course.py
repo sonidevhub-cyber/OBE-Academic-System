@@ -4,7 +4,7 @@ from rest_framework.response import Response
 
 from core.models.course import Course
 from core.permissions import IsSAC
-from core.serializers.course import CourseCreateSerializer, CourseSerializer
+from core.serializers.course import CourseCreateSerializer, CourseSerializer, CourseUpdateSerializer
 
 
 class CourseListCreateView(generics.ListCreateAPIView):
@@ -55,3 +55,39 @@ class CourseListCreateView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         course = serializer.save()
         return Response(CourseSerializer(course).data, status=status.HTTP_201_CREATED)
+
+
+class CourseDetailView(generics.RetrieveUpdateAPIView):
+    """
+    Retrieve, update, or partially update a single Course.
+
+    Supports PATCH for updating course fields such as name, code,
+    credit_hours, course_type, offering_type, parent_course,
+    elective_group_id, and selective_group_id.
+    """
+    queryset = Course.objects.filter(is_active=True).select_related(
+        'program', 'semester', 'elective_group', 'selective_group', 'parent_course'
+    )
+    serializer_class = CourseSerializer
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return CourseUpdateSerializer
+        return CourseSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        from rest_framework.permissions import BasePermission
+        class IsSACHODCoordinator(BasePermission):
+            def has_permission(self, request, view):
+                return bool(
+                    request.user and request.user.is_authenticated and (
+                        request.user.role == 'SAC' or
+                        request.user.role == 'hod' or
+                        request.user.secondary_role == 'hod' or
+                        request.user.role == 'coordinator' or
+                        request.user.secondary_role == 'coordinator'
+                    )
+                )
+        return [IsSACHODCoordinator()]

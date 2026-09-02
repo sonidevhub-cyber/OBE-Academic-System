@@ -119,7 +119,10 @@ const GAReport: React.FC = () => {
   const [currentCQIRecord, setCurrentCQIRecord] = useState<GACQIRecord | null>(null);
   const [issueStatement, setIssueStatement] = useState('');
   const [hodActionPlan, setHodActionPlan] = useState('');
+  const [implementedInBatch, setImplementedInBatch] = useState('');
+  const [actionTaken, setActionTaken] = useState('');
   const [saving, setSaving] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -239,11 +242,10 @@ const GAReport: React.FC = () => {
     setRefreshTick((tick) => tick + 1);
   };
 
-  // Handle Trigger CQI button click
+  // Handle Manage CQI button click
   const handleTriggerCQI = async (ga: GAStatusRow) => {
     try {
       setSaving(true);
-      // Re-fetch to get the latest record
       const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
       setGAStatusRow(data);
       const updatedGA = data.find(g => g.ga_id === ga.ga_id);
@@ -252,27 +254,61 @@ const GAReport: React.FC = () => {
         return;
       }
       setCurrentGA(updatedGA);
-      // Reset fields first
       setIssueStatement('');
       setHodActionPlan('');
+      setImplementedInBatch('');
+      setActionTaken('');
       setCurrentCQIRecord(null);
-      // Fetch the actual CQI record if it exists
       if (updatedGA.cqi_record_id) {
         try {
           const record = await obeService.getGACQIRecord(updatedGA.cqi_record_id);
           setCurrentCQIRecord(record);
           setIssueStatement(record.issue_statement || '');
           setHodActionPlan(record.hod_action_plan || '');
+          setImplementedInBatch(record.implemented_in_batch || '');
+          setActionTaken(record.action_taken_description || '');
         } catch (err) {
           console.error('Failed to fetch CQI record:', err);
         }
       }
       setModalOpen(true);
     } catch (error) {
-      console.error('Failed to trigger CQI:', error);
-      toast.error('Failed to trigger CQI');
+      console.error('Failed to load CQI:', error);
+      toast.error('Failed to load CQI');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Handle close CQI
+  const handleCloseCQI = async () => {
+    if (!currentGA?.cqi_record_id) {
+      toast.error('No CQI record found');
+      return;
+    }
+    if (!implementedInBatch) {
+      toast.error('Implemented In Batch is required');
+      return;
+    }
+    if (actionTaken.trim().length < 20) {
+      toast.error('Action Taken must be at least 20 characters');
+      return;
+    }
+    setClosing(true);
+    try {
+      await obeService.closeGACQI(currentGA.cqi_record_id, {
+        implemented_in_batch: implementedInBatch,
+        action_taken_description: actionTaken.trim(),
+      });
+      toast.success('CQI closed successfully');
+      setModalOpen(false);
+      const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
+      setGAStatusRow(data);
+    } catch (error) {
+      console.error('Failed to close CQI:', error);
+      toast.error('Failed to close CQI');
+    } finally {
+      setClosing(false);
     }
   };
 
@@ -357,6 +393,18 @@ const GAReport: React.FC = () => {
     const cqiRecords = selectedProgramId && selectedBatchId
       ? await obeService.getGACQIAdvisoryExport(selectedProgramId, selectedBatchId)
       : [];
+
+    const pendingCqiRecords = cqiRecords.filter(
+      (r) => r.status !== 'CLOSED_IMPLEMENTED' && r.status !== 'FULLY_APPROVED'
+    );
+    if (pendingCqiRecords.length > 0) {
+      toast.error(
+        `Please close the CQI loop for ${pendingCqiRecords.length} GA(s) before exporting. ` +
+        `Pending: ${pendingCqiRecords.map((r) => r.ga_code).join(', ')}`
+      );
+      return null;
+    }
+
     const gas = sortedGas;
     const rows: any[][] = [
       [selectedBatch?.program?.name || 'Program Name'],
@@ -421,19 +469,23 @@ const GAReport: React.FC = () => {
     const cqiSectionStart = rows.length;
     rows.push([]);
     rows.push(['CQI Details']);
-    rows.push(['GA Code', 'GA Title', 'Status', 'Issue / Problem Statement', 'HOD Action Plan', 'Saved By', 'Saved At', 'Root Cause', 'Remedial Plan', 'HOD Comment']);
+    rows.push(['GA Code', 'GA Title', 'Status', 'Issue / Problem Statement', 'HOD Action Plan', 'Saved By', 'Saved At', 'Root Cause', 'HOD Comment', 'Implemented On', 'Action Taken', 'Resulting Attainment']);
     cqiRecords.forEach((record) => {
       rows.push([
         record.ga_code,
         record.ga_title,
         record.status,
         record.issue_statement || record.root_cause || '',
-        record.hod_action_plan || record.remedial_plan || '',
+        record.hod_action_plan || '',
         record.saved_by_hod_name || record.saved_by_hod?.full_name || record.saved_by_hod?.name || '',
         record.saved_at ? new Date(record.saved_at).toLocaleString() : '',
         record.root_cause || '',
-        record.remedial_plan || '',
         record.hod_comment || '',
+        record.implemented_in_batch_name || record.implemented_in_batch || '',
+        record.action_taken_description || '',
+        record.resulting_attainment !== null && record.resulting_attainment !== undefined
+          ? `${Number(record.resulting_attainment).toFixed(2)}%`
+          : '',
       ]);
     });
 
@@ -449,10 +501,10 @@ const GAReport: React.FC = () => {
       const wb = XLSX.utils.book_new();
 
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      const maxCol = Math.max(9, rows.reduce((max, row) => Math.max(max, row.length - 1), 0));
+      const maxCol = Math.max(12, rows.reduce((max, row) => Math.max(max, row.length - 1), 0));
       ws['!merges'] = [
         ...[0, 1, 2, 3, 4].map((r) => ({ s: { r, c: 0 }, e: { r, c: maxCol } })),
-        { s: { r: cqiSectionStart + 1, c: 0 }, e: { r: cqiSectionStart + 1, c: 9 } },
+        { s: { r: cqiSectionStart + 1, c: 0 }, e: { r: cqiSectionStart + 1, c: 12 } },
       ];
       ws['!freeze'] = { xSplit: 3, ySplit: 7 };
       ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 6, c: 0 }, e: { r: 6 + items.length, c: Math.max(2, 2 + gas.length) } }) };
@@ -472,6 +524,9 @@ const GAReport: React.FC = () => {
         { wch: 22 },
         { wch: 24 },
         { wch: 24 },
+        { wch: 24 },
+        { wch: 26 },
+        { wch: 30 },
         { wch: 24 },
       ];
       ws['!rows'] = rows.map((_, index) => ({ hpt: index < 5 ? 24 : index === 6 || index === cqiSectionStart + 2 ? 32 : 22 }));
@@ -524,7 +579,17 @@ const GAReport: React.FC = () => {
               isBelow = gaScore?.is_below_threshold ?? false;
             }
 
-            if (isBelow) {
+            const cellValue = ws[cellAddress].v;
+            const isNA = typeof cellValue === 'string' && cellValue === 'N/A';
+
+            if (isNA) {
+              ws[cellAddress].s = {
+                fill: { fgColor: { rgb: 'F3F4F6' } },
+                font: { color: { rgb: '9CA3AF' }, italic: true },
+                alignment: { horizontal: 'center' },
+                border: baseBorder,
+              };
+            } else if (isBelow) {
               ws[cellAddress].s = {
                 fill: { fgColor: { rgb: 'FFC7CE' } },
                 font: { color: { rgb: '9C0006' }, bold: true },
@@ -938,20 +1003,20 @@ const GAReport: React.FC = () => {
                       {sortedGas.map((ga) => {
                         const score = (student.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
                         const isBelow = score?.is_below_threshold;
+                        const displayVal = student.is_dropped ? 'Dropped Out' : formatPercent(score?.direct_score);
+                        const isNA = displayVal === 'N/A';
                         return (
                           <td
                             key={ga.ga_id}
                             className={`px-4 py-3 text-center text-sm font-semibold ${
-                              isBelow
+                              isNA
+                                ? 'bg-gray-50 text-gray-400 italic'
+                                : isBelow
                                 ? 'bg-red-50 text-red-800'
                                 : 'text-gray-900'
                             }`}
                           >
-                            {student.is_dropped ? (
-                              'Dropped Out'
-                            ) : (
-                              formatPercent(score?.direct_score)
-                            )}
+                            {displayVal}
                           </td>
                         );
                       })}
@@ -966,16 +1031,20 @@ const GAReport: React.FC = () => {
                       {sortedGas.map((ga) => {
                         const gaScore = (course.ga_scores || []).find((s) => s.ga_id === ga.ga_id);
                         const isBelow = gaScore?.is_below_threshold;
+                        const displayVal = formatPercent(gaScore?.score);
+                        const isNA = displayVal === 'N/A';
                         return (
                           <td
                             key={ga.ga_id}
                             className={`px-4 py-3 text-center text-sm font-semibold ${
-                              isBelow
+                              isNA
+                                ? 'bg-gray-50 text-gray-400 italic'
+                                : isBelow
                                 ? 'bg-red-50 text-red-800'
                                 : 'text-gray-900'
                             }`}
                           >
-                            {formatPercent(gaScore?.score)}
+                            {displayVal}
                           </td>
                         );
                       })}
@@ -1068,61 +1137,56 @@ const GAReport: React.FC = () => {
                     );
                   })}
                 </tr>
-                <tr>
-                  <td
-                    colSpan={3}
-                    className="px-4 py-3 bg-gray-200 text-sm font-bold text-gray-800"
-                  >
-                    CQI Action
-                  </td>
-                  {sortedGas.map((ga) => {
-                    const gaStatus = gaStatusRow.find((s) => s.ga_id === ga.ga_id);
-                    const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
-                    const effectiveStatus = summary?.status ?? gaStatus?.status;
-                    const isSaved = Boolean(
-                      gaStatus?.cqi_status && recordedCqiStatuses.has(gaStatus.cqi_status)
-                    );
-                    return (
-                      <td
-                        key={ga.ga_id}
-                        className={`px-4 py-3 text-center text-sm font-semibold border-t-4 border-gray-300 ${
-                          effectiveStatus === 'BELOW_TARGET'
-                            ? 'bg-red-50'
-                            : 'bg-gray-50'
-                        }`}
-                      >
-                        {effectiveStatus === 'BELOW_TARGET' && gaStatus?.cqi_record_id ? (
-                          <div className="mx-auto max-w-[220px] rounded-xl border-2 border-red-300 bg-white px-3 py-3 shadow-sm">
-                            <div className="text-xs font-black uppercase tracking-[0.2em] text-red-600 mb-2">
-                              BELOW_TARGET
-                            </div>
-                            {isSaved ? (
-                              <button
-                                className="text-green-700 hover:text-green-900 font-bold underline underline-offset-2"
-                                onClick={() => handleTriggerCQI(gaStatus)}
-                              >
-                                ✅ CQI Recorded (View)
-                              </button>
-                            ) : (
-                              <button
-                                className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors"
-                                onClick={() => handleTriggerCQI(gaStatus)}
-                              >
-                                ⚠ Trigger CQI
-                              </button>
-                            )}
-                          </div>
-                        ) : effectiveStatus === 'BELOW_TARGET' ? (
-                          <span className="text-xs font-bold text-red-500">CQI unavailable</span>
-                        ) : effectiveStatus === 'NOT_ASSESSED' ? (
-                          <span className="text-xs font-bold text-gray-500">NOT ASSESSED</span>
-                        ) : (
-                          <span className="text-gray-500">-</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
+                 <tr>
+                   <td
+                     colSpan={3}
+                     className="px-4 py-3 bg-gray-200 text-sm font-bold text-gray-800"
+                   >
+                     CQI Status
+                   </td>
+                   {sortedGas.map((ga) => {
+                     const gaStatus = gaStatusRow.find((s) => s.ga_id === ga.ga_id);
+                     const summary = (reportData.cohort_summary || []).find((s) => s.ga_id === ga.ga_id);
+                     const effectiveStatus = summary?.status ?? gaStatus?.status;
+                     const cqiStatus = gaStatus?.cqi_status;
+                     const hasCqiRecord = Boolean(gaStatus?.cqi_record_id);
+                     const isClosed = cqiStatus === 'CLOSED_IMPLEMENTED' || cqiStatus === 'SAVED' && hasCqiRecord;
+                     const isSaved = Boolean(
+                       cqiStatus && recordedCqiStatuses.has(cqiStatus)
+                     );
+                     const isPending = cqiStatus && cqiStatus !== 'CLOSED_IMPLEMENTED' && !recordedCqiStatuses.has(cqiStatus);
+                     return (
+                       <td
+                         key={ga.ga_id}
+                         className={`px-4 py-3 text-center text-sm font-semibold border-t-4 border-gray-300 ${
+                           effectiveStatus === 'BELOW_TARGET'
+                             ? 'bg-red-50'
+                             : 'bg-gray-50'
+                         }`}
+                       >
+                          {effectiveStatus === 'BELOW_TARGET' && hasCqiRecord ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              isClosed
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : isPending
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-sky-100 text-sky-800'
+                            }`}>
+                              {isClosed ? 'Closed' : isPending ? 'In Progress' : 'Recorded'}
+                            </span>
+                          ) : effectiveStatus === 'BELOW_TARGET' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800">
+                              Need CQI
+                            </span>
+                          ) : effectiveStatus === 'NOT_ASSESSED' ? (
+                            <span className="text-xs font-bold text-gray-500">NOT ASSESSED</span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+                       </td>
+                     );
+                   })}
+                 </tr>
               </tfoot>
             </table>
           </div>
@@ -1150,6 +1214,12 @@ const GAReport: React.FC = () => {
                   {currentCQIRecord.saved_at ? ` on ${new Date(currentCQIRecord.saved_at).toLocaleString()}` : ''}
                 </p>
               )}
+               {currentCQIRecord?.closed_by_name && (
+                 <p className="mt-1 text-sm text-gray-500">
+                   Closed by {currentCQIRecord.closed_by_name}
+                   {currentCQIRecord.closed_at ? ` on ${new Date(currentCQIRecord.closed_at).toLocaleString()}` : ''}
+                 </p>
+               )}
               </div>
             <div className="p-6 space-y-4">
               {/* Issue Statement */}
@@ -1184,6 +1254,67 @@ const GAReport: React.FC = () => {
                   placeholder="Enter your action plan here... (minimum 20 characters)"
                 />
               </div>
+
+              {/* Closing-loop fields - shown when status is SAVED */}
+              {currentGA.cqi_status === 'SAVED' && (
+                <>
+                  {/* Implemented On */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Implemented On <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                        currentCQIRecord?.status === 'CLOSED_IMPLEMENTED' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                      }`}
+                      value={implementedInBatch}
+                      onChange={(e) => setImplementedInBatch(e.target.value)}
+                      disabled={currentCQIRecord?.status === 'CLOSED_IMPLEMENTED'}
+                    >
+                      <option value="">Select a batch</option>
+                      {batches.map((batch) => (
+                        <option key={batch.id} value={batch.id}>
+                          {batch.name}
+                        </option>
+                      ))}
+                    </select>
+                    {currentCQIRecord?.implemented_in_batch_name && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Currently: {currentCQIRecord.implemented_in_batch_name}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Action Taken */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Action Taken <span className="text-red-600">*</span>
+                    </label>
+                    <textarea
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                        currentCQIRecord?.status === 'CLOSED_IMPLEMENTED' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                      }`}
+                      rows={3}
+                      value={actionTaken}
+                      onChange={(e) => setActionTaken(e.target.value)}
+                      disabled={currentCQIRecord?.status === 'CLOSED_IMPLEMENTED'}
+                      placeholder="Describe the action taken and its outcome... (minimum 20 characters)"
+                    />
+                    {currentCQIRecord?.action_taken_description && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Current: {currentCQIRecord.action_taken_description}
+                      </p>
+                    )}
+                  </div>
+
+                  {currentCQIRecord?.resulting_attainment !== null && currentCQIRecord?.resulting_attainment !== undefined && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <span className="text-xs font-black uppercase tracking-wider text-green-700">Resulting Attainment:</span>
+                      <span className="ml-2 text-sm font-bold text-green-800">{Number(currentCQIRecord.resulting_attainment).toFixed(2)}%</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
               <button
@@ -1202,6 +1333,18 @@ const GAReport: React.FC = () => {
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   ) : null}
                   Save CQI Record
+                </button>
+              )}
+              {currentGA.cqi_status === 'SAVED' && currentCQIRecord?.status !== 'CLOSED_IMPLEMENTED' && (
+                <button
+                  onClick={handleCloseCQI}
+                  disabled={closing}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {closing ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : null}
+                  Close CQI Loop
                 </button>
               )}
             </div>

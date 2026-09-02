@@ -164,9 +164,8 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'previous_cqi': {
                  'id': str(previous_cqi.id),
                  'semester': last_completed_semester,
-                 'root_cause': previous_cqi.root_cause,
-                  'remedial_plan': previous_cqi.remedial_plan,
-                  } if previous_cqi else None,
+                  'root_cause': previous_cqi.root_cause,
+                   } if previous_cqi else None,
             })
             
         return Response({'courses': data, 'results': data}) # Wrapped for different component expectations
@@ -486,6 +485,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 "course_name": course.name,
                 "course_code": course.code,
                 "course_type": course.course_type,
+                "offering_type": getattr(course, "offering_type", None),
                 "course_description": (
                     getattr(course, "description", "")
                 ),
@@ -632,7 +632,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
                         "id": str(previous_cqi.id),
                         "semester": last_completed_semester,
                         "root_cause": previous_cqi.root_cause,
-                        "remedial_plan": previous_cqi.remedial_plan,
                     }
                     if previous_cqi
                     else None

@@ -39,9 +39,12 @@ def get_clo_master_report(request, program_id, semester_id):
     # Get the curriculum version and valid courses for this batch & semester.
     # We intentionally use the curriculum as the source of truth so courses that
     # have been promoted but not finalized yet still appear in the report with
-    # zeroed scores.
+    # zeroed scores. We then ALSO append any enrolled Elective/Selective courses
+    # because those are registered dynamically via StudentElectiveEnrollment
+    # (they are NOT present in CurriculumVersionCourse).
     valid_course_ids = []
     course_catalog = []
+    compulsory_ids_set = set()
     if batch and batch.curriculum_version:
         from curriculum.models import CurriculumVersionCourse
         curriculum_version_courses = CurriculumVersionCourse.objects.filter(
@@ -50,6 +53,7 @@ def get_clo_master_report(request, program_id, semester_id):
             is_active=True
         ).select_related('course').order_by('semester_no', 'course__code', 'course__name')
         valid_course_ids = [cvc.course.id for cvc in curriculum_version_courses]
+        compulsory_ids_set = set(valid_course_ids)
         course_catalog = [
             {
                 "course": cvc.course,
@@ -57,6 +61,33 @@ def get_clo_master_report(request, program_id, semester_id):
             }
             for cvc in curriculum_version_courses
         ]
+
+    # Merge active Elective/Selective courses that have sessions + enrolled
+    # students for this (program, batch, semester) into the report columns.
+    # Otherwise CS-2001 (AI elective) and similar courses never render a
+    # column on the coordinator side even though instructor locked internals.
+    from core.models.course import Course
+    from obe.models import CourseSession as _CS
+    elective_sessions_qs = _CS.objects.filter(
+        course__program=program,
+        semester=semester,
+        is_active=True,
+        course__offering_type__in=(Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE),
+    ).select_related('course')
+    if batch:
+        elective_sessions_qs = elective_sessions_qs.filter(batch=batch)
+    elective_sessions = list(elective_sessions_qs)
+    seen_elective_ids = set()
+    for es in elective_sessions:
+        ecourse = es.course
+        if ecourse.id in seen_elective_ids or ecourse.id in compulsory_ids_set:
+            continue
+        seen_elective_ids.add(ecourse.id)
+        valid_course_ids.append(ecourse.id)
+        course_catalog.append({
+            "course": ecourse,
+            "semester_no": semester.number,
+        })
 
     # Keep the master cache aligned with live CLO scores on every report load,
     # similar to how GA reports read fresh CourseGAScore rows.
@@ -149,10 +180,26 @@ def get_clo_master_report(request, program_id, semester_id):
     kpi_achieved_lookup = {}
     kpi_total_lookup = {}  # Count total students per CLO (from cache entries)
 
+    from core.models.course import Course
+    from obe.services import _get_enrolled_student_ids_for_course_session
+
+    course_enrolled_ids_for_kpi = {}
+    for session in all_course_sessions.select_related("course"):
+        course = session.course
+        if course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            course_enrolled_ids_for_kpi[course.id] = {
+                str(sid) for sid in _get_enrolled_student_ids_for_course_session(session)
+            }
+
     for entry in course_entries:
         student_id = entry.student.student_id
         course_id = entry.course.id
         clo_id = entry.clo.id
+
+        enrolled_ids = course_enrolled_ids_for_kpi.get(course_id)
+        if enrolled_ids is not None and str(student_id) not in enrolled_ids:
+            continue
+
         course_entry_lookup[(student_id, course_id, clo_id)] = entry
 
         kpi_key = (course_id, clo_id)
@@ -193,7 +240,16 @@ def get_clo_master_report(request, program_id, semester_id):
     for course_item in course_catalog:
         course = course_item["course"]
         clos_query = CLO.objects.filter(course=course, is_active=True)
-        if batch and batch.curriculum_version:
+        # Elective/Selective courses are registered dynamically outside the
+        # formal CurriculumVersionCourse mapping; their CLO rows may carry
+        # a different curriculum_version or NULL. Skip the curriculum
+        # whitelist filter for those offering types otherwise CS-2001 AI
+        # elective cells show zero CLOs on coordinator side.
+        if (
+            batch
+            and batch.curriculum_version
+            and course.offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+        ):
             clos_query = clos_query.filter(curriculum_version=batch.curriculum_version)
         course_clos = list(clos_query.order_by("order_number"))
         sorted_courses.append({
@@ -201,6 +257,35 @@ def get_clo_master_report(request, program_id, semester_id):
             "semester_no": course_item["semester_no"],
             "clos": course_clos,
         })
+
+    from core.models.course import Course
+    from obe.services import _get_enrolled_student_ids_for_course_session
+
+    course_enrolled_student_ids = {}
+    for course_info in sorted_courses:
+        course = course_info["course"]
+        course_id = course.id
+        session = sessions_by_course_id.get(course_id)
+        if (
+            session
+            and course.offering_type
+            in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
+        ):
+            course_enrolled_student_ids[course_id] = set(
+                _get_enrolled_student_ids_for_course_session(session)
+            )
+        else:
+            course_enrolled_student_ids[course_id] = None
+
+    total_students = students.count()
+    course_cohort_totals = {}
+    for course_info in sorted_courses:
+        course_id = course_info["course"].id
+        enrolled_ids = course_enrolled_student_ids.get(course_id)
+        if enrolled_ids is not None:
+            course_cohort_totals[course_id] = len(enrolled_ids)
+        else:
+            course_cohort_totals[course_id] = total_students
 
     # Prepare student data.
     students_data = []
@@ -215,25 +300,26 @@ def get_clo_master_report(request, program_id, semester_id):
         for course_info in sorted_courses:
             course_id = course_info["course"].id
             course_key = str(course_id)
+            enrolled_ids = course_enrolled_student_ids.get(course_id)
+            is_enrolled = enrolled_ids is None or student.student_id in enrolled_ids
             row["courses"][course_key] = {}
 
             for clo in course_info["clos"]:
                 clo_key = f"CLO-{clo.order_number}"
-                entry_obj = course_entry_lookup.get((student.student_id, course_id, clo.id))
-                if entry_obj:
-                    row["courses"][course_key][clo_key] = {
-                        "score": float(entry_obj.clo_score),
-                        "achieved": entry_obj.is_kpi_achieved,
-                    }
+                if not is_enrolled:
+                    row["courses"][course_key][clo_key] = None
                 else:
-                    row["courses"][course_key][clo_key] = {
-                        "score": 0.0,
-                        "achieved": False,
-                    }
+                    entry_obj = course_entry_lookup.get((student.student_id, course_id, clo.id))
+                    if entry_obj:
+                        row["courses"][course_key][clo_key] = {
+                            "score": float(entry_obj.clo_score),
+                            "achieved": entry_obj.is_kpi_achieved,
+                        }
+                    else:
+                        row["courses"][course_key][clo_key] = None
 
         students_data.append(row)
 
-    total_students = students.count()
     kpi_achieved_counts = {}
     for course_info in sorted_courses:
         for clo in course_info["clos"]:
@@ -320,15 +406,15 @@ def get_clo_master_report(request, program_id, semester_id):
                         "cohort_achieved_count": kpi_achieved_lookup.get(
                             (info["course"].id, clo.id), 0
                         ),
-                        "cohort_total_count": total_students,
-                        "cohort_percentage": (
-                            (
-                                kpi_achieved_lookup.get((info["course"].id, clo.id), 0)
-                                / total_students
-                                * 100
-                            )
-                            if total_students > 0
-                            else 0
+                         "cohort_total_count": course_cohort_totals.get(info["course"].id, total_students),
+                         "cohort_percentage": (
+                             (
+                                 kpi_achieved_lookup.get((info["course"].id, clo.id), 0)
+                                 / course_cohort_totals.get(info["course"].id, total_students)
+                                 * 100
+                             )
+                             if course_cohort_totals.get(info["course"].id, total_students) > 0
+                             else 0
                         ),
                         "cqi": {
                             "reason": cqi_lookup[(info["course"].id, clo.id)].reason,

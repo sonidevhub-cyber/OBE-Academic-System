@@ -338,6 +338,9 @@
             <th>CQI Status</th>
             <th>Identified Weakness</th>
             <th>Corrective Action Plan</th>
+            <th>Implemented On</th>
+            <th>Action Taken</th>
+            <th>Resulting Attainment</th>
             <th>Approved By</th>
             <th>Approved Date</th>
           </tr>
@@ -355,6 +358,9 @@
             </td>
             <td>{% if cqi.rootCause %}{{ cqi.rootCause }}{% else %}Pending HOD submission{% endif %}</td>
             <td>{% if cqi.remedialPlan %}{{ cqi.remedialPlan }}{% else %}Pending HOD submission{% endif %}</td>
+            <td>{% if cqi.implementedInBatch %}{{ cqi.implementedInBatch }}{% else %}-{% endif %}</td>
+            <td>{% if cqi.actionTaken %}{{ cqi.actionTaken }}{% else %}-{% endif %}</td>
+            <td>{% if cqi.resultingAttainment %}{{ cqi.resultingAttainment }}%{% else %}-{% endif %}</td>
             <td>{% if cqi.hodApprovedBy %}{{ cqi.hodApprovedBy }}{% else %}Pending HOD approval{% endif %}</td>
             <td>{% if cqi.hodApprovedDate %}{{ cqi.hodApprovedDate }}{% else %}-{% endif %}</td>
           </tr>

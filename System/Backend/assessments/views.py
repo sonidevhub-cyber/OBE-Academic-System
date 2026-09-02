@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from decimal import Decimal
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -450,7 +450,29 @@ class EnterMarksView(APIView):
                     "error": "Retake assessment marks have been finalized and cannot be edited."
                 }, status=400)
 
-        # ✅ Step 3: Marks save karo
+        # ✅ Step 3: Enrollment validation karo — elective/selective mai sirf enrolled students k marks accept karo
+        if assessment.course_retake:
+            enrolled_ids = {assessment.course_retake.student_id}
+        else:
+            from obe.services import _get_enrolled_student_ids_for_course_session
+            enrolled_ids = (
+                _get_enrolled_student_ids_for_course_session(course_session)
+                if course_session
+                else set(Student.objects.filter(
+                    Q(user__batch=assessment.batch) | Q(batch=assessment.batch)
+                ).values_list('student_id', flat=True))
+            )
+
+        submitted_student_ids = {str(entry['student_id']) for entry in data}
+        enrolled_str_ids = {str(sid) for sid in enrolled_ids}
+        unenrolled_ids = submitted_student_ids - enrolled_str_ids
+        if unenrolled_ids:
+            return Response(
+                {"error": f"Marks rejected: {len(unenrolled_ids)} students not enrolled in this course. Non-enrolled IDs: {', '.join(sorted(unenrolled_ids)[:5])}{'...' if len(unenrolled_ids) > 5 else ''}"},
+                status=400
+            )
+
+        # ✅ Step 4: Marks save karo
         for entry in data:
             StudentQuestionMark.objects.update_or_create(
                 student_id=entry['student_id'],
@@ -463,7 +485,8 @@ class EnterMarksView(APIView):
         if assessment.course_retake:
             students = [assessment.course_retake.student]
         else:
-            students = Student.objects.filter(user__batch=assessment.batch)
+            from obe.services import get_students_enrolled_in_course
+            students = get_students_enrolled_in_course(course_session) if course_session else Student.objects.filter(user__batch=assessment.batch)
 
         for s in students:
             query = StudentQuestionMark.objects.filter(
@@ -970,7 +993,7 @@ class ResubmitCQIView(APIView):
         cqi.save()
 
         return Response({"message": "CQI resubmitted"})
-from django.db.models import Sum
+from django.db.models import Sum, Q
 
 @api_view(['GET'])
 def student_result(request):
@@ -1327,7 +1350,15 @@ class AssessmentMarksView(APIView):
         if assessment.course_retake:
             students = [assessment.course_retake.student]
         else:
-            students = Student.objects.filter(user__batch=assessment.batch)
+            from obe.models import CourseSession
+            from obe.services import get_students_enrolled_in_course
+            session = CourseSession.objects.filter(
+                course=assessment.course,
+                batch=assessment.batch,
+                semester=assessment.semester,
+                is_active=True,
+            ).first()
+            students = get_students_enrolled_in_course(session) if session else Student.objects.filter(user__batch=assessment.batch)
 
         questions = Question.objects.filter(
             assessment=assessment
@@ -1400,7 +1431,7 @@ class AssessmentMarksView(APIView):
             "students": result
         })
 # from django.db import transaction
-# from django.db.models import Sum
+# from django.db.models import Sum, Q
 
 # from rest_framework.views import APIView
 # from rest_framework.response import Response
@@ -1417,7 +1448,7 @@ class AssessmentMarksView(APIView):
 
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -1499,6 +1530,18 @@ class UpdateStudentMarksView(APIView):
         if assessment.is_locked and assessment.assessment_type != "final":
             return Response(
                 {"error": "Internals are locked for this course. Only the Final assessment can be submitted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3b. Enrollment validation — sirf enrolled students k marks edit karne do
+        from obe.services import _get_enrolled_student_ids_for_course_session
+        enrolled_ids = _get_enrolled_student_ids_for_course_session(session)
+        submitted_student_ids = {str(item.get("student_id")) for item in marks if item.get("student_id")}
+        enrolled_str_ids = {str(sid) for sid in enrolled_ids}
+        unenrolled_ids = submitted_student_ids - enrolled_str_ids
+        if unenrolled_ids:
+            return Response(
+                {"error": f"Marks rejected: {len(unenrolled_ids)} students not enrolled in this course. Cannot edit marks for non-enrolled students."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

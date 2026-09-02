@@ -27,8 +27,9 @@ import { coordinatorService } from '../../api/coordinatorService';
 import { api } from '../../api/api';
 import CoordinatorFeedbackView from "../pages/CoordinatorFeedbackView";
 import CoordinatorBatchStructureView from '../modules/coordinator/CoordinatorBatchStructureView';
+import SACElectiveEnrollmentReview from '../pages/SACElectiveEnrollmentReview';
 
-type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'batch-structure' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'feedback';
+type TabId = 'dashboard' | 'curriculum-versions' | 'course-allocations' | 'batch-structure' | 'instructors' | 'programs' | 'clo-reports' | 'ga-reports' | 'feedback' | 'elective-enrollments';
 
 const ModularCoordinatorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -209,6 +210,7 @@ const ModularCoordinatorDashboard: React.FC = () => {
 
   const mainItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'elective-enrollments', label: 'Elective Enrollments', icon: Users },
     { id: 'curriculum-versions', label: 'Curriculum Versions', icon: BookOpen },
     { id: 'course-allocations', label: 'Course Allocation', icon: CheckCircle },
     { id: 'batch-structure', label: 'Batch Structure', icon: Archive },
@@ -371,6 +373,8 @@ const ModularCoordinatorDashboard: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return renderDashboardLanding();
+      case 'elective-enrollments':
+        return <SACElectiveEnrollmentReview />;
       case 'curriculum-versions':
         if (selectedVersionId) {
           return (

@@ -82,6 +82,8 @@ interface DashboardCQIRow {
   status?: string;
   courseId?: string;
   semester?: number;
+  implemented_on?: string | null;
+  action_taken?: string | null;
 }
 
 interface DashboardCLOGroup {
@@ -352,9 +354,10 @@ const OBEReportDashboard: React.FC = () => {
               `Below target at ${Number(item.ga_attainment ?? 0).toFixed(1)}%`,
             remedy:
               latestRecord?.hod_action_plan ||
-              latestRecord?.remedial_plan ||
               'Pending CQI action plan',
             status: latestRecord?.status || item.status,
+            implemented_on: latestRecord?.implemented_in_batch_name || null,
+            action_taken: latestRecord?.action_taken_description || null,
           };
         });
 
@@ -408,8 +411,10 @@ const OBEReportDashboard: React.FC = () => {
             item: `${(item.peo_code || item.peo_id).replace(/^PEO-/, 'PO-')} - ${item.peo_title}`,
             detail: `Final ${Number(item.final_score ?? 0).toFixed(1)}% / Target ${targetKpi.toFixed(1)}%`,
             reason: cqiRecord?.root_cause || `Below target at ${Number(item.final_score ?? 0).toFixed(1)}%`,
-            remedy: cqiRecord?.remedial_plan || 'Pending CQI action plan',
+             remedy: cqiRecord?.action_taken_description || 'Pending CQI action plan',
             status: cqiRecord?.status || 'CQI_TRIGGERED',
+            implemented_on: cqiRecord?.implemented_in_batch_name || null,
+            action_taken: cqiRecord?.action_taken_description || null,
           };
         });
 
@@ -510,10 +515,11 @@ const OBEReportDashboard: React.FC = () => {
   }, [selectedBatchId]);
 
   useEffect(() => {
+    if (!dashboard) return;
     if (selectedSemester !== 'all' && !availableSemesters.includes(Number(selectedSemester))) {
       setSelectedSemester('all');
     }
-  }, [availableSemesters, selectedSemester]);
+  }, [dashboard, availableSemesters, selectedSemester]);
 
   const getVisionMissionCqiKey = (row: VisionMissionAnalyticsRow) => `${row.keyword_type}-${row.keyword_id}`;
 
@@ -588,6 +594,15 @@ const OBEReportDashboard: React.FC = () => {
 
     if (missingActionPlan) {
       toast.error('Please input the required CQI Action Plan notes before exporting the final report.');
+      return;
+    }
+
+    const unfilledCqiRows = [...(dashboard.gaCqiRows || []), ...(dashboard.peoCqiRows || [])].filter(
+      (row) => row.reason && row.reason.includes('Below target at') && row.remedy === 'Pending CQI action plan'
+    );
+
+    if (unfilledCqiRows.length > 0) {
+      toast.error('Please fill in the root cause and action plan for the triggered CQI records before exporting.');
       return;
     }
 
@@ -710,6 +725,30 @@ const OBEReportDashboard: React.FC = () => {
       return;
     }
 
+    const requiredVisionMissionRows = [
+      ...(dashboard.visionMissionAnalytics?.vision_rows || []),
+      ...(dashboard.visionMissionAnalytics?.mission_rows || []),
+    ].filter((row) => row.cqi_action_required);
+
+    const missingActionPlan = requiredVisionMissionRows.some((row) => {
+      const key = getVisionMissionCqiKey(row);
+      return !(cqiDrafts[key] || '').trim();
+    });
+
+    if (missingActionPlan) {
+      toast.error('Please input the required CQI Action Plan notes before exporting the final report.');
+      return;
+    }
+
+    const unfilledCqiRows = [...(dashboard.gaCqiRows || []), ...(dashboard.peoCqiRows || [])].filter(
+      (row) => row.reason && row.reason.includes('Below target at') && row.remedy === 'Pending CQI action plan'
+    );
+
+    if (unfilledCqiRows.length > 0) {
+      toast.error('Please fill in the root cause and action plan for the triggered CQI records before exporting.');
+      return;
+    }
+
     setExporting(true);
     try {
       const wb = XLSX.utils.book_new();
@@ -788,16 +827,43 @@ const OBEReportDashboard: React.FC = () => {
         ['CQI Summary'],
         [`Program: ${programName} | Batch: ${batchName}`],
         [],
-        ['Type', 'Item', 'Detail', 'Reason', 'Remedy', 'Status'],
+        ['Type', 'Item', 'Detail', 'Reason', 'Remedy', 'Implemented On', 'Action Taken', 'Status'],
         ...[...dashboard.cloCqiRows, ...dashboard.gaCqiRows, ...dashboard.peoCqiRows].map((row) => [
           row.type,
           row.item,
           row.detail,
           row.reason,
           row.remedy,
+          row.implemented_on || '-',
+          row.action_taken || '-',
           row.status || '-',
         ]),
       ], [0, 1]);
+
+      const vmAnalytics = dashboard.visionMissionAnalytics;
+      const vmRows: Array<{ type: string; row: any }> = [
+        ...(vmAnalytics?.vision_rows || []).map((row) => ({ type: 'Vision', row })),
+        ...(vmAnalytics?.mission_rows || []).map((row) => ({ type: 'Mission', row })),
+      ];
+
+      if (vmRows.length > 0) {
+        addStyledSheet(wb, 'Vision/Mission CQI', [
+          ['Vision / Mission CQI Details'],
+          [`Program: ${programName} | Batch: ${batchName}`],
+          [],
+          ['Type', 'Keyword', 'Target KPI %', 'Attainment %', 'Status', 'HOD Action Plan', 'Implemented On', 'Action Taken'],
+          ...vmRows.map(({ type, row }) => [
+            type,
+            row.keyword,
+            row.target_kpi?.toFixed(1) || '-',
+            row.attainment_score === null ? 'N/A' : Number(row.attainment_score).toFixed(1),
+            row.status,
+            row.hod_action_plan || '-',
+            row.implemented_in_batch_name || '-',
+            row.action_taken_description || '-',
+          ]),
+        ], [0, 1]);
+      }
 
       XLSX.writeFile(wb, `OBE_Report_${batchName.replace(/\s+/g, '_')}.xlsx`);
       toast.success('OBE report Excel exported');
@@ -902,6 +968,8 @@ const OBEReportDashboard: React.FC = () => {
                 <th className="p-4 font-black text-xs uppercase tracking-wider">Detail</th>
                 <th className="p-4 font-black text-xs uppercase tracking-wider">Reason</th>
                 <th className="p-4 font-black text-xs uppercase tracking-wider">Remedy</th>
+                <th className="p-4 font-black text-xs uppercase tracking-wider">Implemented On</th>
+                <th className="p-4 font-black text-xs uppercase tracking-wider">Action Taken</th>
               </tr>
             </thead>
             <tbody>
@@ -911,6 +979,8 @@ const OBEReportDashboard: React.FC = () => {
                   <td className="p-4 text-gray-700">{row.detail}</td>
                   <td className="p-4 text-gray-700">{row.reason}</td>
                   <td className="p-4 text-gray-700">{row.remedy}</td>
+                  <td className="p-4 text-gray-700">{row.implemented_on || '—'}</td>
+                  <td className="p-4 text-gray-700">{row.action_taken || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -936,12 +1006,14 @@ const OBEReportDashboard: React.FC = () => {
               <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Attainment Score %</th>
               <th className="p-4 font-black text-xs uppercase tracking-wider text-center">Evaluation Status</th>
               <th className="p-4 font-black text-xs uppercase tracking-wider">HOD Corrective Measures / CQI Action Plan</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider">Implemented On</th>
+              <th className="p-4 font-black text-xs uppercase tracking-wider">Action Taken</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-5 text-center font-semibold text-gray-400">
+                <td colSpan={7} className="p-5 text-center font-semibold text-gray-400">
                   No approved keywords are available.
                 </td>
               </tr>
@@ -1008,6 +1080,8 @@ const OBEReportDashboard: React.FC = () => {
                         <p className="text-sm font-semibold text-gray-400">No CQI action required</p>
                       )}
                     </td>
+                    <td className="p-4 text-gray-700">{row.implemented_in_batch_name || '—'}</td>
+                    <td className="p-4 text-gray-700 whitespace-pre-wrap">{row.action_taken_description || '—'}</td>
                   </tr>
                 );
               })

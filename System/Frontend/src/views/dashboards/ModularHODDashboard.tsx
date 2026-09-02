@@ -1,15 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
 import OBEConfigurationModule, { OBEMappingSubTabId } from '../modules/coordinator/OBEConfigurationModule';
 import PEOReport from '../../pages/PEOReport';
 import CoordinatorGAReportModule from '../modules/coordinator/CoordinatorGAReportModule';
@@ -31,7 +21,12 @@ import ModularDashboardShell from '../../components/layout/ModularDashboardShell
 import DashboardStatCard from '../../components/layout/DashboardStatCard';
 import { api } from '../../api/api';
 import { coordinatorService } from '../../api/coordinatorService';
-import obeService, { GAReportItem } from '../../api/obeService';
+import obeService, {
+  CQIClosingSummaryResponse,
+  GACQIClosingSummaryItem,
+  PEOCQIClosingSummaryItem,
+  VisionMissionCQIClosingSummaryItem,
+} from '../../api/obeService';
 
 import {
   LayoutDashboard,
@@ -49,6 +44,8 @@ import {
   GraduationCap,
   MessageSquare,
   Archive,
+  TrendingUp,
+  CheckCircle,
 } from 'lucide-react';
 import HODBatchStructureView from '../modules/hod/HODBatchStructureView';
 
@@ -78,19 +75,22 @@ type TabId =
   | 'cqi-closing-advisory'
   | 'batch-dossier';
 
-interface GaSeriesItem {
-  label: string;
-  target: number;
-  direct: number;
-}
-
 interface RecentBatchItem {
   id: string;
   name: string;
   semester: number | null;
+  programName: string;
   exitSurveyEnabled: boolean;
   alumniFeedbackEnabled: boolean;
   responseRate: number | null;
+}
+
+interface CqiMetrics {
+  totalClosed: number;
+  gaClosed: number;
+  peoClosed: number;
+  vmClosed: number;
+  vmReviews: number;
 }
 
 const extractList = (payload: unknown): any[] => {
@@ -99,15 +99,6 @@ const extractList = (payload: unknown): any[] => {
     const record = payload as Record<string, unknown>;
     if (Array.isArray(record.data)) return record.data;
     if (Array.isArray(record.results)) return record.results;
-  }
-  return [];
-};
-
-const extractGaReports = (payload: unknown): GAReportItem[] => {
-  if (Array.isArray(payload)) return payload as GAReportItem[];
-  if (payload && typeof payload === 'object') {
-    const record = payload as { ga_reports?: GAReportItem[] };
-    if (Array.isArray(record.ga_reports)) return record.ga_reports;
   }
   return [];
 };
@@ -137,12 +128,14 @@ const ModularHODDashboard: React.FC = () => {
     activeBatches: 0,
     totalBatches: 0,
     facultyStrength: 0,
+    totalPrograms: 0,
     feedbackBatches: 0,
     exitSurveyEnabled: 0,
     alumniFeedbackEnabled: 0,
     focusBatchName: 'No active batch',
   });
-  const [dashboardGaSeries, setDashboardGaSeries] = useState<GaSeriesItem[]>([]);
+  const [cqiClosingSummary, setCqiClosingSummary] = useState<CQIClosingSummaryResponse | null>(null);
+  const [cqiMetrics, setCqiMetrics] = useState<CqiMetrics | null>(null);
   const [recentBatches, setRecentBatches] = useState<RecentBatchItem[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     'obe-management': true,
@@ -235,22 +228,15 @@ const ModularHODDashboard: React.FC = () => {
       );
 
       const focusBatch = sortedActiveBatches[0] || batches[0] || null;
-      const focusGaRes = focusBatch?.id
-        ? await Promise.resolve(obeService.getBatchGAReport(String(focusBatch.id), { mode: 'cumulative', scope: 'cohort' }))
-        : null;
 
-      const focusGaReports = focusGaRes
-        ? extractGaReports(focusGaRes)
-        : [];
-
-      const gaSeries: GaSeriesItem[] = focusGaReports
-        .slice(0, 12)
-        .map((item) => ({
-          label: item.ga_code || 'GA',
-          target: scoreValue(item.ga_kpi_threshold, item.kpi_threshold),
-          direct: scoreValue(item.direct_score, item.ga_attainment),
-        }))
-        .filter((item) => item.label);
+      const programSet = new Set<string>();
+      batches.forEach((batch: any) => {
+        if (batch?.program?.id) {
+          programSet.add(String(batch.program.id));
+        } else if (typeof batch?.program === 'string') {
+          programSet.add(batch.program);
+        }
+      });
 
       const exitSurveyEnabled = activeBatches.filter((batch: any) => batch?.exit_survey_enabled).length;
       const alumniFeedbackEnabled = activeBatches.filter((batch: any) => batch?.alumni_feedback_enabled).length;
@@ -259,17 +245,18 @@ const ModularHODDashboard: React.FC = () => {
         id: String(batch.id),
         name: batch.name || batch.custom_id || 'Batch',
         semester: typeof batch.current_semester === 'number' ? batch.current_semester : null,
+        programName: batch.program?.name || batch.program_name || '—',
         exitSurveyEnabled: Boolean(batch.exit_survey_enabled),
         alumniFeedbackEnabled: Boolean(batch.alumni_feedback_enabled),
         responseRate: toNumber(batch.alumni_feedback_response_rate),
       }));
 
-      setDashboardGaSeries(gaSeries);
       setRecentBatches(batchList);
       setDashboardSummary({
         activeBatches: activeBatches.length,
         totalBatches: batches.length,
         facultyStrength: instructors.length,
+        totalPrograms: programSet.size,
         feedbackBatches: feedbackBatches.length || batches.length,
         exitSurveyEnabled,
         alumniFeedbackEnabled,
@@ -278,12 +265,12 @@ const ModularHODDashboard: React.FC = () => {
     } catch (err) {
       console.error('Failed to load HOD dashboard data:', err);
       setError('Dashboard data could not be loaded right now.');
-      setDashboardGaSeries([]);
       setRecentBatches([]);
       setDashboardSummary({
         activeBatches: 0,
         totalBatches: 0,
         facultyStrength: 0,
+        totalPrograms: 0,
         feedbackBatches: 0,
         exitSurveyEnabled: 0,
         alumniFeedbackEnabled: 0,
@@ -297,6 +284,41 @@ const ModularHODDashboard: React.FC = () => {
   useEffect(() => {
     void loadDashboardData();
   }, [loadDashboardData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCqiSummary = async () => {
+      try {
+        const data = await obeService.getCQIClosingSummary();
+        if (cancelled) return;
+        const summary = data as CQIClosingSummaryResponse;
+        const totalClosed =
+          (summary?.ga_cqi_closures?.length ?? 0) +
+          (summary?.peo_cqi_closures?.length ?? 0) +
+          (summary?.vision_mission_cqi_closures?.length ?? 0);
+        const metrics: CqiMetrics = {
+          totalClosed,
+          gaClosed: summary?.ga_cqi_closures?.length ?? 0,
+          peoClosed: summary?.peo_cqi_closures?.length ?? 0,
+          vmClosed: summary?.vision_mission_cqi_closures?.length ?? 0,
+          vmReviews: summary?.vision_mission_reviews?.length ?? 0,
+        };
+        setCqiMetrics(metrics);
+        setCqiClosingSummary(summary);
+      } catch (err) {
+        console.error('Failed to load CQI closing summary:', err);
+        if (!cancelled) {
+          setCqiMetrics(null);
+          setCqiClosingSummary(null);
+        }
+      }
+    };
+    const timer = setTimeout(() => void loadCqiSummary(), 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -326,7 +348,7 @@ const ModularHODDashboard: React.FC = () => {
   const headerImageUrl = getProfileImageUrl(headerProfile);
   const headerName = (headerProfile?.full_name || headerProfile?.name || headerProfile?.username || 'HOD').trim();
 
-  const allTabLabels = useMemo(() => {
+  const allTabLabels = (() => {
     const labels: Record<string, string> = {};
     mainItems.forEach((item) => { labels[item.id] = item.label; });
     sidebarGroups.forEach((group) => {
@@ -334,7 +356,7 @@ const ModularHODDashboard: React.FC = () => {
       group.children.forEach((child) => { labels[child.id] = child.label; });
     });
     return labels;
-  }, []);
+  })();
 
   const activeTabLabel = activeTab === 'dashboard'
     ? 'HOD Dashboard'
@@ -356,7 +378,7 @@ const ModularHODDashboard: React.FC = () => {
 
   const renderDashboard = () => {
     const hasDashboardData = dashboardSummary.activeBatches > 0
-      || dashboardGaSeries.length > 0;
+      || (cqiMetrics?.totalClosed ?? 0) > 0;
 
     if (loading && !hasDashboardData) {
       return (
@@ -403,73 +425,130 @@ const ModularHODDashboard: React.FC = () => {
             delay={0.05}
           />
           <DashboardStatCard
-            title="Feedback Channels"
-            value={dashboardSummary.feedbackBatches}
-            helper="Department batches with feedback access"
-            gradient="from-sky-500 to-blue-600"
-            icon={MessageSquare}
+            title="Programs"
+            value={dashboardSummary.totalPrograms}
+            helper={`${dashboardSummary.activeBatches} active batches`}
+            gradient="from-purple-500 to-violet-600"
+            icon={LayoutGrid}
             delay={0.1}
-            onClick={() => setActiveTab('feedback')}
           />
           <DashboardStatCard
-            title="Exit Surveys"
-            value={dashboardSummary.exitSurveyEnabled}
-            helper={`${dashboardSummary.alumniFeedbackEnabled} alumni feedback active`}
-            gradient="from-pink-500 to-rose-600"
-            icon={GraduationCap}
+            title="CQI Closed"
+            value={cqiMetrics?.totalClosed ?? 0}
+            helper={`${cqiMetrics?.gaClosed ?? 0} GA | ${cqiMetrics?.peoClosed ?? 0} PO | ${cqiMetrics?.vmClosed ?? 0} V/M`}
+            gradient="from-amber-500 to-orange-600"
+            icon={CheckCircle}
             delay={0.15}
-            onClick={() => setActiveTab('exit-survey')}
+            onClick={() => setActiveTab('cqi')}
           />
         </div>
 
         <div className="rounded-lg border border-gray-100 bg-white p-6 shadow-sm">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-500">Cohort GA Attainment</p>
-              <h3 className="mt-1 text-xl font-black text-gray-900">Direct attainment vs target</h3>
-              <p className="mt-1 text-xs font-medium text-gray-400">{dashboardSummary.focusBatchName}</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-500">Department CQI Overview</p>
+              <h3 className="mt-1 text-xl font-black text-gray-900">Recently closed CQI loops across all programs</h3>
             </div>
             <span className="rounded-full bg-gradient-to-r from-indigo-50 to-sky-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-indigo-700">
-              Current focus
+              Department-wide
             </span>
           </div>
-          <div className="h-[340px]">
-            {dashboardGaSeries.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dashboardGaSeries} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
-                    axisLine={{ stroke: '#e2e8f0' }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    domain={[0, 100]}
-                    tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: '14px',
-                      border: '1px solid #e2e8f0',
-                      fontWeight: 700,
-                      fontSize: 12,
-                    }}
-                    formatter={(value: number) => [`${value.toFixed(1)}%`, '']}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} />
-                  <Bar dataKey="target" name="Target" fill="#94a3b8" radius={[8, 8, 0, 0]} maxBarSize={30} />
-                  <Bar dataKey="direct" name="Direct Attainment" fill="#4f46e5" radius={[8, 8, 0, 0]} maxBarSize={30} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gradient-to-br from-indigo-50/60 to-white text-sm text-gray-500">
-                No GA attainment data available for the focus batch.
-              </div>
-            )}
-          </div>
+
+          {cqiClosingSummary ? (
+            (() => {
+              const gaClosures = cqiClosingSummary.ga_cqi_closures || [];
+              const peoClosures = cqiClosingSummary.peo_cqi_closures || [];
+              const vmClosures = cqiClosingSummary.vision_mission_cqi_closures || [];
+              const vmReviews = cqiClosingSummary.vision_mission_reviews || [];
+
+              const recentClosures = [
+                ...gaClosures.map((item: GACQIClosingSummaryItem) => ({
+                  type: 'GA',
+                  item: item.flagged.ga_code,
+                  title: item.flagged.ga_title || '',
+                  batch: item.flagged.batch_name || item.closed_in_batch_name || '—',
+                  implementedOn: item.closed_in_batch_name || '—',
+                  actionTaken: item.action_taken || '—',
+                  resultingAttainment: item.resulting_attainment,
+                  closedBy: item.closed_by_name || '—',
+                  closedDate: item.closed_date || '—',
+                })),
+                ...peoClosures.map((item: PEOCQIClosingSummaryItem) => ({
+                  type: 'PO',
+                  item: item.flagged.peo_code,
+                  title: item.flagged.peo_title || '',
+                  batch: item.flagged.batch_name || item.closed_in_batch_name || '—',
+                  implementedOn: item.closed_in_batch_name || '—',
+                  actionTaken: item.action_taken || '—',
+                  resultingAttainment: item.resulting_attainment,
+                  closedBy: item.closed_by_name || '—',
+                  closedDate: item.closed_date || '—',
+                })),
+                ...vmClosures.map((item: VisionMissionCQIClosingSummaryItem) => ({
+                  type: 'V/M',
+                  item: `${item.flagged.statement_type?.[0] || 'V'} ${item.flagged.keyword || ''}`,
+                  title: item.flagged.keyword || '',
+                  batch: item.flagged.batch_name || item.closed_in_batch_name || '—',
+                  implementedOn: item.closed_in_batch_name || '—',
+                  actionTaken: item.action_taken || '—',
+                  resultingAttainment: item.resulting_attainment,
+                  closedBy: item.closed_by_name || '—',
+                  closedDate: item.closed_date || '—',
+                })),
+              ].sort((a, b) => String(b.closedDate).localeCompare(String(a.closedDate))).slice(0, 10);
+
+              const allClosures = [...gaClosures, ...peoClosures, ...vmClosures];
+
+              return allClosures.length > 0 ? (
+                <div className="overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="w-full table-fixed border-collapse text-left">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500">Type</th>
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500">Item</th>
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500">Batch</th>
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500">Implemented On</th>
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500">Action Taken</th>
+                        <th className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gray-500 text-center">Resulting Attainment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentClosures.map((row, idx) => (
+                        <tr key={`${row.type}-${row.item}-${idx}`} className="border-t border-gray-100 align-top">
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+                              row.type === 'GA' ? 'bg-green-50 text-green-700' :
+                              row.type === 'PO' ? 'bg-indigo-50 text-indigo-700' :
+                              'bg-amber-50 text-amber-700'
+                            }`}>
+                              {row.type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-sm font-semibold text-gray-900">{row.item}</td>
+                          <td className="px-3 py-2 text-sm text-gray-700">{row.batch}</td>
+                          <td className="px-3 py-2 text-sm text-gray-700">{row.implementedOn}</td>
+                          <td className="px-3 py-2 text-sm text-gray-700 truncate max-w-xs">{row.actionTaken}</td>
+                          <td className="px-3 py-2 text-sm text-gray-700 text-center">
+                            {row.resultingAttainment !== null && row.resultingAttainment !== undefined
+                              ? `${Number(row.resultingAttainment).toFixed(1)}%`
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gradient-to-br from-gray-50 to-white py-12 text-sm text-gray-500">
+                  No closed CQI records found across the department.
+                </div>
+              );
+            })()
+          ) : (
+            <div className="flex items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gradient-to-br from-gray-50 to-white py-12 text-sm text-gray-500">
+              Loading CQI summary…
+            </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-gray-100 bg-white p-6 shadow-sm">
@@ -488,6 +567,7 @@ const ModularHODDashboard: React.FC = () => {
                     {batch.semester ? (
                       <p className="mt-1 text-xs font-medium text-gray-500">Semester {batch.semester}</p>
                     ) : null}
+                    <p className="mt-1 text-xs font-medium text-gray-500">Program: {batch.programName}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
                         batch.exitSurveyEnabled

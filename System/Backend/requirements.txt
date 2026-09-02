@@ -1,9 +1,9 @@
 asgiref==3.11.1
-Django==4.2
+Django==5.2
 django-cors-headers==4.9.0
 django-extensions==4.1
 django-filter==23.1
-djangorestframework==3.16.1
+djangorestframework==3.18.0
 pillow==12.1.1
 pip==25.3
 psutil==7.2.2

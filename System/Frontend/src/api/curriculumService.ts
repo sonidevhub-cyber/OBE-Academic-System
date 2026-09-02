@@ -46,10 +46,16 @@ export interface CurriculumCourse {
   course_code: string;
   course_name: string;
   course_type: string;
+  offering_type?: string;
   credit_hours: number;
   semester_no: number;
   is_active: boolean;
   allocation?: any;
+  elective_group_id?: string | null;
+  elective_group_name?: string | null;
+  selective_group_id?: string | null;
+  selective_group_name?: string | null;
+  parent_course_id?: string | null;
 }
 export interface AddCourseToVersionPayload {
   course: string | number;
@@ -355,9 +361,28 @@ export const curriculumService = {
     program_id: number | string;
     semester_no: number;
     parent_course?: string | number;
+    offering_type?: string;
+    selective_group_id?: string | number | null;
+    elective_group_id?: string | number | null;
+    curriculum_version_id?: string | number | null;
   }) =>
-    api.post(
+     api.post(
       'courses/',
       data
     ),
+
+  updateCourseFields: (
+    courseId: string | number,
+    data: Partial<{
+      name: string;
+      code: string;
+      credit_hours: number;
+      course_type: string;
+      offering_type: string;
+      parent_course: string | number | null;
+      selective_group_id: string | number | null;
+      elective_group_id: string | number | null;
+    }>
+  ) =>
+    api.patch(`courses/${courseId}/`, data),
 };

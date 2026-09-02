@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Save, BookOpen, User, Calendar, CheckCircle, XCircle, ChevronRight, GraduationCap, Clock } from 'lucide-react';
 import { coordinatorService } from '../../../api/coordinatorService';
+import obeService from '../../../api/obeService';
 import { useAllocations } from '../../../context/AllocationContext';
 import { toast } from 'react-hot-toast';
 import BatchFrameworkBanner from '../../../components/obe/BatchFrameworkBanner';
@@ -21,9 +22,9 @@ const CourseAllocationBulkModule: React.FC = () => {
   const [allocations, setAllocations] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const isSemesterReadOnly = ['RESULT_RECEIVED', 'FINALIZED'].includes(selectedSemester?.status);
-  const canReassignInstructors = Boolean(selectedSemester?.permitted_actions?.can_reassign_instructors ?? true) && !isSemesterReadOnly;
-  const canSaveAllocations = canReassignInstructors && courses.length > 0;
+
+  const anyCourseEditable = courses.some((c) => !c.resultReceived);
+  const canSaveAllocations = anyCourseEditable && courses.length > 0;
 
   const statusBadgeClass = (status?: string) => {
     switch (status) {
@@ -173,18 +174,39 @@ const CourseAllocationBulkModule: React.FC = () => {
       const semesterKey = `semester_${selectedSemester.number || selectedBatch.current_semester || 1}`;
       const semesterCourses = detailData.courses_by_semester?.[semesterKey] || [];
 
-      const transformedCourses = semesterCourses.map((vc: any) => ({
-        id: vc.course,
-        code: vc.course_code,
-        name: vc.course_name,
-        course_type: vc.course_type || 'lecture',
-        credit_hours: vc.credit_hours,
-        allocation: vc.allocation,
-      }));
+       const transformedCourses = semesterCourses.map((vc: any) => ({
+         id: vc.course,
+         code: vc.course_code,
+         name: vc.course_name,
+         course_type: vc.course_type || 'lecture',
+         credit_hours: vc.credit_hours,
+         allocation: vc.allocation,
+         resultReceived: false,
+       }));
 
-      console.log("=== TRANSFORMED COURSES ===");
-      console.log(transformedCourses);
-      const initialAllocations: Record<string, string> = {};
+       console.log("=== TRANSFORMED COURSES ===");
+       console.log(transformedCourses);
+
+       let sessions: any[] = [];
+       try {
+         const sessionsRes = await obeService.getCourseSessions(selectedBatch.id);
+          sessions = (sessionsRes?.sessions || []) as any[];
+       } catch (sessionsErr) {
+         console.error('Error loading course sessions:', sessionsErr);
+       }
+
+       const sessionStatusMap: Record<string, boolean> = {};
+       sessions.forEach((session: any) => {
+         if (session.assessment_status === 'ASSESSMENT_DONE') {
+           sessionStatusMap[String(session.course)] = true;
+         }
+       });
+
+       transformedCourses.forEach((course: any) => {
+         course.resultReceived = !!sessionStatusMap[String(course.id)];
+       });
+
+       const initialAllocations: Record<string, string> = {};
       transformedCourses.forEach((course: any) => {
         console.log(`Course ${course.code} - Allocation:`, course.allocation);
         let teacherId: string | null = null;
@@ -232,17 +254,33 @@ const CourseAllocationBulkModule: React.FC = () => {
     }
 
     if (!canSaveAllocations) {
-      toast.error('This semester is read-only.');
+      toast.error('No editable courses available to save.');
       return;
     }
 
-    // Filter valid allocations
+    const lockedCourses = Object.entries(allocations)
+      .filter(([courseId]) => {
+        const course = courses.find((c) => c.id === courseId);
+        return course?.resultReceived;
+      });
+
     const allocationList = Object.entries(allocations)
-      .filter(([_, teacherId]) => teacherId && teacherId !== '')
+      .filter(([courseId, teacherId]) => {
+        const course = courses.find((c) => c.id === courseId);
+        if (course?.resultReceived) return false;
+        return teacherId && teacherId !== '';
+      })
       .map(([courseId, teacherId]) => ({
         course: courseId,
         teacher: teacherId
       }));
+
+    if (lockedCourses.length > 0) {
+      toast(
+        `Skipped ${lockedCourses.length} course(s) with results already received.`,
+        { icon: '⚠️' }
+      );
+    }
 
     if (allocationList.length === 0) {
       toast.error('No valid allocations to save');
@@ -453,7 +491,7 @@ const CourseAllocationBulkModule: React.FC = () => {
                   onClick={handleSave}
                   disabled={saving || Object.keys(allocations).length === 0 || !canSaveAllocations}
                   className="flex items-center px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors shadow-sm"
-                  title={!canSaveAllocations ? 'This semester is read-only.' : undefined}
+                  title={!canSaveAllocations ? 'No editable courses available.' : undefined}
                 >
                   {saving ? (
                     <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
@@ -503,9 +541,9 @@ const CourseAllocationBulkModule: React.FC = () => {
                               <select
         value={allocations[course.id] || ''}
                                 onChange={(e) => handleInstructorChange(course.id, e.target.value)}
-                                disabled={!canReassignInstructors}
+      disabled={course.resultReceived}
                                 className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none appearance-none bg-white disabled:bg-gray-50 disabled:cursor-not-allowed"
-                                title={!canReassignInstructors ? 'This semester is read-only.' : undefined}
+                                title={course.resultReceived ? 'Result already received - allocation locked.' : undefined}
                               >
                                 <option value="">Select Instructor</option>
                             {instructors.map(inst => {
@@ -529,7 +567,12 @@ const CourseAllocationBulkModule: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            {allocations[course.id] ? (
+                            {course.resultReceived ? (
+                              <div className="flex items-center text-red-600 text-sm">
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Result Received
+                              </div>
+                            ) : allocations[course.id] ? (
                               <div className="flex items-center text-green-600 text-sm">
                                 <CheckCircle className="h-4 w-4 mr-1" />
                                 Ready

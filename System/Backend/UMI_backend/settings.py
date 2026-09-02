@@ -1,3 +1,5 @@
+from dotenv import load_dotenv 
+load_dotenv()  # Load environment variables from .env file
 import os
 from pathlib import Path
 
@@ -56,6 +58,8 @@ INSTALLED_APPS = [
     'teacher_alerts',
     'clo_master',
     'retake.apps.RetakeConfig',
+    'electives',
+    'anymail',
 
 ]
 
@@ -91,12 +95,13 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'UMI_backend.wsgi.application'
 
+
 # Database
 # Using PostgreSQL as per SETUP.md
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'OBE_DB_Backup',
+        'NAME': 'icms_db',
         'USER': 'obe_user',
         'PASSWORD': 'admin.123',
         'HOST': 'localhost',
@@ -177,3 +182,9 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply
 
 # Public frontend URL used in emailed employer survey links.
 FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:3000')
+EMAIL_BACKEND = 'anymail.backends.sendgrid.EmailBackend'
+ANYMAIL = {
+    "SENDGRID_API_KEY": os.getenv("SENDGRID_API_KEY"),
+}
+DEFAULT_FROM_EMAIL = "soniasul645@gmail.com"
+SILENCE_SYSTEM_CHECKS = ["anymail.W003"]  # Silence warning about missing SENDGRID_API_KEY in development
