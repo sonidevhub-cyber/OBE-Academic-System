@@ -3926,67 +3926,82 @@ if (
                     Select Course
                   </h4>
 
-                  <div className="space-y-1 max-h-[600px] overflow-y-auto pr-2">
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+  {courseEntries.map(
+    ([semester, courses]) => {
+      const semesterNo = Number(
+        semester.replace("semester_", "")
+      );
 
-                    {courseEntries
-                      .flatMap(
-                        ([
-                          ,
-                          courses,
-                        ]) =>
-                          courses as any[]
-                      )
-                      .map(
-                        (vc: any) => (
-                          <button
-                            key={
-                              vc.course
-                            }
-                            onClick={() => {
-                              setSelectedCourseForObe(
-                                vc
-                              );
+      return (
+        <div
+          key={semester}
+          className="space-y-2"
+        >
+          {/* SEMESTER HEADING */}
+          <div className="sticky top-0 z-10 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-700 uppercase">
+                Semester {semesterNo}
+              </span>
 
-                              setIsEditingObe(
-                                false
-                              );
-                            }}
-                            className={`w-full text-left p-3 rounded-lg transition-all border ${
-                              selectedCourseForObe?.course ===
-                              vc.course
-                                ? 'bg-indigo-50 border-indigo-200 shadow-sm'
-                                : 'bg-white border-gray-100 hover:bg-gray-50'
-                            }`}
-                          >
+              <span className="text-[10px] font-semibold text-gray-400">
+                {(courses as any[]).length} Course
+                {(courses as any[]).length !== 1
+                  ? "s"
+                  : ""}
+              </span>
+            </div>
+          </div>
 
-                            <p className="text-xs font-bold text-indigo-600 uppercase">
-                              {
-                                vc.course_code
-                              }
-                            </p>
+          {/* COURSES OF THIS SEMESTER */}
+          {(courses as any[]).map(
+            (vc: any) => (
+              <button
+                key={`${semester}-${vc.course}`}
+                onClick={() => {
+                  setSelectedCourseForObe(vc);
+                  setIsEditingObe(false);
+                }}
+                className={`w-full text-left p-3 rounded-lg transition-all border ${
+                  selectedCourseForObe?.course ===
+                  vc.course
+                    ? "bg-indigo-50 border-indigo-200 shadow-sm"
+                    : "bg-white border-gray-100 hover:bg-gray-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-indigo-600 uppercase">
+                      {vc.course_code}
+                    </p>
 
-                            <p className="text-sm font-semibold text-gray-900 truncate">
-                              {
-                                vc.course_name
-                              }
-                            </p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {vc.course_name}
+                    </p>
 
-                            {vc.course_type && (
-                              <span className="text-[10px] text-gray-400">
-                                {
-                                  vc.course_type ===
-                                  'LAB'
-                                    ? 'Lab'
-                                    : 'Lecture'
-                                }
-                              </span>
-                            )}
-
-                          </button>
-                        )
-                      )}
-
+                    {vc.course_type && (
+                      <span className="text-[10px] text-gray-400">
+                        {vc.course_type === "LAB"
+                          ? "Lab"
+                          : "Lecture"}
+                      </span>
+                    )}
                   </div>
+
+                  {/* SEMESTER BADGE */}
+                  <span className="shrink-0 text-[9px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+                    Sem {semesterNo}
+                  </span>
+                </div>
+              </button>
+            )
+          )}
+        </div>
+      );
+    }
+  )}
+</div>
                 </div>
 
                 {/* MATRIX */}

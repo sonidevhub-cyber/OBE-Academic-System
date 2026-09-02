@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'retake.apps.RetakeConfig',
     'electives',
     'anymail',
+    'course_history',
 
 ]
 

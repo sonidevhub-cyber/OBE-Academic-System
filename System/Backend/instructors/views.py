@@ -1,18 +1,17 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+from django.db.models import F
 
 from .models import Instructor
 from .serializers import InstructorSerializer
 
 from coordinators.models import TeacherAllocation
-from coordinators.serializers import TeacherAllocationSerializer
 
-from core.models import Batch
 from core.responses import api_response
 
 from obe.models import GACQIRecord, CourseSession
-
 from feedback.models import FeedbackCQI
 
 
@@ -170,66 +169,96 @@ class InstructorViewSet(viewsets.ModelViewSet):
             
         return Response({'courses': data, 'results': data}) # Wrapped for different component expectations
     # ============================================================
+    # HELPER
+    # ============================================================
+    def _get_current_semester_allocations(self, user):
+        """
+        Return ONLY allocations belonging to the batch's
+        CURRENT semester.
+
+        Example:
+            bscs2024 -> current_semester = 2
+            bscs2025 -> current_semester = 1
+
+        Old semester allocations remain in DB/history but are
+        not shown in My Courses.
+        """
+
+        return (
+            TeacherAllocation.objects.filter(
+                teacher=user,
+                is_active=True,
+                status="active",
+                batch__status="active",
+                semester_no=F("batch__current_semester"),
+            )
+            .select_related(
+                "course",
+                "course__program",
+                "course__semester",
+                "batch",
+                "batch__program",
+                "curriculum_version",
+                "allocated_by",
+            )
+            .order_by(
+                "batch__name",
+                "semester_no",
+                "course__name",
+            )
+        )
+
+    # ============================================================
     # MY COURSES
     # ============================================================
     @action(detail=False, methods=["get"], url_path="my-courses")
     def my_courses(self, request):
         """
-        Get all courses allocated to the currently logged-in instructor.
+        Get ONLY current-semester courses allocated to the
+        currently logged-in instructor.
 
-        IMPORTANT:
-        - Only active allocations are returned.
-        - Active batch courses are returned.
-        - Previous GA CQI logic is preserved.
-        - Coordinator Feedback CQI implemented for this batch is
-          ALSO returned.
+        Historical allocations are NOT deleted.
+        They simply do not appear in My Courses.
+
+        GA CQI logic is preserved.
+        Feedback CQI logic is preserved.
         """
 
         user = request.user
 
         print(
-            f"Fetching courses for user: "
+            f"Fetching current-semester courses for user: "
             f"{getattr(user, 'email', 'N/A')}, "
             f"ID: {getattr(user, 'id', 'N/A')}, "
             f"Role: {getattr(user, 'role', 'N/A')}"
         )
 
         # ========================================================
-        # ACTIVE TEACHER ALLOCATIONS
+        # CURRENT SEMESTER ALLOCATIONS ONLY
         # ========================================================
-        allocations = (
-            TeacherAllocation.objects.filter(
-                teacher=user,
-                is_active=True,
-                status="active",
-                batch__status="active",
-            )
-            .select_related(
-                "course",
-                "course__program",
-                "batch",
-                "batch__program",
-                "curriculum_version",
-                "allocated_by",
-            )
-            .order_by("batch__name", "semester_no", "course__name")
-        )
 
-        print(f"Found {allocations.count()} active allocations")
+        allocations = self._get_current_semester_allocations(user)
+
+        print(
+            f"Found {allocations.count()} current-semester "
+            f"active allocations"
+        )
 
         data = []
 
         # ========================================================
-        # LOOP THROUGH ALLOCATIONS
+        # LOOP THROUGH CURRENT ALLOCATIONS
         # ========================================================
+
         for alloc in allocations:
 
             course = alloc.course
             batch = alloc.batch
 
             # ----------------------------------------------------
-            # CORE SEMESTER
+            # CURRENT SEMESTER
             # ----------------------------------------------------
+
             from core.models import Semester as CoreSemester
 
             core_semester = (
@@ -242,6 +271,20 @@ class InstructorViewSet(viewsets.ModelViewSet):
             # ----------------------------------------------------
             # LAST COMPLETED SEMESTER
             # ----------------------------------------------------
+            #
+            # IMPORTANT:
+            # This is NOT changed.
+            #
+            # It is required for previous semester GA CQI.
+            #
+            # Example:
+            # bscs2024 current semester = 2
+            # previous completed semester = 1
+            #
+            # GA CQI from semester 1 can therefore be shown
+            # as warning for semester 2.
+            # ----------------------------------------------------
+
             last_completed_semester = None
 
             completed_semesters = (
@@ -260,6 +303,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
             completed_semesters = list(completed_semesters)
 
             if completed_semesters:
+
                 eligible_semesters = [
                     semester
                     for semester in completed_semesters
@@ -273,9 +317,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
             # ====================================================
             # EXISTING GA CQI
-            # ====================================================
-            # DO NOT CHANGE THIS LOGIC.
-            # This is your existing GA CQI mechanism.
             # ====================================================
 
             previous_cqi = None
@@ -301,25 +342,12 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 )
 
             # ====================================================
-            # NEW: FEEDBACK CQI
-            # ====================================================
-            #
-            # Coordinator creates CQI for OLD batch:
-            #
-            # bscs2024
-            #
-            # and selects:
-            #
-            # implemented_batch = bscs2025
-            #
-            # Therefore instructor of bscs2025 should see it.
-            #
-            # IMPORTANT:
-            # We DO NOT modify GA CQI.
+            # FEEDBACK CQI
             # ====================================================
 
-            feedback_cqi_qs = (
+            feedback_cqi = (
                 FeedbackCQI.objects.filter(
+                    course=course,
                     implemented_batch=batch,
                     status="IMPLEMENTED",
                 )
@@ -327,90 +355,111 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     "course",
                     "clo",
                     "batch",
+                    "implemented_batch",
                     "semester",
                     "created_by",
                 )
                 .order_by("-created_at")
             )
 
-            # ----------------------------------------------------
-            # Only CQI related to this allocated course
-            # ----------------------------------------------------
-            course_feedback_cqi = feedback_cqi_qs.filter(
-                course=course
-            )
-
             feedback_cqi_data = []
 
-            for cqi in course_feedback_cqi:
+            for cqi in feedback_cqi:
 
                 feedback_cqi_data.append(
                     {
                         "id": cqi.id,
+
                         "course_id": (
                             cqi.course.id
                             if cqi.course
                             else None
                         ),
+
                         "course_name": (
                             cqi.course.name
                             if cqi.course
                             else ""
                         ),
+
                         "course_code": (
                             cqi.course.code
                             if cqi.course
                             else ""
                         ),
+
                         "clo_id": (
                             cqi.clo.id
                             if cqi.clo
                             else None
                         ),
+
                         "clo_code": (
-                            getattr(cqi.clo, "code", "")
+                            getattr(
+                                cqi.clo,
+                                "code",
+                                "",
+                            )
                             if cqi.clo
                             else ""
                         ),
+
                         "clo_title": (
-                            getattr(cqi.clo, "title", "")
+                            getattr(
+                                cqi.clo,
+                                "title",
+                                "",
+                            )
                             if cqi.clo
                             else ""
                         ),
+
                         "source": cqi.source,
+
                         "root_cause": cqi.root_cause,
-                        "remedial_action": cqi.remedial_action,
+
+                        "remedial_action": (
+                            cqi.remedial_action
+                        ),
+
                         "status": cqi.status,
+
                         "original_batch_id": (
                             cqi.batch.id
                             if cqi.batch
                             else None
                         ),
+
                         "original_batch_name": (
                             cqi.batch.name
                             if cqi.batch
                             else ""
                         ),
+
                         "implemented_batch_id": (
                             cqi.implemented_batch.id
                             if cqi.implemented_batch
                             else None
                         ),
+
                         "implemented_batch_name": (
                             cqi.implemented_batch.name
                             if cqi.implemented_batch
                             else ""
                         ),
+
                         "semester_id": (
                             cqi.semester.id
                             if cqi.semester
                             else None
                         ),
+
                         "created_by_id": (
                             cqi.created_by.id
                             if cqi.created_by
                             else None
                         ),
+
                         "created_at": cqi.created_at,
                     }
                 )
@@ -428,10 +477,12 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 ).first()
             )
 
-            # ----------------------------------------------------
-            # Sync workflow safely
-            # ----------------------------------------------------
+            # ====================================================
+            # WORKFLOW
+            # ====================================================
+
             try:
+
                 from assessments.workflows import (
                     sync_course_session_workflow_from_assessments,
                     derive_batch_semester_status,
@@ -468,26 +519,37 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 permitted_actions = []
 
             # ====================================================
-            # FINAL RESPONSE OBJECT
+            # FINAL COURSE OBJECT
             # ====================================================
 
             course_data = {
+
                 # ------------------------------------------------
                 # Allocation
                 # ------------------------------------------------
+
                 "id": alloc.id,
                 "allocation_id": alloc.id,
 
                 # ------------------------------------------------
                 # Course
                 # ------------------------------------------------
+
                 "course_id": course.id,
+
                 "course_name": course.name,
+
                 "course_code": course.code,
+
                 "course_type": course.course_type,
                 "offering_type": getattr(course, "offering_type", None),
+
                 "course_description": (
-                    getattr(course, "description", "")
+                    getattr(
+                        course,
+                        "description",
+                        "",
+                    )
                 ),
 
                 "credits": getattr(
@@ -505,12 +567,15 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 # ------------------------------------------------
                 # Batch
                 # ------------------------------------------------
+
                 "batch_id": batch.id,
+
                 "batch_name": batch.name,
 
                 # ------------------------------------------------
                 # Semester
                 # ------------------------------------------------
+
                 "semester_no": alloc.semester_no,
 
                 "semester_id": (
@@ -528,9 +593,17 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     or f"Semester {alloc.semester_no}"
                 ),
 
+                # Current batch semester
+                "batch_current_semester": getattr(
+                    batch,
+                    "current_semester",
+                    alloc.semester_no,
+                ),
+
                 # ------------------------------------------------
                 # Previous semester
                 # ------------------------------------------------
+
                 "last_completed_semester": (
                     last_completed_semester
                 ),
@@ -538,6 +611,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 # ------------------------------------------------
                 # Course Session
                 # ------------------------------------------------
+
                 "course_session_id": (
                     course_session.id
                     if course_session
@@ -560,8 +634,9 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 ),
 
                 # ------------------------------------------------
-                # Semester workflow
+                # Semester Workflow
                 # ------------------------------------------------
+
                 "semester_status": semester_status,
 
                 "permitted_actions": permitted_actions,
@@ -569,6 +644,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 # ------------------------------------------------
                 # Program
                 # ------------------------------------------------
+
                 "program_name": (
                     batch.program.name
                     if batch.program
@@ -584,6 +660,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 # ------------------------------------------------
                 # Coordinator
                 # ------------------------------------------------
+
                 "coordinator_name": (
                     getattr(
                         alloc.allocated_by,
@@ -606,6 +683,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 # ------------------------------------------------
                 # Curriculum
                 # ------------------------------------------------
+
                 "curriculum_version": (
                     alloc.curriculum_version.version_no
                     if alloc.curriculum_version
@@ -621,8 +699,9 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 "status": alloc.status,
 
                 # =================================================
-                # EXISTING GA CQI
+                # GA CQI
                 # =================================================
+
                 "has_previous_cqi": (
                     previous_cqi is not None
                 ),
@@ -632,17 +711,16 @@ class InstructorViewSet(viewsets.ModelViewSet):
                         "id": str(previous_cqi.id),
                         "semester": last_completed_semester,
                         "root_cause": previous_cqi.root_cause,
+                        "remedial_plan": (
+                            previous_cqi.remedial_plan
+                        ),
                     }
                     if previous_cqi
                     else None
                 ),
 
                 # =================================================
-                # NEW FEEDBACK CQI
-                # =================================================
-                #
-                # Instructor's current batch ke course ka
-                # coordinator-applied CQI.
+                # FEEDBACK CQI
                 # =================================================
 
                 "has_feedback_cqi": bool(
@@ -669,6 +747,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
     # ============================================================
     # PROFILE
     # ============================================================
+
     @action(detail=False, methods=["get"])
     def profile(self, request):
 
@@ -725,6 +804,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
     # ============================================================
     # COURSES
     # ============================================================
+
     @action(detail=False, methods=["get"])
     def courses(self, request):
 
@@ -744,24 +824,8 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 'curriculum_version')
 
             allocations = (
-                TeacherAllocation.objects.filter(
-                    teacher=request.user,
-                    is_active=True,
-                    status="active",
-                    batch__status="active",
-                )
-                .select_related(
-                    "course",
-                    "course__semester",
-                    "allocated_by",
-                    "batch",
-                    "batch__program",
-                    "curriculum_version",
-                )
-                .order_by(
-                    "batch__name",
-                    "semester_no",
-                    "course__name",
+                self._get_current_semester_allocations(
+                    request.user
                 )
             )
 
@@ -770,6 +834,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
             for allocation in allocations:
 
                 course = allocation.course
+
                 semester = getattr(
                     course,
                     "semester",
@@ -777,7 +842,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 )
 
                 # ----------------------------------------------
-                # Feedback CQI for this course + batch
+                # Feedback CQI
                 # ----------------------------------------------
 
                 feedback_cqi = (
@@ -798,11 +863,13 @@ class InstructorViewSet(viewsets.ModelViewSet):
                 feedback_cqi_data = [
                     {
                         "id": cqi.id,
+
                         "clo_id": (
                             cqi.clo.id
                             if cqi.clo
                             else None
                         ),
+
                         "clo_code": (
                             getattr(
                                 cqi.clo,
@@ -812,37 +879,47 @@ class InstructorViewSet(viewsets.ModelViewSet):
                             if cqi.clo
                             else ""
                         ),
+
                         "root_cause": cqi.root_cause,
+
                         "remedial_action": (
                             cqi.remedial_action
                         ),
+
                         "status": cqi.status,
+
                         "source": cqi.source,
+
                         "original_batch_id": (
                             cqi.batch.id
                             if cqi.batch
                             else None
                         ),
+
                         "original_batch_name": (
                             cqi.batch.name
                             if cqi.batch
                             else ""
                         ),
+
                         "implemented_batch_id": (
                             cqi.implemented_batch.id
                             if cqi.implemented_batch
                             else None
                         ),
+
                         "implemented_batch_name": (
                             cqi.implemented_batch.name
                             if cqi.implemented_batch
                             else ""
                         ),
+
                         "semester_id": (
                             cqi.semester.id
                             if cqi.semester
                             else None
                         ),
+
                         "created_at": cqi.created_at,
                     }
                     for cqi in feedback_cqi
@@ -870,36 +947,28 @@ class InstructorViewSet(viewsets.ModelViewSet):
                             else ""
                         ),
 
-                        "course_name": (
-                            getattr(
-                                course,
-                                "name",
-                                "",
-                            )
+                        "course_name": getattr(
+                            course,
+                            "name",
+                            "",
                         ),
 
-                        "course_code": (
-                            getattr(
-                                course,
-                                "code",
-                                "",
-                            )
+                        "course_code": getattr(
+                            course,
+                            "code",
+                            "",
                         ),
 
-                        "course_description": (
-                            getattr(
-                                course,
-                                "description",
-                                "",
-                            )
+                        "course_description": getattr(
+                            course,
+                            "description",
+                            "",
                         ),
 
-                        "credits": (
-                            getattr(
-                                course,
-                                "credit_hours",
-                                0,
-                            )
+                        "credits": getattr(
+                            course,
+                            "credit_hours",
+                            0,
                         ),
 
                         "semester_id": (
@@ -908,23 +977,25 @@ class InstructorViewSet(viewsets.ModelViewSet):
                             else None
                         ),
 
-                        "semester_name": (
-                            getattr(
-                                semester,
-                                "name",
-                                "",
-                            )
+                        "semester_name": getattr(
+                            semester,
+                            "name",
+                            "",
                         ),
 
-                        "semester_code": (
-                            getattr(
-                                semester,
-                                "code",
-                                "",
-                            )
+                        "semester_code": getattr(
+                            semester,
+                            "code",
+                            "",
                         ),
 
                         "semester_no": allocation.semester_no,
+
+                        "batch_current_semester": getattr(
+                            allocation.batch,
+                            "current_semester",
+                            allocation.semester_no,
+                        ),
 
                         "program_name": (
                             allocation.batch.program.name
@@ -974,7 +1045,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
                         "status": allocation.status,
 
-                        # NEW
                         "has_feedback_cqi": bool(
                             feedback_cqi_data
                         ),
@@ -985,7 +1055,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
             return api_response(
                 data=data,
-                message="Courses retrieved successfully",
+                message="Current semester courses retrieved successfully",
             )
 
         except Exception as e:
@@ -1003,12 +1073,12 @@ class InstructorViewSet(viewsets.ModelViewSet):
     # ============================================================
     # COURSES SUMMARY
     # ============================================================
+
     @action(detail=False, methods=["get"])
     def courses_summary(self, request):
 
-        qs = TeacherAllocation.objects.filter(
-            teacher=request.user,
-            is_active=True,
+        qs = self._get_current_semester_allocations(
+            request.user
         )
 
         return api_response(
@@ -1036,10 +1106,11 @@ class InstructorViewSet(viewsets.ModelViewSet):
     # ============================================================
     # COURSE DETAILS
     # ============================================================
+
     @action(detail=False, methods=["get"])
     def course_details(self, request):
 
-        course_id = request.GET.get("course_id")
+        allocation_id = request.GET.get("course_id")
 
         try:
 
@@ -1051,10 +1122,17 @@ class InstructorViewSet(viewsets.ModelViewSet):
                     "allocated_by",
                     "batch",
                     "batch__program",
+                    "curriculum_version",
                 )
                 .get(
-                    id=course_id,
+                    id=allocation_id,
                     teacher=request.user,
+                    is_active=True,
+                    status="active",
+                    batch__status="active",
+                    semester_no=F(
+                        "batch__current_semester"
+                    ),
                 )
             )
 
@@ -1162,21 +1240,25 @@ class InstructorViewSet(viewsets.ModelViewSet):
 
                     "course": {
                         "course_id": course.id,
+
                         "name": getattr(
                             course,
                             "name",
                             "",
                         ),
+
                         "code": getattr(
                             course,
                             "code",
                             "",
                         ),
+
                         "description": getattr(
                             course,
                             "description",
                             "",
                         ),
+
                         "credits": getattr(
                             course,
                             "credit_hours",
@@ -1190,10 +1272,17 @@ class InstructorViewSet(viewsets.ModelViewSet):
                             if allocation.batch
                             else None
                         ),
+
                         "batch_name": (
                             allocation.batch.name
                             if allocation.batch
                             else ""
+                        ),
+
+                        "current_semester": getattr(
+                            allocation.batch,
+                            "current_semester",
+                            allocation.semester_no,
                         ),
                     },
 
@@ -1203,11 +1292,13 @@ class InstructorViewSet(viewsets.ModelViewSet):
                             if semester
                             else None
                         ),
+
                         "name": getattr(
                             semester,
                             "name",
                             "",
                         ),
+
                         "code": getattr(
                             semester,
                             "code",
@@ -1260,7 +1351,6 @@ class InstructorViewSet(viewsets.ModelViewSet):
                         "",
                     ),
 
-                    # NEW
                     "has_feedback_cqi": bool(
                         feedback_cqi_data
                     ),
@@ -1274,7 +1364,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
         except TeacherAllocation.DoesNotExist:
 
             return api_response(
-                message="Course not found",
+                message="Current semester course not found",
                 status_code=404,
             )
 

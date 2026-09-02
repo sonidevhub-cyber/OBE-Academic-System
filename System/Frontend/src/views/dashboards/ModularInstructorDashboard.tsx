@@ -12,9 +12,9 @@ import RetakeResultEntryPage from '../pages/RetakeResultEntryPage';
 import ModularDashboardShell from '../../components/layout/ModularDashboardShell';
 import DashboardStatCard from '../../components/layout/DashboardStatCard';
 import { instructorCourseService, InstructorCourse } from '../../api/instructorCourseService';
+import CourseHistoryModule from "../modules/CourseHistoryModule";
 
-
-type TabId = 'dashboard' | 'courses' | 'obe' | 'retakes';
+type TabId = 'dashboard' | 'courses' | 'obe' | 'history'| 'retakes';
 
 const ModularInstructorDashboard: React.FC = () => {
   const { currentUser, logout } = useAuth();
@@ -97,6 +97,7 @@ const ModularInstructorDashboard: React.FC = () => {
     { id: 'courses', label: 'My Courses', iconPath: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
     { id: 'obe', label: 'OBE Management', iconPath: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
     { id: 'retakes', label: 'Assigned Retakes', iconPath: 'M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { id: 'history', label: 'Course History', iconPath: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'},
   ];
 
   const activeTabLabel = tabs.find((tab) => tab.id === activeTab)?.label || 'Instructor Dashboard';
@@ -222,6 +223,21 @@ const ModularInstructorDashboard: React.FC = () => {
         return renderInstructorDashboard();
       case 'obe':
         return <OBEModule />;
+      case 'history':
+  return (
+    <CourseHistoryModule
+      onViewReport={(course) => {
+        console.log("Selected historical course:", course);
+
+        // temporary test
+        alert(
+          `Course: ${course.course_name || course.course?.name}\n` +
+          `Batch: ${course.batch_name || course.batch?.name}\n` +
+          `Semester: ${course.semester_no || course.semester?.name}`
+        );
+      }}
+    />
+  );
       case 'retakes':
         if (retakeIdFromQuery) {
           return <RetakeResultEntryPage />;
