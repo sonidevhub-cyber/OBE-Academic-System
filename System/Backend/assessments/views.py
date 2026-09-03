@@ -550,7 +550,8 @@ class EnterMarksView(APIView):
                 CLOService.generate_student_report(
                     course_id=assessment.course_id,
                     batch_id=assessment.batch_id,
-                    semester_id=assessment.semester_id
+                    semester_id=assessment.semester_id,
+                    request_user=request.user,
                 )
 
                 # ✅ Step 10: Weak CLOs check karo

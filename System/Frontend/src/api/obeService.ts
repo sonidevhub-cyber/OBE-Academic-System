@@ -1356,6 +1356,26 @@ async copyCLOs(
     return response.data;
   }
 
+  async getProgramVision(programId: string): Promise<VisionResponse> {
+    const response = await api.get(`/obe/programs/${programId}/vision/`);
+    return response.data;
+  }
+
+  async saveProgramVision(programId: string, statement: string): Promise<VisionResponse> {
+    const response = await api.patch(`/obe/programs/${programId}/vision/`, { statement });
+    return response.data;
+  }
+
+  async getProgramMission(programId: string): Promise<MissionResponse> {
+    const response = await api.get(`/obe/programs/${programId}/mission/`);
+    return response.data;
+  }
+
+  async saveProgramMission(programId: string, statement: string): Promise<MissionResponse> {
+    const response = await api.patch(`/obe/programs/${programId}/mission/`, { statement });
+    return response.data;
+  }
+
   async extractKeywords(sourceType: 'vision' | 'mission', text: string): Promise<{ candidates: string[] }> {
     const response = await api.post('/obe/extract-keywords/', { source_type: sourceType, text });
     return response.data;

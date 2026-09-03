@@ -42,7 +42,6 @@ const CoordinatorCLOReportModule: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [allPrograms, setAllPrograms] = useState<any[]>([]);
-  const [allSemesters, setAllSemesters] = useState<any[]>([]);
   const [allBatches, setAllBatches] = useState<Batch[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string>('');
   const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
@@ -59,10 +58,20 @@ const CoordinatorCLOReportModule: React.FC = () => {
     return batch?.name || null;
   }, [allBatches, selectedBatchId]);
 
+  // Semesters derived from the selected batch's program, sorted by number
+  const batchSemesters = useMemo(() => {
+    const batch = allBatches.find((b) => b.id === selectedBatchId);
+    const programId = batch?.program?.id;
+    if (!programId) return [];
+    const program = allPrograms.find((p) => p.id === programId);
+    const semesters: any[] = program?.semesters || [];
+    return [...semesters].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  }, [allBatches, allPrograms, selectedBatchId]);
+
   const selectedSemesterName = useMemo(() => {
-    const sem = allSemesters.find((s) => s.id === selectedSemesterId);
-    return sem ? `${sem.name} (Semester ${sem.number})` : null;
-  }, [allSemesters, selectedSemesterId]);
+    const sem = batchSemesters.find((s) => s.id === selectedSemesterId);
+    return sem ? `Semester ${sem.number}` : null;
+  }, [batchSemesters, selectedSemesterId]);
 
   const selectedProgramName = useMemo(() => {
     const prog = allPrograms.find((p) => p.id === selectedProgramId);
@@ -72,8 +81,8 @@ const CoordinatorCLOReportModule: React.FC = () => {
   const loadingDescriptor = useMemo(() => {
     const parts: string[] = [];
     if (selectedProgramName) parts.push(selectedProgramName);
-    if (selectedSemesterName) parts.push(selectedSemesterName);
     if (selectedBatchName) parts.push(selectedBatchName);
+    if (selectedSemesterName) parts.push(selectedSemesterName);
     if (parts.length === 0) return 'Loading CLO report…';
     return `Loading CLO report for ${parts.join(' · ')}…`;
   }, [selectedProgramName, selectedSemesterName, selectedBatchName]);
@@ -92,14 +101,9 @@ const CoordinatorCLOReportModule: React.FC = () => {
           obeService.getAllBatches({ alumni_feedback: 'all' }),
         ]);
         const programs = programsRes.data;
-        // Flatten all semesters from all programs
-        const semesters = programs.flatMap((p: any) => p.semesters || []);
-        // De-duplicate semesters by id
-        const uniqueSemesters = Array.from(new Map(semesters.map((s: any) => [s.id, s])).values());
         setAllPrograms(programs);
-        setAllSemesters(uniqueSemesters);
         setAllBatches(batches);
-        
+
         if (programs[0]) setSelectedProgramId(programs[0].id);
       } catch (error) {
         console.error(error);
@@ -512,7 +516,6 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 setSelectedSemesterId('');
                 setSelectedBatchId('');
                 setReport(null);
-                setLoading(true);
               }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
             >
@@ -531,14 +534,34 @@ const CoordinatorCLOReportModule: React.FC = () => {
               onChange={(e) => {
                 setBatchCategory(e.target.value as BatchCategory);
                 setSelectedBatchId('');
+                setSelectedSemesterId('');
                 setReport(null);
-                setLoading(true);
               }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
             >
               <option value="all">All Batches</option>
               <option value="ongoing">Ongoing</option>
               <option value="graduated">Graduated</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Select Batch
+            </label>
+            <select
+              value={selectedBatchId}
+              onChange={(e) => {
+                setSelectedBatchId(e.target.value);
+                setSelectedSemesterId('');
+                setReport(null);
+              }}
+              disabled={!selectedProgramId}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all disabled:bg-gray-100"
+            >
+              <option value="">Select a batch</option>
+              {filteredBatches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -550,33 +573,13 @@ const CoordinatorCLOReportModule: React.FC = () => {
               onChange={(e) => {
                 setSelectedSemesterId(e.target.value);
                 setReport(null);
-                setLoading(true);
               }}
-              className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
-            >
-              <option value="">Select Semester</option>
-              {allSemesters.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} (Semester {s.number})</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
-              Select Batch
-            </label>
-            <select
-              value={selectedBatchId}
-              onChange={(e) => {
-                setSelectedBatchId(e.target.value);
-                setReport(null);
-                setLoading(true);
-              }}
-              disabled={!selectedProgramId}
+              disabled={!selectedBatchId}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all disabled:bg-gray-100"
             >
-              <option value="">Select a batch</option>
-              {filteredBatches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+              <option value="">Select semester</option>
+              {batchSemesters.map((s) => (
+                <option key={s.id} value={s.id}>Semester {s.number}</option>
               ))}
             </select>
           </div>
@@ -769,32 +772,95 @@ const CoordinatorCLOReportModule: React.FC = () => {
                   <td colSpan={3} className="px-4 py-3 font-black text-indigo-800 border border-gray-200 sticky left-0 bg-indigo-50 z-10">
                     No. of Students Achieving CLOs KPI (50%):
                   </td>
-                  {report.finalized_courses.map((course) => 
+                  {report.finalized_courses.map((course) =>
+                    course.clos.map((clo) => (
+                      <td key={`count-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
+                        {typeof clo.cohort_achieved_count === 'number' ? clo.cohort_achieved_count : 0}
+                      </td>
+                    ))
+                  )}
+                </tr>
+
+                {/* Summary Row 2: Direct Attainment (80%) */}
+                <tr className="border-t border-gray-200 bg-green-50">
+                  <td colSpan={3} className="px-4 py-3 font-black text-green-800 border border-gray-200 sticky left-0 bg-green-50 z-10">
+                    Direct Attainment % <span className="font-semibold text-green-600">(From Assessments — 80%)</span>
+                  </td>
+                  {report.finalized_courses.map((course) =>
                     course.clos.map((clo) => {
-                      const achievedCount = typeof clo.cohort_achieved_count === 'number'
-                        ? clo.cohort_achieved_count
-                        : 0;
+                      const direct = typeof (clo as any).direct_attainment === 'number'
+                        ? (clo as any).direct_attainment
+                        : (typeof clo.cohort_percentage === 'number' ? clo.cohort_percentage : null);
                       return (
-                        <td key={`count-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
-                          {achievedCount}
+                        <td key={`direct-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-green-800">
+                          {direct !== null && direct !== undefined ? `${Number(direct).toFixed(2)}%` : 'N/A'}
                         </td>
                       );
                     })
                   )}
                 </tr>
-                {/* Summary Row 2: Percentage of Students Achieving CLOs KPI */}
-                <tr className="border-t border-gray-300 bg-indigo-50">
-                  <td colSpan={3} className="px-4 py-3 font-black text-indigo-800 border border-gray-200 sticky left-0 bg-indigo-50 z-10">
-                    % of Students Achieving CLOs at Cohort-Level (50%):
+
+                {/* Summary Row 3: Indirect Attainment / Course Feedback (20%) */}
+                <tr className="border-t border-gray-200 bg-yellow-50">
+                  <td colSpan={3} className="px-4 py-3 font-black text-yellow-800 border border-gray-200 sticky left-0 bg-yellow-50 z-10">
+                    Indirect Attainment % <span className="font-semibold text-yellow-600">(Course Feedback — 20%)</span>
                   </td>
-                  {report.finalized_courses.map((course) => 
+                  {report.finalized_courses.map((course) =>
                     course.clos.map((clo) => {
-                      const percentage = typeof clo.cohort_percentage === 'number'
-                        ? clo.cohort_percentage
-                        : 0;
+                      const cf = (clo as any).course_feedback_attainment;
                       return (
-                        <td key={`percentage-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-indigo-800">
-                          {percentage.toFixed(2)}%
+                        <td key={`cf-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-yellow-800">
+                          {cf !== null && cf !== undefined ? `${Number(cf).toFixed(2)}%` : 'N/A'}
+                        </td>
+                      );
+                    })
+                  )}
+                </tr>
+
+                {/* Summary Row 4: Final Combined Attainment (80% Direct + 20% CF) */}
+                <tr className="border-t border-gray-200 bg-blue-50">
+                  <td colSpan={3} className="px-4 py-3 font-black text-blue-800 border border-gray-200 sticky left-0 bg-blue-50 z-10">
+                    Final Combined Attainment % <span className="font-semibold text-blue-600">(80% Direct + 20% Indirect)</span>
+                  </td>
+                  {report.finalized_courses.map((course) =>
+                    course.clos.map((clo) => {
+                      const final = typeof (clo as any).overall_attainment === 'number'
+                        ? (clo as any).overall_attainment
+                        : (typeof clo.cohort_percentage === 'number' ? clo.cohort_percentage : null);
+                      return (
+                        <td key={`final-${course.course_id}-${clo.clo_id}`} className="px-3 py-2 text-center border border-gray-200 font-black text-blue-800">
+                          {final !== null && final !== undefined ? `${Number(final).toFixed(2)}%` : 'N/A'}
+                        </td>
+                      );
+                    })
+                  )}
+                </tr>
+
+                {/* Summary Row 5: Status */}
+                <tr className="border-t border-gray-200 bg-gray-100">
+                  <td colSpan={3} className="px-4 py-3 font-black text-gray-800 border border-gray-200 sticky left-0 bg-gray-100 z-10">
+                    Status <span className="font-semibold text-gray-500">(Target KPI: 50%)</span>
+                  </td>
+                  {report.finalized_courses.map((course) =>
+                    course.clos.map((clo) => {
+                      const final = typeof (clo as any).overall_attainment === 'number'
+                        ? (clo as any).overall_attainment
+                        : (typeof clo.cohort_percentage === 'number' ? clo.cohort_percentage : null);
+                      const kpi = typeof clo.kpi_target === 'number' ? clo.kpi_target : 50;
+                      const achieved = final !== null && final !== undefined && final >= kpi;
+                      const notAssessed = final === null || final === undefined;
+                      return (
+                        <td
+                          key={`status-${course.course_id}-${clo.clo_id}`}
+                          className={`px-3 py-2 text-center border border-gray-200 font-black text-xs uppercase tracking-wider ${
+                            notAssessed
+                              ? 'bg-gray-100 text-gray-500'
+                              : achieved
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          {notAssessed ? 'N/A' : achieved ? 'Achieved' : 'Below Target'}
                         </td>
                       );
                     })

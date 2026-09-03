@@ -430,9 +430,29 @@ class CurriculumVersionSerializer(
                 "current_semester",
                 None
             ),
+
+            # Graduation / editability status
+            "status": getattr(
+                batch,
+                "status",
+                None
+            ),
+            "is_program_end_ready": bool(
+                getattr(batch, "is_program_end_ready", False)
+            ),
+            "graduation_status": getattr(
+                batch,
+                "graduation_status",
+                None
+            ),
+            "graduated_at": (
+                batch.graduated_at.isoformat()
+                if getattr(batch, "graduated_at", None)
+                else None
+            ),
         }
         for batch in obj.assigned_batches.all()
-    ]
+      ]
 
     # ========================================================
     # TOTAL COURSES

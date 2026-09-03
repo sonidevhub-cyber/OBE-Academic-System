@@ -13,7 +13,8 @@ class CLOReportView(APIView):
         data = CLOService.generate_student_report(
             course_id,
             batch_id,
-            semester_id
+            semester_id,
+            request_user=request.user,
         )
 
         return Response(data)

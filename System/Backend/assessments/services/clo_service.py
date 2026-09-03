@@ -511,6 +511,7 @@ class CLOService:
         assessment_types=None,
         report_status="FINAL",
         lock_attainment=False,
+        request_user=None,
     ):
 
         # ========================================================
@@ -674,6 +675,7 @@ class CLOService:
         # ========================================================
 
         from retake.models import CourseRetake
+        from retake.permissions import is_teacher
 
         retake_by_student_id = {}
 
@@ -689,6 +691,10 @@ class CLOService:
             )
             .select_related("student")
         )
+
+        # Instructors (primary role only) should only see retakes assigned to them
+        if request_user and is_teacher(request_user):
+            active_retakes = active_retakes.filter(retake_teacher=request_user)
 
         students_by_id = {
             student.student_id: student

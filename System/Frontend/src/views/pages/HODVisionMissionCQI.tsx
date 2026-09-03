@@ -12,7 +12,6 @@ import authService from '../../api/authService';
 import { fetchCurrentProfile } from '../../api/profileService';
 import academicStructureService, { Program } from '../../api/academicStructureService';
 import {
-  Eye,
   RefreshCw,
   CheckSquare,
   Edit3,
@@ -44,7 +43,6 @@ const extractDepartmentId = (...values: any[]): string => {
 };
 
 const HODVisionMissionCQI: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'VISION' | 'MISSION'>('VISION');
   const [reviews, setReviews] = useState<VisionMissionCQIReviewRecord[]>([]);
   const [vision, setVision] = useState<VisionResponse | null>(null);
   const [mission, setMission] = useState<MissionResponse | null>(null);
@@ -188,12 +186,8 @@ const HODVisionMissionCQI: React.FC = () => {
 
   const filteredReviews = reviews.filter(
     (r) =>
-      r.statement_type === activeTab &&
-      (!departmentId || String(r.department || '') === departmentId)
+      !departmentId || String(r.department || '') === departmentId
   );
-
-  const currentStatementText =
-    activeTab === 'VISION' ? vision?.statement ?? '' : mission?.statement ?? '';
 
   const toggleReviewExpansion = (id: string) => {
     setExpandedReview((prev) => (prev === id ? null : id));
@@ -283,43 +277,35 @@ const HODVisionMissionCQI: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex gap-2 border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('VISION')}
-          className={`px-5 py-3 font-black uppercase tracking-wider text-xs rounded-t-lg transition-colors ${
-            activeTab === 'VISION'
-              ? 'bg-indigo-100 text-indigo-700 border-b-2 border-indigo-500'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <Eye className="inline w-4 h-4 mr-1.5" />
-          Vision
-        </button>
-        <button
-          onClick={() => setActiveTab('MISSION')}
-          className={`px-5 py-3 font-black uppercase tracking-wider text-xs rounded-t-lg transition-colors ${
-            activeTab === 'MISSION'
-              ? 'bg-violet-100 text-violet-700 border-b-2 border-violet-500'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <ShieldCheck className="inline w-4 h-4 mr-1.5" />
-          Mission
-        </button>
-      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 border-b border-gray-100">
+            <p className="text-xs font-black uppercase tracking-widest text-indigo-500 mb-2">
+              Current Live Vision Statement
+            </p>
+            <p className="text-lg font-semibold text-gray-800 leading-relaxed">
+              {vision?.statement ?? (
+                <span className="text-gray-400 italic">
+                  No vision statement set for this program
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
 
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-5 border-b border-gray-100">
-          <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">
-            Current Live {activeTab} Statement
-          </p>
-          <p className="text-lg font-semibold text-gray-800 leading-relaxed">
-            {currentStatementText || (
-              <span className="text-gray-400 italic">
-                No {activeTab.toLowerCase()} statement set for this program
-              </span>
-            )}
-          </p>
+        <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 p-5 border-b border-gray-100">
+            <p className="text-xs font-black uppercase tracking-widest text-violet-500 mb-2">
+              Current Live Mission Statement
+            </p>
+            <p className="text-lg font-semibold text-gray-800 leading-relaxed">
+              {mission?.statement ?? (
+                <span className="text-gray-400 italic">
+                  No mission statement set for this program
+                </span>
+              )}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -350,6 +336,26 @@ const HODVisionMissionCQI: React.FC = () => {
           </select>
         </div>
 
+        {analytics && (
+          <div className="mt-2 flex flex-wrap gap-3">
+            <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
+              Batch: {' '}
+              {batches.find((b) => b.id === selectedBatchId)?.name ||
+                selectedBatchId ||
+                'Select batch'}
+            </div>
+            <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
+              Total Keywords: {(analytics.vision_rows || []).length + (analytics.mission_rows || []).length}
+            </div>
+            <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
+              CQI Records: {triggeredRows.length}
+            </div>
+            <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              Closed: {triggeredRows.filter((r) => r.cqi_status === 'CLOSED_IMPLEMENTED').length}
+            </div>
+          </div>
+        )}
+
         {triggeredRows.length === 0 ? (
           <div className="p-10 text-center text-sm text-gray-400 italic">
             No triggered Vision/Mission CQI records found for the selected batch.
@@ -363,7 +369,9 @@ const HODVisionMissionCQI: React.FC = () => {
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Keyword</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Target</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Attainment</th>
+                  <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">CQI Status</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Action Plan</th>
+                  <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Resulting At.</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Closing</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-widest text-gray-500">Actions</th>
                 </tr>
@@ -377,8 +385,19 @@ const HODVisionMissionCQI: React.FC = () => {
                       <td className="px-4 py-4 text-sm font-semibold text-gray-700">{row.keyword}</td>
                       <td className="px-4 py-4 text-sm text-gray-600">{row.target_kpi?.toFixed(1) ?? '-'}%</td>
                       <td className="px-4 py-4 text-sm font-bold text-rose-600">{row.attainment_score?.toFixed(1) ?? '-'}%</td>
+                      <td className="px-4 py-4">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-100 text-emerald-700">
+                          <CheckCheck className="h-3 w-3" />
+                          {row.cqi_status === 'CLOSED_IMPLEMENTED' ? 'Closed' : (row.cqi_status || 'Open')}
+                        </span>
+                      </td>
                       <td className="px-4 py-4 text-sm text-gray-600 max-w-md">
                         {row.hod_action_plan || 'Pending HOD action plan'}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-700">
+                        {row.resulting_attainment !== null && row.resulting_attainment !== undefined
+                          ? `${Number(row.resulting_attainment).toFixed(1)}%`
+                          : closed ? '—' : <span className="text-gray-400 text-xs italic">Pending close</span>}
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-600">
                         {closed ? (
@@ -388,7 +407,7 @@ const HODVisionMissionCQI: React.FC = () => {
                               Closed
                             </span>
                             <div className="text-xs text-gray-500">
-                              {row.implemented_in_batch_name || 'Implementation batch'} · {row.resulting_attainment?.toFixed(1) ?? '-'}%
+                              {row.implemented_in_batch_name || 'Implementation batch'}
                             </div>
                           </div>
                         ) : (
@@ -434,7 +453,7 @@ const HODVisionMissionCQI: React.FC = () => {
         <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
           <FileText className="w-12 h-12 mx-auto text-gray-300 mb-4" />
           <h3 className="text-xl font-bold text-gray-900 mb-2">
-            No {activeTab} reviews yet
+            No Vision/Mission reviews yet
           </h3>
           <p className="text-gray-500 mb-4">
             Statement review records appear here after revisions are saved from OBE Configuration.

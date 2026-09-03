@@ -339,6 +339,146 @@ class ExtractKeywordsView(APIView):
         })
 
 
+class ProgramVisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_program(self, program_id):
+        from core.models import Program
+        try:
+            return Program.objects.select_related('department').get(id=program_id)
+        except Program.DoesNotExist:
+            return None
+
+    def get(self, request, program_id):
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        vision = Vision.objects.filter(program_id=program_id, is_active=True).order_by('-created_at').first()
+        if not vision:
+            return Response({'id': None, 'statement': '', 'keywords': []})
+        keywords = VisionKeyword.objects.filter(vision=vision, is_active=True)
+        data = VisionSerializer(vision).data
+        data['keywords'] = VisionKeywordSerializer(keywords, many=True).data
+        return Response(data)
+
+    @transaction.atomic
+    def post(self, request, program_id):
+        if not _is_hod(request.user):
+            return Response({'error': 'Only HODs can manage Vision.'}, status=status.HTTP_403_FORBIDDEN)
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        statement = (request.data.get('statement') or '').strip()
+        if not statement:
+            return Response({'error': 'Vision statement cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        vision = Vision.objects.create(
+            department=program.department,
+            program=program,
+            statement=statement,
+            created_by=request.user,
+            is_active=True,
+        )
+        return Response(VisionSerializer(vision).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def patch(self, request, program_id):
+        if not _is_hod(request.user):
+            return Response({'error': 'Only HODs can manage Vision.'}, status=status.HTTP_403_FORBIDDEN)
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        statement = (request.data.get('statement') or '').strip()
+        if not statement:
+            return Response({'error': 'Vision statement cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        vision = Vision.objects.filter(program_id=program_id, is_active=True).order_by('-created_at').first()
+        if vision and vision.statement == statement:
+            keywords = VisionKeyword.objects.filter(vision=vision, is_active=True)
+            data = VisionSerializer(vision).data
+            data['keywords'] = VisionKeywordSerializer(keywords, many=True).data
+            return Response(data)
+        vision = Vision.objects.create(
+            department=program.department,
+            program=program,
+            statement=statement,
+            created_by=request.user,
+            is_active=True,
+        )
+        keywords = VisionKeyword.objects.filter(vision=vision, is_active=True)
+        data = VisionSerializer(vision).data
+        data['keywords'] = VisionKeywordSerializer(keywords, many=True).data
+        return Response(data)
+
+
+class ProgramMissionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_program(self, program_id):
+        from core.models import Program
+        try:
+            return Program.objects.select_related('department').get(id=program_id)
+        except Program.DoesNotExist:
+            return None
+
+    def get(self, request, program_id):
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        mission = Mission.objects.filter(program_id=program_id, is_active=True).order_by('-created_at').first()
+        if not mission:
+            return Response({'id': None, 'statement': '', 'keywords': []})
+        keywords = MissionKeyword.objects.filter(mission=mission, is_active=True)
+        data = MissionSerializer(mission).data
+        data['keywords'] = MissionKeywordSerializer(keywords, many=True).data
+        return Response(data)
+
+    @transaction.atomic
+    def post(self, request, program_id):
+        if not _is_hod(request.user):
+            return Response({'error': 'Only HODs can manage Mission.'}, status=status.HTTP_403_FORBIDDEN)
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        statement = (request.data.get('statement') or '').strip()
+        if not statement:
+            return Response({'error': 'Mission statement cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        mission = Mission.objects.create(
+            department=program.department,
+            program=program,
+            statement=statement,
+            created_by=request.user,
+            is_active=True,
+        )
+        return Response(MissionSerializer(mission).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def patch(self, request, program_id):
+        if not _is_hod(request.user):
+            return Response({'error': 'Only HODs can manage Mission.'}, status=status.HTTP_403_FORBIDDEN)
+        program = self._get_program(program_id)
+        if not program:
+            return Response({'error': 'Program not found.'}, status=status.HTTP_404_NOT_FOUND)
+        statement = (request.data.get('statement') or '').strip()
+        if not statement:
+            return Response({'error': 'Mission statement cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        mission = Mission.objects.filter(program_id=program_id, is_active=True).order_by('-created_at').first()
+        if mission and mission.statement == statement:
+            keywords = MissionKeyword.objects.filter(mission=mission, is_active=True)
+            data = MissionSerializer(mission).data
+            data['keywords'] = MissionKeywordSerializer(keywords, many=True).data
+            return Response(data)
+        mission = Mission.objects.create(
+            department=program.department,
+            program=program,
+            statement=statement,
+            created_by=request.user,
+            is_active=True,
+        )
+        keywords = MissionKeyword.objects.filter(mission=mission, is_active=True)
+        data = MissionSerializer(mission).data
+        data['keywords'] = MissionKeywordSerializer(keywords, many=True).data
+        return Response(data)
+
+
 class VisionKeywordListView(APIView):
     permission_classes = [IsAuthenticated]
 

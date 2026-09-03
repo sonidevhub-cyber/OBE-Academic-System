@@ -1574,33 +1574,20 @@ def calculate_weighted_ga_score(ga, batch, force_recalculate=False):
         exit_score = exit_ga_score.score
         exit_coverage = exit_ga_score.coverage_percent
     
-    # Calculate indirect score: average of CF and Exit if available
-    indirect_score = None
-    if cf_score is not None and exit_score is not None:
-        indirect_score = round((cf_score + exit_score) / 2, 2)
-    elif cf_score is not None:
-        indirect_score = round(cf_score, 2)
-    elif exit_score is not None:
-        indirect_score = round(exit_score, 2)
-        
-    # Determine available components and their weights
+    # GA indirect = exit survey only (course feedback is CLO-level, not GA-level)
+    indirect_score = round(exit_score, 2) if exit_score is not None else None
+
+    # GA formula: 80% direct + 20% exit survey. CF excluded from GA.
     available = []
     if direct_score is not None:
         available.append(('direct', direct_score, W_DIRECT))
-    if cf_score is not None and (cf_coverage is None or cf_coverage > 0):
-        available.append(('cf', cf_score, W_CF))
     if exit_score is not None and (exit_coverage is None or exit_coverage > 0):
         available.append(('exit', exit_score, W_EXIT))
-    
+
     # Calculate formula applied label
     formula_applied = 'no_data'
-    if len(available) == 3:
+    if len(available) == 2:
         formula_applied = 'full'
-    elif len(available) == 2:
-        if available[0][0] == 'direct' and available[1][0] == 'cf':
-            formula_applied = 'direct_cf_only'
-        else:
-            formula_applied = 'partial'
     elif len(available) == 1:
         if available[0][0] == 'direct':
             formula_applied = 'direct_only'
@@ -1865,30 +1852,19 @@ def calculate_semester_ga_report(batch: Batch, semester: Semester):
         exit_score = exit_ga_score.score if exit_ga_score else None
         exit_coverage = exit_ga_score.coverage_percent if exit_ga_score else None
 
-        indirect_score = None
-        if cf_score is not None and exit_score is not None:
-            indirect_score = round((Decimal(str(cf_score)) + Decimal(str(exit_score))) / 2, 2)
-        elif cf_score is not None:
-            indirect_score = round(Decimal(str(cf_score)), 2)
-        elif exit_score is not None:
-            indirect_score = round(Decimal(str(exit_score)), 2)
+        # GA indirect = exit survey only (course feedback is CLO-level, not GA-level)
+        indirect_score = round(Decimal(str(exit_score)), 2) if exit_score is not None else None
 
+        # GA formula: 80% direct + 20% exit survey. CF excluded from GA.
         available = []
         if direct_score is not None:
             available.append(('direct', Decimal(str(direct_score)), W_DIRECT))
-        if cf_score is not None:
-            available.append(('cf', Decimal(str(cf_score)), W_CF))
         if exit_score is not None:
             available.append(('exit', Decimal(str(exit_score)), W_EXIT))
 
         formula_applied = 'no_data'
-        if len(available) == 3:
+        if len(available) == 2:
             formula_applied = 'full'
-        elif len(available) == 2:
-            if available[0][0] == 'direct' and available[1][0] == 'cf':
-                formula_applied = 'direct_cf_only'
-            else:
-                formula_applied = 'partial'
         elif len(available) == 1:
             if available[0][0] == 'direct':
                 formula_applied = 'direct_only'

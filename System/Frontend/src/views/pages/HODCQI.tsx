@@ -12,14 +12,13 @@ import obeService, {
 import authService from "../../api/authService";
 import {
   History,
-  CheckCircle,
-  XCircle,
   FileBarChart,
   AlertCircle,
   ChevronRight,
   ChevronDown,
   Lock,
   CheckCheck,
+  XCircle,
 } from "lucide-react";
 
 interface HODCQIProps {
@@ -35,6 +34,7 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
   const [cloComments, setCloComments] = useState<{ [key: string]: string }>({});
 
   const [gaBatches, setGaBatches] = useState<Batch[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>("");
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   const [gaReportData, setGaReportData] =
     useState<GAReportItem[] | ReadinessResponse | BatchGAReportResponse | null>(null);
@@ -53,13 +53,7 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
   });
   const [savingClose, setSavingClose] = useState(false);
   const [editingCqiStatus, setEditingCqiStatus] = useState<string>("");
-  const [closeModalOpen, setCloseModalOpen] = useState(false);
-  const [closingCqiId, setClosingCqiId] = useState<string | null>(null);
-  const [closeForm, setCloseForm] = useState({
-    implemented_in_batch: "",
-    action_taken_description: "",
-  });
-  const [closeSubmitting, setCloseSubmitting] = useState(false);
+
 
   const currentAuth = authService.getCurrentUser();
   const isHod =
@@ -189,36 +183,6 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
     setExpandedHistory((prev) => (prev === cqiId ? null : cqiId));
   };
 
-  const handleApproveCqi = async (cqiId: string) => {
-    setSubmitting(true);
-    try {
-      await obeService.approveGACQI(cqiId);
-      toast.success("GA CQI approved");
-      fetchGaReport();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to approve CQI");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleRejectCqi = async (cqiId: string) => {
-    const comment =
-      localComment[cqiId] || prompt("Please provide a rejection comment:");
-    if (!comment) return;
-    setSubmitting(true);
-    try {
-      await obeService.rejectGACQI(cqiId, comment);
-      toast.success("GA CQI rejected");
-      fetchGaReport();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to reject CQI");
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const openEditForm = (cqi: GACQIRecord) => {
     setEditingCqiId(cqi.id);
@@ -294,46 +258,6 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
     }
   };
 
-  const openCloseModal = (cqi: GACQIRecord) => {
-    setClosingCqiId(cqi.id);
-    setCloseForm({
-      implemented_in_batch: cqi.implemented_in_batch || "",
-      action_taken_description: cqi.action_taken_description || "",
-    });
-    setCloseModalOpen(true);
-  };
-
-  const handleCloseCqi = async () => {
-    if (!closingCqiId) return;
-    if (!closeForm.implemented_in_batch) {
-      toast.error("Please select the batch where actions were implemented");
-      return;
-    }
-    if (!closeForm.action_taken_description.trim()) {
-      toast.error("Please describe the action taken (mandatory)");
-      return;
-    }
-    setCloseSubmitting(true);
-    try {
-      await obeService.closeGACQI(closingCqiId, {
-        implemented_in_batch: closeForm.implemented_in_batch,
-        action_taken_description: closeForm.action_taken_description.trim(),
-      });
-      toast.success("GA CQI closed successfully");
-      setCloseModalOpen(false);
-      setClosingCqiId(null);
-      fetchGaReport();
-    } catch (error: any) {
-      console.error(error);
-      const msg =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        "Failed to close CQI";
-      toast.error(msg);
-    } finally {
-      setCloseSubmitting(false);
-    }
-  };
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
@@ -407,14 +331,24 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
     );
   };
 
+  const gaPrograms = useMemo(() => {
+    const seen = new Map<string, string>();
+    gaBatches.forEach(b => {
+      const id = String(b.program?.id || (b as any).program_id || '');
+      const name = b.program?.name || (b as any).program_name || '';
+      if (id && name) seen.set(id, name);
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  }, [gaBatches]);
+
   const filteredGaBatches = useMemo(
     () =>
       gaBatches
-        .filter((batch) => batch.status === "graduated")
+        .filter((batch) => batch.status === "graduated" && (!selectedProgramId || String(batch.program?.id || (batch as any).program_id || '') === selectedProgramId))
         .sort((a, b) =>
           String(b.name || '').localeCompare(String(a.name || ''))
         ),
-    [gaBatches]
+    [gaBatches, selectedProgramId]
   );
 
   const implementationBatches = useMemo(
@@ -520,23 +454,22 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                   report calculation.
                 </p>
               </div>
-               <div className="grid w-full gap-3 md:max-w-[300px]">
-                <div>
-                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                  Select Alumni Batch
-                </label>
-                <select
-                  className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0"
-                  value={selectedBatchId}
-                  onChange={(e) => setSelectedBatchId(e.target.value)}
-                >
-                  <option value="">Select a batch</option>
-                  {filteredGaBatches.map((batch) => (
-                    <option key={batch.id} value={batch.id}>
-                      {batch.name}
-                    </option>
-                  ))}
-                </select>
+               <div className="grid w-full gap-3 md:max-w-[520px]">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">Program</label>
+                    <select className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0" value={selectedProgramId} onChange={(e) => { setSelectedProgramId(e.target.value); setSelectedBatchId(""); }}>
+                      <option value="">All Programs</option>
+                      {gaPrograms.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">Select Alumni Batch</label>
+                    <select className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0" value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)}>
+                      <option value="">Select a batch</option>
+                      {filteredGaBatches.map((batch) => (<option key={batch.id} value={batch.id}>{batch.name}</option>))}
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -805,43 +738,16 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
                                         ) : null}
                                       </div>
 
-                                      {cqi.status !== "FULLY_APPROVED" &&
-                                        cqi.status !== "CLOSED_IMPLEMENTED" &&
-                                        cqi.status !== "OPEN" &&
-                                        !cqi.is_locked &&
-                                        isHod && (
-                                          <div className="flex gap-3">
-                                            <button
-                                              type="button"
-                                              onClick={() => handleRejectCqi(cqi.id)}
-                                              disabled={submitting}
-                                              className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-70"
-                                            >
-                                              Reject
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleApproveCqi(cqi.id)}
-                                              disabled={submitting}
-                                              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-70"
-                                            >
-                                              <CheckCircle className="inline h-4 w-4 mr-1" />
-                                              Approve
-                                            </button>
-                                           </div>
-                                         )}
-                                         {cqi.status === "SAVED" && isHod && (
-                                           <div className="flex gap-3">
-                                             <button
-                                               type="button"
-                                               onClick={() => openCloseModal(cqi)}
-                                               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 shadow"
-                                             >
-                                               <CheckCheck className="inline h-4 w-4 mr-1" />
-                                               Close CQI
-                                             </button>
-                                           </div>
-                                         )}
+                                      {cqi.status !== "CLOSED_IMPLEMENTED" && isHod && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditForm(cqi)}
+                                          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 shadow"
+                                        >
+                                          <CheckCheck className="inline h-4 w-4 mr-1" />
+                                          Manage CQI
+                                        </button>
+                                      )}
                                        </div>
 
                                     {expandedHistory === cqi.id ? (
@@ -1041,103 +947,6 @@ const HODCQI: React.FC<HODCQIProps> = ({ mode }) => {
         </div>
       )}
 
-      {closeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white">
-                  <CheckCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-black text-gray-900">
-                    Close GA CQI — Complete the Loop
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    Mandatory documentation — applies whether target was met or not.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="p-6 space-y-5">
-              <div>
-                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                  Implementation Batch <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-emerald-500 focus:ring-0"
-                  value={closeForm.implemented_in_batch}
-                  onChange={(e) =>
-                    setCloseForm((prev) => ({
-                      ...prev,
-                      implemented_in_batch: e.target.value,
-                    }))
-                  }
-                >
-                  <option value="">
-                    Select the batch where actions were implemented
-                  </option>
-                  {implementationBatches.map((batch) => (
-                    <option key={batch.id} value={batch.id}>
-                      {batch.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-                  Action Taken Description <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 outline-none transition-all focus:border-emerald-500"
-                  rows={6}
-                  placeholder="Describe the corrective actions implemented, interventions applied, teaching strategies revised, resources added, faculty development conducted, etc."
-                  value={closeForm.action_taken_description}
-                  onChange={(e) =>
-                    setCloseForm((prev) => ({
-                      ...prev,
-                      action_taken_description: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-amber-700 mb-1">
-                  Resulting Attainment
-                </p>
-                <p className="text-sm text-amber-800">
-                  Automatically pulled from the{" "}
-                  <span className="font-bold">calculated cumulative GA attainment</span>{" "}
-                  for the implementation batch at the moment of closing. Not editable.
-                </p>
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setCloseModalOpen(false);
-                  setClosingCqiId(null);
-                }}
-                disabled={closeSubmitting}
-                className="rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-300 disabled:opacity-70"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCloseCqi}
-                disabled={closeSubmitting}
-                className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {closeSubmitting ? "Closing..." : "Confirm Close & Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

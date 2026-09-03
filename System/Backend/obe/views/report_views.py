@@ -224,6 +224,7 @@ class CourseCLOReportView(APIView):
             course_id=course.id,
             batch_id=session.batch.id,
             semester_id=session.semester.id if session.semester else None,
+            request_user=request.user,
         )
 
         service_students = (
@@ -237,6 +238,27 @@ class CourseCLOReportView(APIView):
             else {}
         )
         total_enrolled = len(service_students)
+
+        # Fetch course feedback (indirect) CLO scores for this course/batch/semester
+        from feedback.models import FeedbackResponse
+        from django.db.models import Sum, Count
+        feedback_responses = FeedbackResponse.objects.filter(
+            course=course,
+            batch=session.batch,
+            semester=session.semester,
+        )
+        # Build per-CLO feedback attainment map: clo_id -> score (0-100)
+        cf_clo_attainment = {}
+        for clo in clos:
+            clo_responses = feedback_responses.filter(clo=clo)
+            agg = clo_responses.aggregate(total=Sum('rating'), count=Count('id'))
+            if agg['count'] and agg['count'] > 0:
+                # Convert 1-5 rating to 0-100%: ((avg - 1) / 4) * 100
+                pct = ((Decimal(str(agg['total'])) - Decimal(str(agg['count']))) / (Decimal(str(agg['count'])) * Decimal('4'))) * Decimal('100')
+                cf_clo_attainment[clo.id] = round(float(pct), 2)
+
+        CLO_DIRECT_WEIGHT = Decimal('0.80')
+        CLO_CF_WEIGHT = Decimal('0.20')
 
         clo_summary = []
         assessment_effectiveness = []
@@ -255,13 +277,26 @@ class CourseCLOReportView(APIView):
                     pass_count += 1
 
             if isinstance(clo_service_result, dict) and clo_service_result.get("error"):
+                direct_attainment = None
                 overall_attainment = None
                 status_str = 'NOT_ASSESSED'
             elif total_enrolled > 0:
-                overall_attainment = round((Decimal(pass_count) / Decimal(total_enrolled)) * Decimal('100'), 2)
-                overall_attainment = float(overall_attainment)
+                direct_attainment = round((Decimal(pass_count) / Decimal(total_enrolled)) * Decimal('100'), 2)
+                direct_attainment = float(direct_attainment)
+                # Blend: 80% direct + 20% course feedback
+                cf_score = cf_clo_attainment.get(clo.id)
+                if cf_score is not None:
+                    overall_attainment = round(
+                        float(Decimal(str(direct_attainment)) * CLO_DIRECT_WEIGHT + Decimal(str(cf_score)) * CLO_CF_WEIGHT),
+                        2
+                    )
+                    formula_used = 'direct_cf'
+                else:
+                    overall_attainment = direct_attainment
+                    formula_used = 'direct_only'
                 status_str = 'ACHIEVED' if overall_attainment >= target_kpi else 'BELOW_TARGET'
             else:
+                direct_attainment = None
                 overall_attainment = None
                 status_str = 'NOT_ASSESSED'
 
@@ -283,7 +318,10 @@ class CourseCLOReportView(APIView):
                 'clo_code': clo_code,
                 'description': clo.description,
                 'target_kpi': target_kpi,
+                'direct_attainment': direct_attainment,
+                'course_feedback_attainment': cf_clo_attainment.get(clo.id),
                 'overall_attainment': overall_attainment,
+                'formula': formula_used if overall_attainment is not None else 'no_data',
                 'status': status_str,
                 'mapped_assessments': mapped_assessments,
                 'unmapped_assessments': unmapped_assessments,

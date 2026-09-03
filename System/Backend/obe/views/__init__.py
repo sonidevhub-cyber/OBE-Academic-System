@@ -86,6 +86,8 @@ from .report_views import (
 from .vision_mission_views import (
     DepartmentVisionView,
     DepartmentMissionView,
+    ProgramVisionView,
+    ProgramMissionView,
     ExtractKeywordsView,
     VisionKeywordListView,
     MissionKeywordListView,
@@ -174,6 +176,8 @@ __all__ = [
     # Vision & Mission views
     'DepartmentVisionView',
     'DepartmentMissionView',
+    'ProgramVisionView',
+    'ProgramMissionView',
     'ExtractKeywordsView',
     'VisionKeywordListView',
     'MissionKeywordListView',

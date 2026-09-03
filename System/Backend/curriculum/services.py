@@ -550,6 +550,44 @@ def validate_semester_editable(
             )
 
         # ----------------------------------------------------
+        # Graduated batches can never be edited
+        # ----------------------------------------------------
+
+        if getattr(batch, "status", None) == "graduated":
+
+            raise ValidationError(
+                f"Batch {batch.name} has graduated "
+                "and cannot be edited."
+            )
+
+        if getattr(batch, "is_program_end_ready", False):
+
+            raise ValidationError(
+                f"Batch {batch.name} is program-end-ready "
+                "and cannot be edited."
+            )
+
+        # ----------------------------------------------------
+        # If ANY batch assigned to this progressive version is
+        # graduated, the entire curriculum is frozen — the
+        # graduated batch represents the highest semester and
+        # adding courses to any earlier batch would be
+        # inconsistent with the already-passed curriculum.
+        # ----------------------------------------------------
+
+        any_graduated = any(
+            b.status == "graduated"
+            or getattr(b, "is_program_end_ready", False)
+            for b in version.assigned_batches.all()
+        )
+        if any_graduated:
+
+            raise ValidationError(
+                "This progressive curriculum has one or more "
+                "graduated batches and cannot be edited further."
+            )
+
+        # ----------------------------------------------------
         # Draft
         #
         # Draft curriculum can be edited.

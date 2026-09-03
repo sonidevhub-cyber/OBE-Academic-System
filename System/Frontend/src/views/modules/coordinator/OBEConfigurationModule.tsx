@@ -420,7 +420,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
       ]);
       const res = programRes;
       setPrograms(res.data);
-      if (res.data.length > 0) {
+      if (res.data.length > 0 && !selectedProgram) {
         setSelectedProgram(res.data[0]);
       }
       const batchList = Array.isArray(batchRes.data) ? batchRes.data : [];
@@ -453,14 +453,6 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   useEffect(() => {
     if (!selectedBatch) return;
 
-    const batchProgramId = toId(selectedBatch.program_id || selectedBatch.program?.id);
-    if (batchProgramId && toId(selectedProgram?.id) !== batchProgramId) {
-      const nextProgram = programs.find(program => toId(program.id) === batchProgramId);
-      if (nextProgram) {
-        setSelectedProgram(nextProgram);
-      }
-    }
-
     if (selectedBatch.curriculum_version_id) {
       const batchVersionId = toId(selectedBatch.curriculum_version_id);
       if (toId(selectedVersion?.id) !== batchVersionId) {
@@ -470,7 +462,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
         }
       }
     }
-  }, [programs, selectedBatch, selectedProgram, selectedVersion, versionOptions]);
+  }, [programs, selectedBatch, selectedVersion, versionOptions]);
 
   useEffect(() => {
     if (selectedCourse?.semester_number) {
@@ -699,11 +691,11 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     error?.response?.data?.error || error?.response?.data?.message || fallback;
 
   const loadVisionMissionData = async () => {
-    if (!selectedDepartmentId) return;
+    if (!selectedProgram?.id) return;
     try {
       const [visionRes, missionRes] = await Promise.all([
-        obeService.getDepartmentVision(selectedDepartmentId),
-        obeService.getDepartmentMission(selectedDepartmentId),
+        obeService.getProgramVision(selectedProgram.id),
+        obeService.getProgramMission(selectedProgram.id),
       ]);
       setDepartmentVision(visionRes);
       setDepartmentMission(missionRes);
@@ -754,8 +746,8 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   };
 
   const handleSaveVision = async () => {
-    if (!selectedDepartmentId) {
-      toast.error('Department information is missing for this program.');
+    if (!selectedProgram?.id) {
+      toast.error('Program information is missing.');
       return;
     }
     if (!vision.trim()) {
@@ -773,7 +765,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     }
     setIsSavingVision(true);
     try {
-      const saved = await obeService.saveDepartmentVision(selectedDepartmentId, vision.trim());
+      const saved = await obeService.saveProgramVision(selectedProgram.id, vision.trim());
       setDepartmentVision(saved);
       setVision(saved.statement || '');
       setVisionKeywords(saved.keywords || []);
@@ -786,8 +778,8 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
   };
 
   const handleSaveMission = async () => {
-    if (!selectedDepartmentId) {
-      toast.error('Department information is missing for this program.');
+    if (!selectedProgram?.id) {
+      toast.error('Program information is missing.');
       return;
     }
     if (!mission.trim()) {
@@ -805,7 +797,7 @@ const OBEConfigurationModule: React.FC<OBEConfigurationModuleProps> = ({
     }
     setIsSavingVision(true);
     try {
-      const saved = await obeService.saveDepartmentMission(selectedDepartmentId, mission.trim());
+      const saved = await obeService.saveProgramMission(selectedProgram.id, mission.trim());
       setDepartmentMission(saved);
       setMission(saved.statement || '');
       setMissionKeywords(saved.keywords || []);

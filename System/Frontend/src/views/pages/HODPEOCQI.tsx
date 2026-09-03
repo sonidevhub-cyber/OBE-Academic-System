@@ -25,6 +25,7 @@ import peoService, {
 
 const HODPEOCQI: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
   const [peoReports, setPeoReports] = useState<PEOReportItem[]>([]);
   const [peoCqiRecords, setPeoCqiRecords] = useState<PEOCQIRecord[]>([]);
@@ -61,6 +62,21 @@ const HODPEOCQI: React.FC = () => {
           String(b.name || '').localeCompare(String(a.name || ''))
         ),
     [batches]
+  );
+
+  const peoPrograms = useMemo(() => {
+    const seen = new Map<string, string>();
+    batches.forEach(b => {
+      const id = String((b as any).program?.id || (b as any).program_id || '');
+      const name = (b as any).program?.name || (b as any).program_name || '';
+      if (id && name) seen.set(id, name);
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  }, [batches]);
+
+  const filteredAlumniBatches = useMemo(
+    () => alumniBatches.filter(b => !selectedProgramId || String((b as any).program?.id || (b as any).program_id || '') === selectedProgramId),
+    [alumniBatches, selectedProgramId]
   );
 
   const activeBatch =
@@ -444,22 +460,25 @@ const HODPEOCQI: React.FC = () => {
             </p>
           </div>
 
-          <div className="min-w-[300px]">
-            <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">
-              Select Alumni Batch
-            </label>
-            <select
-              className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0"
-              value={selectedBatchId}
-              onChange={(e) => setSelectedBatchId(e.target.value)}
-            >
-              <option value="">Select a batch</option>
-              {alumniBatches.map((batch) => (
-                <option key={batch.id} value={batch.id}>
-                  {batch.name}
-                </option>
-              ))}
+          <div className="flex gap-3 flex-wrap">
+            <div className="min-w-[180px]">
+              <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">Program</label>
+              <select className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0" value={selectedProgramId} onChange={(e) => { setSelectedProgramId(e.target.value); setSelectedBatchId(""); }}>
+                <option value="">All Programs</option>
+                {peoPrograms.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+              </select>
+            </div>
+            <div className="min-w-[180px]">
+              <label className="mb-2 block text-xs font-black uppercase tracking-widest text-gray-400">Select Alumni Batch</label>
+              <select className="w-full rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-3 font-bold text-gray-700 transition-all focus:border-indigo-500 focus:ring-0" value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)}>
+                <option value="">Select a batch</option>
+                {filteredAlumniBatches.map((batch) => (
+                  <option key={batch.id} value={batch.id}>
+                    {batch.name}
+                  </option>
+                ))}
             </select>
+            </div>
           </div>
         </div>
       </div>

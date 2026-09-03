@@ -1061,10 +1061,11 @@ class StudentGAEntry(models.Model):
         return f"{self.student} - {self.ga}: {self.ga_score}%"
 
 
-# Weight constants
+# Weight constants for GA report
+# GA formula: 80% direct + 20% exit survey. Course feedback is CLO-level only.
 W_DIRECT = Decimal('0.80')
-W_CF = Decimal('0.15')
-W_EXIT = Decimal('0.05')
+W_CF = Decimal('0.00')
+W_EXIT = Decimal('0.20')
 
 
 def get_ga_indirect_score(ga_id, batch_id):
@@ -1675,6 +1676,13 @@ class Vision(models.Model):
         on_delete=models.CASCADE,
         related_name='visions'
     )
+    program = models.ForeignKey(
+        'core.Program',
+        on_delete=models.CASCADE,
+        related_name='visions',
+        null=True,
+        blank=True,
+    )
     statement = models.TextField()
     is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
@@ -1691,15 +1699,18 @@ class Vision(models.Model):
 
     def save(self, *args, **kwargs):
         if self.is_active:
-            Vision.objects.filter(
-                department=self.department,
-                is_active=True
-            ).exclude(id=self.id).update(is_active=False)
+            qs = Vision.objects.filter(is_active=True).exclude(id=self.id)
+            if self.program_id:
+                qs = qs.filter(program=self.program)
+            else:
+                qs = qs.filter(department=self.department, program__isnull=True)
+            qs.update(is_active=False)
         super().save(*args, **kwargs)
 
     def __str__(self):
         snippet = self.statement[:60]
-        return f"Vision for {self.department.code}: {snippet}..."
+        scope = self.program.code if self.program_id else self.department.code
+        return f"Vision for {scope}: {snippet}..."
 
 
 class Mission(models.Model):
@@ -1708,6 +1719,13 @@ class Mission(models.Model):
         'core.Department',
         on_delete=models.CASCADE,
         related_name='missions'
+    )
+    program = models.ForeignKey(
+        'core.Program',
+        on_delete=models.CASCADE,
+        related_name='missions',
+        null=True,
+        blank=True,
     )
     statement = models.TextField()
     is_active = models.BooleanField(default=True)
@@ -1725,15 +1743,17 @@ class Mission(models.Model):
 
     def save(self, *args, **kwargs):
         if self.is_active:
-            Mission.objects.filter(
-                department=self.department,
-                is_active=True
-            ).exclude(id=self.id).update(is_active=False)
+            qs = Mission.objects.filter(is_active=True).exclude(id=self.id)
+            if self.program_id:
+                qs = qs.filter(program=self.program)
+            else:
+                qs = qs.filter(department=self.department, program__isnull=True)
+            qs.update(is_active=False)
         super().save(*args, **kwargs)
 
     def __str__(self):
         snippet = self.statement[:60]
-        return f"Mission for {self.department.code}: {snippet}..."
+        return f"Mission for {self.program.code if self.program_id else self.department.code}: {snippet}..."
 
 
 class VisionKeyword(models.Model):

@@ -650,8 +650,8 @@ const CurriculumVersionDetailPage: React.FC<
 
             if (!fullBatch) return assignedBatch;
 
-            return {
-  ...assignedBatch,
+             return {
+   ...assignedBatch,
 
   // Batch's own semester
   current_semester:
@@ -676,6 +676,27 @@ const CurriculumVersionDetailPage: React.FC<
     assignedBatch.mode ??
     fullBatch.curriculum_mode ??
     fullBatch.mode,
+
+  // Graduation / editability status
+  status:
+    fullBatch.status ??
+    assignedBatch.status ??
+    'active',
+
+  is_program_end_ready:
+    fullBatch.is_program_end_ready ??
+    assignedBatch.is_program_end_ready ??
+    false,
+
+  graduation_status:
+    fullBatch.graduation_status ??
+    assignedBatch.graduation_status ??
+    null,
+
+  graduated_at:
+    fullBatch.graduated_at ??
+    assignedBatch.graduated_at ??
+    null,
 };
           }),
         };
@@ -688,20 +709,45 @@ const CurriculumVersionDetailPage: React.FC<
 
       setVersion(enrichedData);
 
-      // Keep a stable batch context for shared versions. Prefer an
-      // existing Progressive batch, otherwise use the first batch.
+      // Keep a stable batch context for shared versions.
+      // In progressive mode, prefer the highest non-graduated batch
+      // by current_semester so courses are added to the latest
+      // active batch. If all batches are graduated, fall back to the
+      // first available batch (editing will be blocked server-side).
       const assigned = Array.isArray(enrichedData?.assigned_batches)
         ? enrichedData.assigned_batches
         : [];
+      const versionMode = String(
+        enrichedData?.curriculum_mode ??
+        enrichedData?.mode ??
+        ''
+      ).toLowerCase();
+      const nonGraduated = assigned.filter(
+        (b: any) =>
+          (b?.status ?? 'active') !== 'graduated' &&
+          !b?.is_program_end_ready
+      );
       const preferred =
-        assigned.find((b: any) =>
-          String(
-            b?.curriculum_mode ??
-              b?.mode ??
-              b?.curriculum?.mode ??
-              ''
-          ).toLowerCase() === 'progressive'
-        ) || assigned[0];
+        versionMode === 'progressive'
+          ? nonGraduated
+              .slice()
+              .sort((a: any, b: any) => {
+                const sa = Number(
+                  a?.current_semester ??
+                    a?.currentSemester ??
+                    a?.batch_current_semester ??
+                    0
+                );
+                const sb = Number(
+                  b?.current_semester ??
+                    b?.currentSemester ??
+                    b?.batch_current_semester ??
+                    0
+                );
+                return sb - sa;
+              })[0] ||
+            assigned[0]
+          : assigned[0];
 
       setSelectedBatchContextId(
         preferred?.id ? String(preferred.id) : ''
@@ -1746,28 +1792,64 @@ const handleUpdateCourse = async (
   const activeBatchMode = getBatchMode(activeBatch);
   const activeBatchCurrentSemester = getBatchCurrentSemester(activeBatch);
 
-  // For a Progressive curriculum, the batch's current semester is the
-  // semester that is currently editable. Keep the Add Course form in sync
-  // with the latest promoted batch semester automatically.
-  useEffect(() => {
-    if (
-      activeBatchMode === 'progressive' &&
-      activeBatchCurrentSemester
-    ) {
-      setNewCourse((prev) => ({
-        ...prev,
-        semester_no: activeBatchCurrentSemester,
-      }));
-    }
-  }, [activeBatchMode, activeBatchCurrentSemester]);
+   // For a Progressive curriculum, the batch's current semester is the
+   // semester that is currently editable. Keep the Add Course form in sync
+   // with the latest promoted batch semester automatically.
+   // Also sync for any mode when a batch context with a current semester
+   // is available (e.g., draft progressive versions with assigned batches).
+   useEffect(() => {
+     if (activeBatchCurrentSemester) {
+       setNewCourse((prev) => ({
+         ...prev,
+         semester_no: activeBatchCurrentSemester,
+       }));
+     }
+   }, [activeBatchCurrentSemester]);
+
+   const activeBatchGraduated =
+    !isSAC &&
+    ((activeBatch as any)?.status === 'graduated' ||
+      !!(activeBatch as any)?.is_program_end_ready);
+
+  // In progressive mode, only the batch with the highest current_semester
+  // among non-graduated batches should be able to add courses. A lower-
+  // semester batch must NOT show the Add Course button.
+  const maxNonGraduatedSemester = useMemo(() => {
+    const assigned = version?.assigned_batches || [];
+    const nonGrad = assigned.filter(
+      (b: any) =>
+        (b?.status ?? 'active') !== 'graduated' &&
+        !b?.is_program_end_ready
+    );
+    if (!nonGrad.length) return null;
+    return Math.max(
+      ...nonGrad.map((b: any) =>
+        Number(
+          b?.current_semester ??
+            b?.currentSemester ??
+            b?.batch_current_semester ??
+            0
+        )
+      )
+    );
+  }, [version?.assigned_batches]);
+
+  const isHighestSemesterBatch =
+    activeBatchMode === 'progressive' &&
+    !activeBatchGraduated &&
+    activeBatchCurrentSemester !== null &&
+    maxNonGraduatedSemester !== null &&
+    activeBatchCurrentSemester >= maxNonGraduatedSemester;
 
   // Draft versions remain editable as before. For a finalized/shared
   // version, only the batch explicitly configured as Progressive is
   // allowed to edit the same version. Other batches remain locked and
   // use the existing branch flow if a new editable copy is required.
+  // Graduated / program-end-ready batches are never editable.
   const canEditCurrentBatch =
     !isSAC &&
-    (version?.status === 'draft' || activeBatchMode === 'progressive');
+    (version?.status === 'draft' || activeBatchMode === 'progressive') &&
+    !activeBatchGraduated;
 
   const ensureEditable = async (
     action: () => Promise<void>
@@ -1822,9 +1904,28 @@ const handleUpdateCourse = async (
    const handleAddCourse = async (keepOpen: boolean = false) => {
     if (!version) return;
 
-    const action = async () => {
+    if (activeBatchGraduated) {
+      toast.error(
+        'Cannot add courses: selected batch has graduated or is program-end-ready.'
+      );
+      return;
+    }
+
+     const action = async () => {
       try {
         setSubmitting(true);
+
+        if (
+          activeBatchMode === 'progressive' &&
+          !isHighestSemesterBatch
+        ) {
+          toast.error(
+            'Add Course is only available for the batch with the ' +
+            'highest current semester in progressive mode. ' +
+            'Please switch to the correct batch context.'
+          );
+          return;
+        }
 
         if (
           !newCourseData.name ||
@@ -2244,12 +2345,13 @@ if (
     }
   }
 
-  const canAddCourse =
+   const canAddCourse =
     !isSAC &&
     canEditCurrentBatch &&
+    !activeBatchGraduated &&
     (version.status === 'draft' ||
       (activeBatchMode === 'progressive' &&
-        !!activeBatchCurrentSemester));
+        isHighestSemesterBatch));
         const visibleCourseEntries =
   activeBatchMode === 'progressive' &&
   activeBatchCurrentSemester
@@ -2438,26 +2540,62 @@ if (
               </div>
 
               {version.assigned_batches && version.assigned_batches.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-100">
-                  <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">
-                    Batch Context / Access
-                  </label>
-                  <div className="flex gap-2">
-                    <select
-                      value={selectedBatchContextId}
-                      onChange={(e) => setSelectedBatchContextId(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      {version.assigned_batches.map((batch: any) => {
-                        const mode = getBatchMode(batch);
-                        const sem = getBatchCurrentSemester(batch);
-                        return (
-                          <option key={batch.id} value={batch.id}>
-                            {batch.name} — {mode === 'progressive' ? `Progressive / Sem ${sem || 1}` : mode === 'complete' ? 'Complete / Locked' : 'Locked'}
-                          </option>
-                        );
-                      })}
-                    </select>
+                 <div className="mt-3 pt-3 border-t border-gray-100">
+                   <label className="block text-[10px] text-gray-500 uppercase font-bold mb-1">
+                     Batch Context / Access
+                   </label>
+                   <div className="flex gap-2">
+                     <select
+                       value={selectedBatchContextId}
+                       onChange={(e) => setSelectedBatchContextId(e.target.value)}
+                       className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                     >
+                       {/* Show non-graduated batches first, sorted by semester desc */}
+                       {(() => {
+                         const sorted = [...(version.assigned_batches || [])].sort(
+                           (a: any, b: any) => {
+                             const sa = Number(
+                               a?.current_semester ??
+                                 a?.currentSemester ??
+                                 a?.batch_current_semester ??
+                                 0
+                             );
+                             const sb = Number(
+                               b?.current_semester ??
+                                 b?.currentSemester ??
+                                 b?.batch_current_semester ??
+                                 0
+                             );
+                             return sb - sa;
+                           });
+                         return sorted.map((batch: any) => {
+                           const mode = getBatchMode(batch);
+                           const sem = getBatchCurrentSemester(batch);
+                           const isGraduated =
+                             batch?.status === 'graduated' ||
+                             !!batch?.is_program_end_ready;
+                           return (
+                             <option
+                               key={batch.id}
+                               value={batch.id}
+                               disabled={isGraduated}
+                               style={{
+                                 fontStyle: isGraduated ? 'italic' : 'normal',
+                                 color: isGraduated ? '#9CA3AF' : 'inherit',
+                               }}
+                             >
+                               {batch.name} —{' '}
+                               {mode === 'progressive'
+                                 ? `Progressive / Sem ${sem || 1}`
+                                 : mode === 'complete'
+                                 ? 'Complete / Locked'
+                                 : 'Locked'}
+                               {isGraduated && ' (Graduated)'}
+                             </option>
+                           );
+                         });
+                       })()}
+                     </select>
                     {!isSAC && (
                       <button
                         type="button"
@@ -3545,6 +3683,12 @@ if (
 
                   Add Course
                 </button>
+              )}
+              {!canAddCourse && !isSAC && version && (version as any).assigned_batches?.length > 0 && activeBatchMode === 'progressive' && (
+                <div className="flex items-center text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
+                  <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.523-1.36 3.288 0l5.712 9.892c.75 1.334-.213 3.001-1.644 3.001H4.19c-1.43-.001-2.394-1.667-1.644-3.001L8.257 3.099zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                  Select a non-graduated batch with the highest current semester to add courses.
+                </div>
               )}
             </div>
 

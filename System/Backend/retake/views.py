@@ -126,10 +126,10 @@ class MyAssignedRetakesView(APIView):
     def get(self, request):
         user = request.user
 
-        if is_sac(user) or is_hod(user) or is_coordinator(user):
-            queryset = _retake_queryset()
-        elif is_teacher(user):
+        if is_teacher(user):
             queryset = _retake_queryset().filter(retake_teacher=user)
+        elif is_sac(user) or is_hod(user) or is_coordinator(user):
+            queryset = _retake_queryset()
         else:
             raise PermissionDenied("You are not allowed to view assigned retakes.")
 
@@ -363,6 +363,7 @@ class FailedStudentsLookupView(APIView):
                     course_id=str(course_id),
                     batch_id=str(batch_id),
                     semester_id=str(semester_id),
+                    request_user=request.user,
                 )
                 if not (isinstance(report_data, dict) and report_data.get("error")):
                     rows = report_data if isinstance(report_data, list) else report_data.get("report", [])

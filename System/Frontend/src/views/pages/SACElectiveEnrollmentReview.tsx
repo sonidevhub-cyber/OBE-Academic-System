@@ -16,7 +16,7 @@ import {
   Save,
   Search,
 } from 'lucide-react';
-import batchService, { BatchFlat } from '../../api/batchService';
+import { BatchFlat } from '../../api/batchService';
 import electivesApi, {
   SACElectiveEnrollmentsResponse,
   StudentElectiveEnrollment,
@@ -25,6 +25,7 @@ import electivesApi, {
   WindowLockError,
 } from '../../api/electivesService';
 import academicStructureService from '../../api/academicStructureService';
+import { coordinatorService } from '../../api/coordinatorService';
 
 type TabKey = 'selective' | 'optional' | 'raw';
 
@@ -46,6 +47,9 @@ interface LockErrorDialogState {
 const SACElectiveEnrollmentReview: React.FC = () => {
   const [batchesLoading, setBatchesLoading] = useState(true);
   const [batches, setBatches] = useState<BatchFlat[]>([]);
+  const [programs, setPrograms] = useState<any[]>([]);
+  const [programsLoading, setProgramsLoading] = useState(true);
+  const [selectedProgram, setSelectedProgram] = useState<string>('');
   const [programSemesters, setProgramSemesters] = useState<number>(8);
 
   const [batchId, setBatchId] = useState<string>('');
@@ -97,19 +101,54 @@ const SACElectiveEnrollmentReview: React.FC = () => {
 
   const [lockErrorDialog, setLockErrorDialog] = useState<LockErrorDialogState>({ open: false, error: null });
 
+  // ─── Load coordinator's assigned programs (backend already scopes to coordinator) ───
   useEffect(() => {
     (async () => {
       try {
-        const res = await batchService.getAllBatches();
-        const list = Array.isArray(res.data) ? res.data : (res.data as any)?.results || [];
-        setBatches(list.filter((b: any) => b.is_active !== false));
+        const res = await coordinatorService.getPrograms();
+        const list = Array.isArray(res.data)
+          ? res.data
+          : (res.data as any)?.results || [];
+        const programList = (list || []).filter(
+          (p: any) => p.is_active !== false
+        );
+        setPrograms(programList);
+
+        // Auto-select if only one program assigned
+        if (programList.length === 1) {
+          setSelectedProgram(String(programList[0].id));
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setProgramsLoading(false);
+      }
+    })();
+  }, []);
+
+  // ─── Load batches for the selected program ───
+  useEffect(() => {
+    if (!selectedProgram) {
+      setBatches([]);
+      return;
+    }
+    (async () => {
+      setBatchesLoading(true);
+      try {
+        const res = await coordinatorService.getBatchesByProgram(selectedProgram);
+        const list = Array.isArray(res.data)
+          ? res.data
+          : (res.data as any)?.data || (res.data as any)?.results || [];
+        setBatches(
+          (list || []).filter((b: any) => b.is_active !== false)
+        );
       } catch (e) {
         console.error(e);
       } finally {
         setBatchesLoading(false);
       }
     })();
-  }, []);
+  }, [selectedProgram]);
 
   useEffect(() => {
     if (!batchId) return;
@@ -606,7 +645,31 @@ const SACElectiveEnrollmentReview: React.FC = () => {
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-          <div>
+          {/* Program dropdown — only for coordinators with multiple programs */}
+          {programs.length > 1 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Program *</label>
+              <select
+                value={selectedProgram}
+                onChange={(e) => {
+                  setSelectedProgram(e.target.value);
+                  setBatchId('');
+                  setSemesterNo('');
+                  setData(null);
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                disabled={programsLoading}
+              >
+                <option value="">{programsLoading ? 'Loading programs...' : 'Select Program'}</option>
+                {programs.map((p: any) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || p.program_name || p.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className={programs.length > 1 ? "md:col-span-3" : ""}>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Batch *</label>
             <select
               value={batchId}
@@ -616,9 +679,9 @@ const SACElectiveEnrollmentReview: React.FC = () => {
                 setData(null);
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-              disabled={batchesLoading}
+              disabled={batchesLoading || (programs.length > 1 && !selectedProgram)}
             >
-              <option value="">{batchesLoading ? 'Loading batches...' : 'Select Batch'}</option>
+              <option value="">{batchesLoading ? 'Loading batches...' : !selectedProgram ? 'Select Program First' : 'Select Batch'}</option>
               {batches.map((b: any) => (
                 <option key={b.id} value={b.id}>
                    {b.name || b.custom_id || b.id} &middot; {b.program_name || ''}

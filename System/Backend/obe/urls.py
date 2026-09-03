@@ -74,6 +74,8 @@ from .views import (
     # Vision & Mission views
     DepartmentVisionView,
     DepartmentMissionView,
+    ProgramVisionView,
+    ProgramMissionView,
     ExtractKeywordsView,
     VisionKeywordListView,
     MissionKeywordListView,
@@ -309,6 +311,10 @@ urlpatterns = [
     path('departments/<uuid:department_id>/vision/', DepartmentVisionView.as_view()),
     # Department-scoped Mission
     path('departments/<uuid:department_id>/mission/', DepartmentMissionView.as_view()),
+    # Program-scoped Vision
+    path('programs/<uuid:program_id>/vision/', ProgramVisionView.as_view()),
+    # Program-scoped Mission
+    path('programs/<uuid:program_id>/mission/', ProgramMissionView.as_view()),
     # Keyword extraction helper (no persistence)
     path('extract-keywords/', ExtractKeywordsView.as_view()),
     # Vision keywords CRUD
