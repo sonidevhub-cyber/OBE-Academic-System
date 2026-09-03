@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx-js-style';
 import jsPDF from 'jspdf';
@@ -139,7 +139,6 @@ const GAReport: React.FC = () => {
     const fetchBatches = async () => {
       try {
         const batchesData = await obeService.getAllBatches({ alumni_feedback: 'all' });
-        console.log('=== Fetched batches:', batchesData); // Log to see what each batch has!
         setBatches(batchesData);
         const uniquePrograms = Array.from(
           new Map(
@@ -166,12 +165,14 @@ const GAReport: React.FC = () => {
     if (!selectedBatchId) {
       reportRequestRef.current += 1;
       resetReportState();
+      setLoading(false);
       return;
     }
 
     const fetchReport = async () => {
       const requestId = reportRequestRef.current + 1;
       reportRequestRef.current = requestId;
+      resetReportState();
       setLoading(true);
       
       try {
@@ -234,16 +235,16 @@ const GAReport: React.FC = () => {
     fetchGAStatusRow();
   }, [selectedProgramId, selectedBatchId, refreshTick]);
 
-  const handleRefreshReport = () => {
+  const handleRefreshReport = useCallback(() => {
     if (!selectedBatchId) {
       toast.error('Select a batch first');
       return;
     }
     setRefreshTick((tick) => tick + 1);
-  };
+  }, [selectedBatchId]);
 
   // Handle Manage CQI button click
-  const handleTriggerCQI = async (ga: GAStatusRow) => {
+  const handleTriggerCQI = useCallback(async (ga: GAStatusRow) => {
     try {
       setSaving(true);
       const data = await obeService.getGAStatusRow(selectedProgramId, selectedBatchId);
@@ -278,10 +279,10 @@ const GAReport: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  };
+  }, [selectedProgramId, selectedBatchId]);
 
   // Handle close CQI
-  const handleCloseCQI = async () => {
+  const handleCloseCQI = useCallback(async () => {
     if (!currentGA?.cqi_record_id) {
       toast.error('No CQI record found');
       return;
@@ -310,10 +311,10 @@ const GAReport: React.FC = () => {
     } finally {
       setClosing(false);
     }
-  };
+  }, [currentGA, implementedInBatch, actionTaken, selectedProgramId, selectedBatchId]);
 
   // Handle save CQI
-  const handleSaveCQI = async () => {
+  const handleSaveCQI = useCallback(async () => {
     if (!currentGA?.cqi_record_id) {
       toast.error('No CQI record found');
       return;
@@ -339,9 +340,9 @@ const GAReport: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  };
+  }, [currentGA, hodActionPlan, issueStatement, selectedProgramId, selectedBatchId]);
 
-  const filteredBatches = selectedProgramId
+  const filteredBatches = useMemo(() => selectedProgramId
     ? batches.filter((b) => {
         if (b.program?.id !== selectedProgramId) return false;
         if (batchCategory === 'all') return true;
@@ -354,7 +355,9 @@ const GAReport: React.FC = () => {
         if (batchCategory === 'ongoing') return b.status === 'active';
         if (batchCategory === 'graduated') return b.status === 'graduated';
         return true;
-      });
+      }),
+    [batches, selectedProgramId, batchCategory]
+  );
 
   useEffect(() => {
     if (!selectedBatchId && filteredBatches.length > 0) {
@@ -771,9 +774,10 @@ const GAReport: React.FC = () => {
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
               value={selectedProgramId}
               onChange={(e) => {
+                resetReportState();
                 setSelectedProgramId(e.target.value);
                 setSelectedBatchId('');
-                resetReportState();
+                setLoading(true);
               }}
             >
               <option value="">Select a program</option>
@@ -794,9 +798,10 @@ const GAReport: React.FC = () => {
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
               value={batchCategory}
               onChange={(e) => {
+                resetReportState();
                 setBatchCategory(e.target.value as BatchCategory);
                 setSelectedBatchId('');
-                resetReportState();
+                setLoading(true);
               }}
             >
               <option value="all">All Batches</option>
@@ -814,13 +819,14 @@ const GAReport: React.FC = () => {
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
               value={selectedBatchId}
               onChange={(e) => {
+                resetReportState();
                 const nextBatchId = e.target.value;
                 const nextBatch = batches.find((batch) => batch.id === nextBatchId);
                 setSelectedBatchId(nextBatchId);
                 if (nextBatch?.program?.id) {
                   setSelectedProgramId(nextBatch.program.id);
                 }
-                resetReportState();
+                setLoading(true);
               }}
               disabled={!selectedProgramId}
             >
@@ -845,7 +851,12 @@ const GAReport: React.FC = () => {
                     ? 'bg-white text-indigo-600 shadow'
                     : 'text-gray-600 hover:text-gray-800'
                 }`}
-                onClick={() => setViewMode('student-wise')}
+                onClick={() => {
+                  if (viewMode === 'student-wise') return;
+                  resetReportState();
+                  setViewMode('student-wise');
+                  setLoading(true);
+                }}
               >
                 Student-wise
               </button>
@@ -855,7 +866,12 @@ const GAReport: React.FC = () => {
                     ? 'bg-white text-indigo-600 shadow'
                     : 'text-gray-600 hover:text-gray-800'
                 }`}
-                onClick={() => setViewMode('course-wise')}
+                onClick={() => {
+                  if (viewMode === 'course-wise') return;
+                  resetReportState();
+                  setViewMode('course-wise');
+                  setLoading(true);
+                }}
               >
                 Course-wise
               </button>

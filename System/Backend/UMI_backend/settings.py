@@ -102,7 +102,7 @@ WSGI_APPLICATION = 'UMI_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'icms_db',
+        'NAME': 'OBE_DB_Backup',
         'USER': 'obe_user',
         'PASSWORD': 'admin.123',
         'HOST': 'localhost',

@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { FileBarChart, ArrowLeft, Download, RotateCw, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileBarChart, ArrowLeft, Download, RotateCw, CheckCircle, AlertCircle, Info, ChevronDown, ChevronRight, LoaderCircle } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -40,6 +40,7 @@ const compareCloCode = (a: string, b: string) => {
 
 const CoordinatorCLOReportModule: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [allPrograms, setAllPrograms] = useState<any[]>([]);
   const [allSemesters, setAllSemesters] = useState<any[]>([]);
   const [allBatches, setAllBatches] = useState<Batch[]>([]);
@@ -51,21 +52,36 @@ const CoordinatorCLOReportModule: React.FC = () => {
   const [expandedCqi, setExpandedCqi] = useState<Set<string>>(new Set());
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-
-  const toggleCqi = (key: string) => {
-    const newSet = new Set(expandedCqi);
-    if (newSet.has(key)) {
-      newSet.delete(key);
-    } else {
-      newSet.add(key);
-    }
-    setExpandedCqi(newSet);
-  };
+  const reportRequestRef = useRef(0);
 
   const selectedBatchName = useMemo(() => {
     const batch = allBatches.find((b) => b.id === selectedBatchId);
     return batch?.name || null;
   }, [allBatches, selectedBatchId]);
+
+  const selectedSemesterName = useMemo(() => {
+    const sem = allSemesters.find((s) => s.id === selectedSemesterId);
+    return sem ? `${sem.name} (Semester ${sem.number})` : null;
+  }, [allSemesters, selectedSemesterId]);
+
+  const selectedProgramName = useMemo(() => {
+    const prog = allPrograms.find((p) => p.id === selectedProgramId);
+    return prog?.name || prog?.code || null;
+  }, [allPrograms, selectedProgramId]);
+
+  const loadingDescriptor = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedProgramName) parts.push(selectedProgramName);
+    if (selectedSemesterName) parts.push(selectedSemesterName);
+    if (selectedBatchName) parts.push(selectedBatchName);
+    if (parts.length === 0) return 'Loading CLO report…';
+    return `Loading CLO report for ${parts.join(' · ')}…`;
+  }, [selectedProgramName, selectedSemesterName, selectedBatchName]);
+
+  useEffect(() => {
+    if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) return;
+    void loadReport(false);
+  }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
   // Fetch initial data
   useEffect(() => {
@@ -97,25 +113,48 @@ const CoordinatorCLOReportModule: React.FC = () => {
   }, []);
 
   // Filter batches based on program and category
-  const filteredBatches = selectedProgramId
-    ? allBatches.filter((b) => {
-        if (b.program?.id !== selectedProgramId) return false;
-        if (batchCategory === 'all') return true;
-        if (batchCategory === 'ongoing') return b.status === 'active';
-        if (batchCategory === 'graduated') return b.status === 'graduated';
-        return true;
-      })
-    : allBatches.filter((b) => {
-        if (batchCategory === 'all') return true;
-        if (batchCategory === 'ongoing') return b.status === 'active';
-        if (batchCategory === 'graduated') return b.status === 'graduated';
-        return true;
-      });
+  const filteredBatches = useMemo(() => {
+    return selectedProgramId
+      ? allBatches.filter((b) => {
+          if (b.program?.id !== selectedProgramId) return false;
+          if (batchCategory === 'all') return true;
+          if (batchCategory === 'ongoing') return b.status === 'active';
+          if (batchCategory === 'graduated') return b.status === 'graduated';
+          return true;
+        })
+      : allBatches.filter((b) => {
+          if (batchCategory === 'all') return true;
+          if (batchCategory === 'ongoing') return b.status === 'active';
+          if (batchCategory === 'graduated') return b.status === 'graduated';
+          return true;
+        });
+  }, [allBatches, selectedProgramId, batchCategory]);
 
-  const loadReport = async (forceRefresh = false) => {
+  const toggleCqi = useCallback((key: string) => {
+    setExpandedCqi((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const loadReport = useCallback(async (forceRefresh = false) => {
     if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) return;
 
-    setLoading(!report);
+    const requestId = reportRequestRef.current + 1;
+    reportRequestRef.current = requestId;
+
+    if (forceRefresh) {
+      setRefreshing(true);
+    } else {
+      setReport(null);
+      setLoading(true);
+    }
+
     try {
       const data = await obeService.getCLOMasterCompilation(
         selectedProgramId,
@@ -124,6 +163,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
         'json',
         forceRefresh
       );
+      if (reportRequestRef.current !== requestId) return;
       const normalized = data as CLOMasterCompilationResponse;
       (normalized.finalized_courses || []).forEach((course) => {
         if (course.clos && course.clos.length > 1) {
@@ -132,27 +172,17 @@ const CoordinatorCLOReportModule: React.FC = () => {
       });
       setReport(normalized);
     } catch (error) {
+      if (reportRequestRef.current !== requestId) return;
       console.error(error);
       toast.error('Failed to load CLO Master Compilation');
     } finally {
+      if (reportRequestRef.current !== requestId) return;
       setLoading(false);
+      setRefreshing(false);
     }
-  };
-
-  // Fetch report when selections change
-  useEffect(() => {
-    loadReport(false);
   }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
 
-  useEffect(() => {
-    if (!selectedProgramId || !selectedSemesterId || !selectedBatchId) {
-      return;
-    }
-
-    // Auto-refresh removed - user can manually refresh using the refresh button
-  }, [selectedProgramId, selectedSemesterId, selectedBatchId]);
-
-  const buildExportRows = () => {
+  const buildExportRowsInternal = useMemo(() => {
     if (!report) return null;
 
     const selectedBatch = allBatches.find((b) => b.id === selectedBatchId);
@@ -212,7 +242,9 @@ const CoordinatorCLOReportModule: React.FC = () => {
     }
 
     return { selectedBatch, courseColumns, cqiSectionStart, rows };
-  };
+  }, [report, selectedBatchId, allBatches]);
+
+  const buildExportRows = useCallback(() => buildExportRowsInternal, [buildExportRowsInternal]);
 
   const handleExportExcel = async () => {
     if (!report) return;
@@ -416,15 +448,17 @@ const CoordinatorCLOReportModule: React.FC = () => {
 
     const runRefresh = async () => {
       try {
-        setLoading(true);
+        setRefreshing(true);
         await obeService.recalculateRetakeReports(selectedBatchId, selectedSemesterId);
         await loadReport(true);
         toast.success('Retake reports refreshed');
       } catch (error) {
-        console.error(error);
-        toast.error('Failed to refresh retake reports');
+        if (reportRequestRef.current === reportRequestRef.current) {
+          console.error(error);
+          toast.error('Failed to refresh retake reports');
+        }
       } finally {
-        setLoading(false);
+        setRefreshing(false);
       }
     };
 
@@ -478,6 +512,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 setSelectedSemesterId('');
                 setSelectedBatchId('');
                 setReport(null);
+                setLoading(true);
               }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
             >
@@ -497,6 +532,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
                 setBatchCategory(e.target.value as BatchCategory);
                 setSelectedBatchId('');
                 setReport(null);
+                setLoading(true);
               }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
             >
@@ -514,6 +550,7 @@ const CoordinatorCLOReportModule: React.FC = () => {
               onChange={(e) => {
                 setSelectedSemesterId(e.target.value);
                 setReport(null);
+                setLoading(true);
               }}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all"
             >
@@ -529,7 +566,11 @@ const CoordinatorCLOReportModule: React.FC = () => {
             </label>
             <select
               value={selectedBatchId}
-              onChange={(e) => setSelectedBatchId(e.target.value)}
+              onChange={(e) => {
+                setSelectedBatchId(e.target.value);
+                setReport(null);
+                setLoading(true);
+              }}
               disabled={!selectedProgramId}
               className="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-bold text-gray-700 focus:border-indigo-500 focus:ring-0 transition-all disabled:bg-gray-100"
             >
@@ -560,9 +601,19 @@ const CoordinatorCLOReportModule: React.FC = () => {
 
       {/* Loading State */}
       {loading && (
-        <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/3 mx-auto mb-4" />
-          <div className="h-4 bg-gray-200 rounded w-2/3 mx-auto" />
+        <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center">
+          <LoaderCircle className="w-12 h-12 text-indigo-600 animate-spin mx-auto mb-4" />
+          <p className="text-lg font-bold text-gray-700">{loadingDescriptor}</p>
+        </div>
+      )}
+
+      {/* Refreshing In-Place Banner */}
+      {refreshing && report && (
+        <div className="bg-indigo-50 border border-indigo-200 px-4 py-3 rounded-2xl flex items-center gap-3">
+          <LoaderCircle className="w-5 h-5 text-indigo-600 animate-spin shrink-0" />
+          <p className="text-sm font-bold text-indigo-800">
+            Refreshing CLO report{selectedSemesterName ? ` for ${selectedSemesterName}` : ''}…
+          </p>
         </div>
       )}
 

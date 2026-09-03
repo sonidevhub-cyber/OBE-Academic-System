@@ -116,6 +116,13 @@ def sync_stale_clo_master_cache(
     if not batch:
         return None
 
+    # OPT-9: Clear per-batch scored_ids memo so any new marks since the last
+    # report load are visible.  Within this single sync call, repeated calls
+    # to get_students_for_batch / _get_enrolled_student_ids_for_course_session
+    # share the same single DB hit for the StudentCLOScore scored_ids set.
+    from obe.services import clear_student_batch_caches
+    clear_student_batch_caches()
+
     master_cache, _ = SemesterCLOMasterCache.objects.get_or_create(
         program=program,
         batch=batch,
@@ -130,7 +137,7 @@ def sync_stale_clo_master_cache(
         master_cache.total_courses_expected = len(valid_course_ids)
         master_cache.save(update_fields=["total_courses_expected"])
 
-    reportable_sessions = CourseSession.objects.filter(
+    reportable_sessions_qs = CourseSession.objects.filter(
         course__program=program,
         semester=semester,
         batch=batch,
@@ -143,15 +150,71 @@ def sync_stale_clo_master_cache(
     # lists Compulsory courses. Keep elective/selective sessions even when
     # not in that whitelist since they are registered dynamically via
     # StudentElectiveEnrollment.
+    reportable_sessions_all = list(reportable_sessions_qs)
     if valid_course_ids:
         reportable_sessions = [
-            s for s in reportable_sessions
+            s for s in reportable_sessions_all
             if s.course_id in valid_course_ids
             or s.course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
         ]
+    else:
+        reportable_sessions = reportable_sessions_all
+
+    # --- OPT-5: Batch fetch key-sets for ALL sessions in 3 queries
+    # (replaces N × 3 = 3N per-session queries when force=False).
+    session_ids = [s.id for s in reportable_sessions]
+    active_scores_by_session = defaultdict(set)  # sid -> {(clo_id, student_id), ...}
+    cached_keys_by_session = defaultdict(set)    # sid -> {(clo_id, student_id), ...}
+    sample_by_session = defaultdict(list)        # sid -> [entry1, entry2, ...] (up to 5)
+
+    if session_ids and not force:
+        # 1. ALL active StudentCLOScore rows for these sessions
+        for sid, clo_id, student_id in StudentCLOScore.objects.filter(
+            course_session_id__in=session_ids,
+            is_active=True,
+        ).values_list("course_session_id", "clo_id", "student_id"):
+            active_scores_by_session[sid].add((clo_id, student_id))
+
+        # 2. ALL cached CourseCLOMasterEntry rows for (master, these sessions, active)
+        for row in CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            course_session_id__in=session_ids,
+            is_active=True,
+        ).values_list("course_session_id", "clo_id", "student_id", "id", "clo_score"):
+            sid, clo_id, student_id, pk, clo_score = row
+            cached_keys_by_session[sid].add((clo_id, student_id))
+            if len(sample_by_session[sid]) < 5:
+                sample_by_session[sid].append((pk, clo_score))
+
+    def _session_needs_sync_inline(session):
+        """Inline batched version of session_needs_clo_cache_sync.
+
+        Reuses the batch-loaded dicts above; avoids 3 queries per session.
+        """
+        sid = session.id
+        # Key-set compare (same logic as session_needs_clo_cache_sync L42-67).
+        if not should_append_course_to_clo_master(session):
+            return False
+        active_scores_keys = active_scores_by_session.get(sid, set())
+        cached_keys = cached_keys_by_session.get(sid, set())
+        if not active_scores_keys and cached_keys:
+            return True
+        if active_scores_keys != cached_keys:
+            return True
+        # Legacy one-time resync check: any whole-number clo_score in sample?
+        sample_vals = sample_by_session.get(sid, [])
+        if sample_vals:
+            for _pk, score_val in sample_vals:
+                try:
+                    dv = Decimal(str(score_val))
+                    if dv == dv.to_integral_value():
+                        return True
+                except Exception:
+                    pass
+        return False
 
     for session in reportable_sessions:
-        if force or session_needs_clo_cache_sync(session, master_cache):
+        if force or _session_needs_sync_inline(session):
             append_course_to_clo_master(sender=CourseSession, instance=session, created=False)
 
     master_cache.refresh_from_db()
@@ -239,6 +302,65 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
 
         seen_entry_keys = set()
 
+        # --- OPT-6/7: ONE pre-fetch of all existing entries for this
+        # (master_cache, course_session) so we can use bulk_create +
+        # bulk_update instead of N update_or_create calls.
+        existing_entries_qs = CourseCLOMasterEntry.objects.filter(
+            master_cache=master_cache,
+            course_session=instance,
+        )
+        existing_by_key = {}  # (clo_id, student_id) -> CourseCLOMasterEntry
+        stale_inactive_candidates = []  # list of entry PKs to mark inactive
+        for existing_entry in existing_entries_qs:
+            k = (existing_entry.clo_id, existing_entry.student_id)
+            existing_by_key[k] = existing_entry
+            stale_inactive_candidates.append(
+                (existing_entry.pk, existing_entry.clo_id, existing_entry.student_id)
+            )
+
+        to_create = []
+        to_update = []
+        _now = timezone.now()
+
+        def _upsert_entry(key, course_obj, clo_obj, student_obj, score_val, achieved_bool):
+            """Schedule a create or update into the bulk lists."""
+            seen_entry_keys.add(key)
+            existing = existing_by_key.get(key)
+            if existing is not None:
+                changed = False
+                if existing.course_id != course_obj.id:
+                    existing.course = course_obj
+                    changed = True
+                # Normalize Decimal/int for safe comparison
+                try:
+                    if Decimal(str(existing.clo_score)) != Decimal(str(score_val)):
+                        existing.clo_score = score_val
+                        changed = True
+                except Exception:
+                    existing.clo_score = score_val
+                    changed = True
+                if existing.is_kpi_achieved != bool(achieved_bool):
+                    existing.is_kpi_achieved = bool(achieved_bool)
+                    changed = True
+                if not existing.is_active:
+                    existing.is_active = True
+                    changed = True
+                if changed:
+                    existing.finalized_at = _now
+                    to_update.append(existing)
+            else:
+                to_create.append(CourseCLOMasterEntry(
+                    master_cache=master_cache,
+                    course_session=instance,
+                    clo=clo_obj,
+                    student=student_obj,
+                    course=course_obj,
+                    clo_score=score_val,
+                    is_kpi_achieved=bool(achieved_bool),
+                    finalized_at=_now,
+                    is_active=True,
+                ))
+
         if isinstance(clo_service_result, dict) and clo_service_result.get("error"):
             # ----------------------------------------------------------
             # FALLBACK: CLOService couldn't produce a report (e.g. no
@@ -268,20 +390,13 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
                 kpi = score.clo.kpi_target
                 is_achieved = score.attainment >= kpi
                 entry_key = (score.clo_id, score.student_id)
-                seen_entry_keys.add(entry_key)
-
-                CourseCLOMasterEntry.objects.update_or_create(
-                    master_cache=master_cache,
-                    course_session=instance,
-                    clo=score.clo,
-                    student=score.student,
-                    defaults={
-                        'course': score.clo.course,
-                        'clo_score': score.attainment,
-                        'is_kpi_achieved': is_achieved,
-                        'finalized_at': timezone.now(),
-                        'is_active': True,
-                    }
+                _upsert_entry(
+                    entry_key,
+                    score.clo.course,
+                    score.clo,
+                    score.student,
+                    score.attainment,
+                    is_achieved,
                 )
         else:
             # ----------------------------------------------------------
@@ -294,7 +409,7 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
             #     StudentCLOScore uses: pick the CLO with real questions).
             from assessments.models import Assessment as AssessmentModel
 
-            finalized_assessments = AssessmentModel.objects.filter(
+            finalized_assessments_qs = AssessmentModel.objects.filter(
                 course_id=course.id,
                 batch_id=batch.id,
                 semester_id=semester.id,
@@ -302,9 +417,11 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
                 course_retake__isnull=True,
             )
             if assessment_types is not None:
-                finalized_assessments = finalized_assessments.filter(
+                finalized_assessments_qs = finalized_assessments_qs.filter(
                     assessment_type__in=assessment_types
                 )
+            finalized_assessments = list(finalized_assessments_qs)
+            finalized_assessment_ids = [a.id for a in finalized_assessments]
 
             # Elective/Selective courses are registered dynamically and may not have
             # their CLO rows attached to this specific batch curriculum_version.
@@ -326,15 +443,22 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
             for clo in course_clos:
                 clos_by_order[clo.order_number].append(clo)
 
+            # --- OPT-8: ONE batched Question query across ALL finalized
+            # assessments, giving the set of clo_ids that have at least
+            # one question. Replaces len(course_clos) per-CLO .exists() calls.
+            question_clo_ids = set()
+            if finalized_assessment_ids:
+                question_rows = QuestionModel.objects.filter(
+                    assessment_id__in=finalized_assessment_ids,
+                    clo_id__isnull=False,
+                ).values_list("clo_id", flat=True).distinct()
+                question_clo_ids = set(question_rows)
+
             target_clo_per_order = {}
             for order_num, clo_list in clos_by_order.items():
                 selected = None
                 for clo in clo_list:
-                    has_q = QuestionModel.objects.filter(
-                        clo=clo,
-                        assessment__in=finalized_assessments,
-                    ).exists()
-                    if has_q:
+                    if clo.id in question_clo_ids:
                         selected = clo
                         break
                 if selected is None and clo_list:
@@ -382,31 +506,35 @@ def append_course_to_clo_master(sender, instance, created, **kwargs):
                     is_achieved = percentage >= kpi_target
 
                     entry_key = (target_clo.id, student.student_id)
-                    seen_entry_keys.add(entry_key)
-
-                    CourseCLOMasterEntry.objects.update_or_create(
-                        master_cache=master_cache,
-                        course_session=instance,
-                        clo=target_clo,
-                        student=student,
-                        defaults={
-                            'course': course,
-                            'clo_score': round(percentage, 2),
-                            'is_kpi_achieved': is_achieved,
-                            'finalized_at': timezone.now(),
-                            'is_active': True,
-                        }
+                    _upsert_entry(
+                        entry_key,
+                        course,
+                        target_clo,
+                        student,
+                        round(percentage, 2),
+                        is_achieved,
                     )
 
-        # Mark stale rows for this session as inactive so the master keeps the
-        # latest snapshot without leaving orphaned historical values visible.
-        for existing_entry in CourseCLOMasterEntry.objects.filter(
-            master_cache=master_cache,
-            course_session=instance,
-        ).select_related("clo", "student"):
-            if (existing_entry.clo_id, existing_entry.student_id) not in seen_entry_keys:
-                existing_entry.is_active = False
-                existing_entry.save(update_fields=["is_active"])
+        # --- OPT-6: Flush bulk_create + bulk_update (replacing N UPDATE/CREATE queries)
+        if to_create:
+            CourseCLOMasterEntry.objects.bulk_create(to_create, batch_size=500)
+        if to_update:
+            CourseCLOMasterEntry.objects.bulk_update(
+                to_update,
+                fields=['course', 'clo_score', 'is_kpi_achieved', 'finalized_at', 'is_active'],
+                batch_size=500,
+            )
+
+        # --- OPT-7: Mark stale rows inactive in ONE queryset.update()
+        # instead of N per-row .save() calls.
+        stale_pks = [
+            pk for (pk, clo_id, student_id) in stale_inactive_candidates
+            if (clo_id, student_id) not in seen_entry_keys
+        ]
+        if stale_pks:
+            CourseCLOMasterEntry.objects.filter(pk__in=stale_pks).update(
+                is_active=False
+            )
 
         # Update master cache stats (only count valid courses)
         finalized_entries_query = CourseCLOMasterEntry.objects.filter(

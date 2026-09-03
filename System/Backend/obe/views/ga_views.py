@@ -825,6 +825,13 @@ class BatchGAReportView(APIView):
         except Batch.DoesNotExist:
             return Response({'error': 'Batch not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # OPT-9 (CLO batch-cache parity): Clear per-batch scored_ids memo so this
+        # GA report load picks up any marks / roster changes since the last
+        # request, while still sharing the StudentCLOScore lookup within this
+        # request's repeated get_students_for_batch / enrolled calls.
+        from ..services import clear_student_batch_caches
+        clear_student_batch_caches()
+
         scope = request.query_params.get('scope', 'cohort')    # cohort|student|all_students|course_wise
         student_id = request.query_params.get('student_id', None)
 

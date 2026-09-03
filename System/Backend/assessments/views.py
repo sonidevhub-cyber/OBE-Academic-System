@@ -1350,7 +1350,6 @@ class AssessmentMarksView(APIView):
         if assessment.course_retake:
             students = [assessment.course_retake.student]
         else:
-            from obe.models import CourseSession
             from obe.services import get_students_enrolled_in_course
             session = CourseSession.objects.filter(
                 course=assessment.course,
