@@ -1,5 +1,7 @@
 import uuid
 from decimal import Decimal
+from functools import lru_cache
+
 from django.utils import timezone
 from .models import (
     CLOGAMapping,
@@ -33,6 +35,42 @@ from students.models import Student
 from core.models import Batch, Semester
 
 
+# =====================================================================
+# OPT-9: Request-scored memoization for the heaviest repeated sub-query
+# in get_students_for_batch (the StudentCLOScore scored_ids lookup).
+#
+# Call clear_student_batch_caches() at the TOP of every report / cache-sync
+# entry point so there is NO cross-request staleness risk.  Within a
+# single request, same batch.id resolves scored_ids once instead of N
+# times (N = # of reportable sessions / course columns).
+# =====================================================================
+
+@lru_cache(maxsize=512)
+def _cached_scored_ids_for_batch(batch_id: str):
+    """Return frozenset of scored student UUIDs for the batch, or empty frozenset.
+
+    Keyed by batch.id (string UUID) so equality is cheap and consistent.
+    Return type is frozenset so callers can safely iterate / len / `in`.
+    """
+    rows = StudentCLOScore.objects.filter(
+        course_session__batch_id=batch_id,
+        course_session__is_active=True,
+        is_active=True,
+    ).values_list('student_id', flat=True).distinct()
+    return frozenset(str(r) for r in rows)
+
+
+def clear_student_batch_caches():
+    """Explicitly drop the per-batch scored_ids cache.
+
+    MUST be called at the start of every report-generation entry point
+    (coordinator CLO master report, GA report, sync_stale_clo_master_cache,
+    etc.) so that mid-day roster / mark changes are picked up on the
+    next page load.
+    """
+    _cached_scored_ids_for_batch.cache_clear()
+
+
 def _get_effective_course_sessions_for_batch(batch: Batch, *, require_assessment_done: bool = False):
     """
     Return the latest effective session per course code for a batch.
@@ -61,15 +99,13 @@ def get_students_for_batch(batch: Batch):
     batch changes. If no course-session scores exist yet, fall back to current
     membership so in-progress rosters still render before marks are entered.
     """
-    scored_student_ids = StudentCLOScore.objects.filter(
-        course_session__batch=batch,
-        course_session__is_active=True,
-        is_active=True,
-    ).values_list('student_id', flat=True).distinct()
+    # OPT-9: Reuse the per-request cached scored_ids set instead of re-running
+    # the StudentCLOScore query on every call for the same batch.
+    scored_ids = _cached_scored_ids_for_batch(str(batch.id))
 
-    if scored_student_ids.exists():
+    if scored_ids:
         return (
-            Student.objects.filter(student_id__in=scored_student_ids, user__is_active=True)
+            Student.objects.filter(student_id__in=scored_ids, user__is_active=True)
             .select_related('user', 'batch', 'original_batch')
             .distinct()
         )
@@ -863,6 +899,334 @@ def calculate_ga_attainment_cumulative_student(student: Student, ga: GA, batch: 
         return None
 
     return round(total_attainment / total_weight, 2)
+
+
+# =====================================================================
+# GA REPORT OPTIMIZATION: Request-level caches and bulk functions
+# =====================================================================
+
+# Module-level dict for caching calculate_weighted_ga_score results
+# within a single request. Cleared via clear_ga_report_caches().
+_ga_weighted_score_cache: dict = {}
+
+
+def clear_ga_report_caches():
+    """Clear all GA report caches. Must be called at the start of each report request."""
+    _ga_weighted_score_cache.clear()
+
+
+def _cached_weighted_ga_score(ga, batch, force_recalculate=False):
+    """
+    Wrapper around calculate_weighted_ga_score with request-level caching.
+    The cache key is (ga_id, batch_id, force_recalculate).
+    """
+    cache_key = (str(ga.id), str(batch.id), force_recalculate)
+    if cache_key in _ga_weighted_score_cache:
+        return _ga_weighted_score_cache[cache_key]
+    result = calculate_weighted_ga_score(ga, batch, force_recalculate=force_recalculate)
+    _ga_weighted_score_cache[cache_key] = result
+    return result
+
+
+def _precompute_batch_ga_data(batch: Batch, gas, *, require_assessment_done: bool = True):
+    """
+    Pre-compute course sessions, CLO-GA mappings, and enrolled student IDs
+    for a batch and set of GAs in as few queries as possible.
+
+    Returns a dict with:
+      - course_sessions: list of CourseSession (with select_related)
+      - mappings_by_course: {course_id: [(mapping, ga_id), ...]}
+      - enrolled_student_ids: set of student_id strings
+      - student_clos_by_key: {(student_id, clo_id, course_session_id): attainment}
+    """
+    from core.models.course import Course
+
+    course_sessions = _get_effective_course_sessions_for_batch(
+        batch,
+        require_assessment_done=require_assessment_done,
+    )
+
+    # Filter by curriculum version if available
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(cid)
+            for cid in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
+
+    # Pre-compute CLOGAMappings for ALL GAs in one query
+    mappings = CLOGAMapping.objects.filter(
+        clo__course__in=[cs.course_id for cs in course_sessions],
+        ga__in=gas,
+        is_active=True,
+        clo__is_active=True,
+    ).select_related('clo', 'ga')
+
+    if batch.curriculum_version:
+        mappings = mappings.filter(clo__curriculum_version=batch.curriculum_version)
+
+    mappings_by_course = {}
+    for mapping in mappings:
+        course_id = mapping.clo.course_id
+        mappings_by_course.setdefault(course_id, []).append(mapping)
+
+    # Bulk-load all StudentCLOScores for this batch in a single query
+    session_ids = [cs.id for cs in course_sessions]
+    clo_ids = list(mappings.values_list('clo_id', flat=True))
+
+    if session_ids and clo_ids:
+        student_clo_scores = StudentCLOScore.objects.filter(
+            course_session_id__in=session_ids,
+            clo_id__in=clo_ids,
+            is_active=True,
+        ).select_related('clo', 'course_session')
+    else:
+        student_clo_scores = StudentCLOScore.objects.none()
+
+    student_clos_by_key = {}
+    for score in student_clo_scores:
+        key = (str(score.student_id), str(score.clo_id), str(score.course_session_id))
+        student_clos_by_key[key] = score
+
+    # Pre-compute enrolled student IDs (for enrollment filtering)
+    enrolled_student_ids = set()
+    for cs in course_sessions:
+        course = cs.course
+        offering_type = getattr(course, 'offering_type', Course.OFFERING_COMPULSORY)
+        if offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            # Compulsory: all batch students enrolled
+            enrolled_student_ids.update(
+                str(sid) for sid in get_students_for_batch(batch).values_list('student_id', flat=True)
+            )
+        else:
+            try:
+                from electives.models import StudentElectiveEnrollment
+                eids = StudentElectiveEnrollment.objects.filter(
+                    course=course,
+                    batch=cs.batch,
+                    semester=cs.semester,
+                    is_active=True,
+                ).values_list('student_id', flat=True)
+                enrolled_student_ids.update(str(eid) for eid in eids)
+            except Exception:
+                pass
+
+    return {
+        'course_sessions': course_sessions,
+        'mappings_by_course': mappings_by_course,
+        'student_clos_by_key': student_clos_by_key,
+        'enrolled_student_ids': enrolled_student_ids,
+    }
+
+
+def calculate_ga_attainment_cumulative_student_bulk(batch: Batch, students, gas):
+    """
+    Compute cumulative GA attainment for ALL students and ALL GAs in bulk.
+    Eliminates per-student N+1 queries by pre-loading all needed data once.
+
+    Returns: {student_id_str: {ga_id_str: attainment}}
+    """
+    if not students or not gas:
+        return {}
+
+    gas_list = list(gas) if hasattr(gas, 'all') else list(gas)
+    student_list = list(students) if hasattr(students, 'all') else list(students)
+
+    if not student_list or not gas_list:
+        return {}
+
+    # Pre-compute all shared data once for the batch + GAs
+    precomputed = _precompute_batch_ga_data(batch, GA.objects.filter(id__in=[g.id for g in gas_list]))
+
+    course_sessions = precomputed['course_sessions']
+    mappings_by_course = precomputed['mappings_by_course']
+    student_clos_by_key = precomputed['student_clos_by_key']
+    enrolled_ids = precomputed['enrolled_student_ids']
+
+    student_ids = [str(s.student_id) for s in student_list]
+    student_id_set = set(student_ids)
+
+    # Group mappings by (ga_id, course_id) for efficient lookup
+    mappings_by_ga_course = {}
+    for course_id, mappings in mappings_by_course.items():
+        for mapping in mappings:
+            key = (str(mapping.ga_id), str(course_id))
+            mappings_by_ga_course.setdefault(key, []).append(mapping)
+
+    result = {}
+
+    for student in student_list:
+        sid = str(student.student_id)
+        result[sid] = {}
+
+        # Determine enrollment for this student
+        is_enrolled = {}
+
+        for ga in gas_list:
+            ga_id = str(ga.id)
+            total_attainment = Decimal('0')
+            total_weight = Decimal('0')
+
+            for session in course_sessions:
+                session_id = str(session.id)
+                course_id = str(session.course_id)
+
+                # Check enrollment (compulsory = True, elective = check set)
+                enrollment_key = (sid, session_id)
+                if enrollment_key not in is_enrolled:
+                    offering_type = getattr(session.course, 'offering_type', None)
+                    if offering_type in ('ELECTIVE', 'SELECTIVE', None):
+                        is_enrolled[enrollment_key] = sid in enrolled_ids
+                    else:
+                        is_enrolled[enrollment_key] = True
+
+                if not is_enrolled[enrollment_key]:
+                    continue
+
+                # Get mappings for this (GA, course) pair
+                map_key = (ga_id, course_id)
+                session_mappings = mappings_by_ga_course.get(map_key, [])
+
+                for mapping in session_mappings:
+                    clo_key = (sid, str(mapping.clo_id), session_id)
+                    score = student_clos_by_key.get(clo_key)
+                    if score:
+                        total_attainment += Decimal(str(score.attainment)) * Decimal(str(mapping.weight))
+                        total_weight += Decimal(str(mapping.weight))
+
+            if total_weight == 0:
+                result[sid][ga_id] = None
+            else:
+                result[sid][ga_id] = round(total_attainment / total_weight, 2)
+
+    return result
+
+
+def calculate_ga_attainment_semester_student_bulk(batch: Batch, semester: Semester, students, gas):
+    """
+    Compute semester-wise GA attainment for ALL students and ALL GAs in bulk.
+    """
+    if not students or not gas:
+        return {}
+
+    gas_list = list(gas) if hasattr(gas, 'all') else list(gas)
+    student_list = list(students) if hasattr(students, 'all') else list(students)
+
+    if not student_list or not gas_list:
+        return {}
+
+    # Get course sessions for this specific semester
+    course_sessions = _get_effective_course_sessions_for_batch(
+        batch, require_assessment_done=True,
+    )
+    if batch.curriculum_version:
+        allowed_course_ids = {
+            str(cid)
+            for cid in batch.curriculum_version.version_courses.filter(
+                is_active=True
+            ).values_list('course_id', flat=True)
+        }
+        course_sessions = [
+            session for session in course_sessions
+            if str(session.course_id) in allowed_course_ids
+        ]
+    course_sessions = [s for s in course_sessions if s.semester_id == semester.id]
+
+    # Pre-compute CLOGAMappings for ALL GAs in one query
+    mappings = CLOGAMapping.objects.filter(
+        clo__course__in=[cs.course_id for cs in course_sessions],
+        ga__in=gas,
+        is_active=True,
+        clo__is_active=True,
+    ).select_related('clo', 'ga')
+
+    if batch.curriculum_version:
+        mappings = mappings.filter(clo__curriculum_version=batch.curriculum_version)
+
+    mappings_by_ga_course = {}
+    clo_ids = set()
+    for mapping in mappings:
+        key = (str(mapping.ga_id), str(mapping.clo.course_id))
+        mappings_by_ga_course.setdefault(key, []).append(mapping)
+        clo_ids.add(str(mapping.clo_id))
+
+    # Bulk-load StudentCLOScores
+    session_ids = [cs.id for cs in course_sessions]
+    if session_ids and clo_ids:
+        student_clo_scores = StudentCLOScore.objects.filter(
+            course_session_id__in=session_ids,
+            clo_id__in=list(clo_ids),
+            is_active=True,
+        ).select_related('clo', 'course_session')
+    else:
+        student_clo_scores = StudentCLOScore.objects.none()
+
+    student_clos_by_key = {}
+    for score in student_clo_scores:
+        key = (str(score.student_id), str(score.clo_id), str(score.course_session_id))
+        student_clos_by_key[key] = score
+
+    # Pre-compute enrolled student IDs for elective courses
+    from core.models.course import Course
+    enrolled_student_ids = set()
+    for sess in course_sessions:
+        offering_type = getattr(sess.course, 'offering_type', Course.OFFERING_COMPULSORY)
+        if offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            try:
+                from electives.models import StudentElectiveEnrollment
+                eids = StudentElectiveEnrollment.objects.filter(
+                    course=sess.course,
+                    batch=sess.batch,
+                    semester=sess.semester,
+                    is_active=True,
+                ).values_list('student_id', flat=True)
+                enrolled_student_ids.update(str(eid) for eid in eids)
+            except Exception:
+                pass
+
+    student_list = list(students) if hasattr(students, 'all') else list(students)
+    gas_list = list(gas) if hasattr(gas, 'all') else list(gas)
+
+    result = {}
+    for student in student_list:
+        sid = str(student.student_id)
+        result[sid] = {}
+
+        for ga in gas_list:
+            ga_id = str(ga.id)
+            total_attainment = Decimal('0')
+            total_weight = Decimal('0')
+
+            for session in course_sessions:
+                session_id = str(session.id)
+                course_id = str(session.course_id)
+
+                offering_type = getattr(session.course, 'offering_type', Course.OFFERING_COMPULSORY)
+                if offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+                    if sid not in enrolled_student_ids:
+                        continue
+
+                map_key = (ga_id, course_id)
+                session_mappings = mappings_by_ga_course.get(map_key, [])
+
+                for mapping in session_mappings:
+                    clo_key = (sid, str(mapping.clo_id), session_id)
+                    score = student_clos_by_key.get(clo_key)
+                    if score:
+                        total_attainment += Decimal(str(score.attainment)) * Decimal(str(mapping.weight))
+                        total_weight += Decimal(str(mapping.weight))
+
+            if total_weight == 0:
+                result[sid][ga_id] = None
+            else:
+                result[sid][ga_id] = round(total_attainment / total_weight, 2)
+
+    return result
 
 
 def check_and_trigger_ga_cqi(batch: Batch, ga: GA, cqi_level: str = 'CUMULATIVE', semester: int = None):

@@ -711,9 +711,7 @@ class InstructorViewSet(viewsets.ModelViewSet):
                         "id": str(previous_cqi.id),
                         "semester": last_completed_semester,
                         "root_cause": previous_cqi.root_cause,
-                        "remedial_plan": (
-                            previous_cqi.remedial_plan
-                        ),
+                        
                     }
                     if previous_cqi
                     else None

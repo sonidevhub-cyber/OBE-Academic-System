@@ -511,17 +511,48 @@ const handleTypeChange = (value: string) => {
     const loadStudents = async () => {
       setStudentLoading(true);
       try {
-        const res = await api.get(`students/?batch=${batchId}&page_size=500`);
-        const data = res.data;
+        const canUseOptimizedFetch = Boolean(
+          batchId && courseId && (semesterNumber || (selectedCourse as any)?.semester_id)
+        );
+
         let studentList: any[] = [];
-        if (Array.isArray(data)) {
-          studentList = data;
-        } else if (data?.results) {
-          studentList = data.results;
-        } else if (data?.items) {
-          studentList = data.items;
-        } else if (data?.students) {
-          studentList = data.students;
+        let backendFilteredEnrollment = false;
+
+        if (canUseOptimizedFetch) {
+          const params: Record<string, any> = {
+            batch: batchId,
+            course: courseId,
+            page_size: 500,
+          };
+          if (semesterNumber) {
+            params.semester_number = semesterNumber;
+          } else if ((selectedCourse as any)?.semester_id) {
+            params.semester_id = (selectedCourse as any).semester_id;
+          }
+          const res = await api.get(`students/`, { params });
+          const data = res.data;
+          if (Array.isArray(data)) {
+            studentList = data;
+          } else if (data?.results) {
+            studentList = data.results;
+          } else if (data?.items) {
+            studentList = data.items;
+          } else if (data?.students) {
+            studentList = data.students;
+          }
+          backendFilteredEnrollment = Boolean(data?.was_enrollment_filtered);
+        } else {
+          const res = await api.get(`students/?batch=${batchId}&page_size=500`);
+          const data = res.data;
+          if (Array.isArray(data)) {
+            studentList = data;
+          } else if (data?.results) {
+            studentList = data.results;
+          } else if (data?.items) {
+            studentList = data.items;
+          } else if (data?.students) {
+            studentList = data.students;
+          }
         }
 
         const applyEnrollmentFilter = async (students: any[]) => {
@@ -554,13 +585,31 @@ const handleTypeChange = (value: string) => {
             const enrolledStudentIds = new Set<string>(
               courseEnrollments.map((e: any) => String(e.student_id))
             );
+            const enrolledCustomIds = new Set<string>(
+              courseEnrollments
+                .map((e: any) => String(e.student_custom_id || '').trim())
+                .filter((s: string) => s.length > 0)
+            );
+            const enrolledRegNumbers = new Set<string>(
+              courseEnrollments
+                .map((e: any) => String(e.student_registration_number || '').trim())
+                .filter((s: string) => s.length > 0)
+            );
 
             const filteredByEnrollment = students.filter((student: any) => {
               const possibleIds = [
                 String(student.student_id || ''),
                 String(student.id || ''),
               ];
-              return possibleIds.some((id) => enrolledStudentIds.has(id));
+              const possibleCustomIds = [
+                String(student.custom_id || '').trim(),
+                String(student.registration_number || '').trim(),
+              ];
+              return (
+                possibleIds.some((id) => enrolledStudentIds.has(id)) ||
+                possibleCustomIds.some((cid) => enrolledCustomIds.has(cid)) ||
+                possibleCustomIds.some((rn) => enrolledRegNumbers.has(rn))
+              );
             });
 
             return { studentList: filteredByEnrollment, enrolledStudentIds };
@@ -573,7 +622,9 @@ const handleTypeChange = (value: string) => {
           }
         };
 
-        const { studentList: enrollmentFilteredStudents } = await applyEnrollmentFilter(studentList);
+        const { studentList: enrollmentFilteredStudents } = backendFilteredEnrollment
+          ? { studentList }
+          : await applyEnrollmentFilter(studentList);
 
         const filteredStudents = retakeStudentIdSet.size > 0
           ? enrollmentFilteredStudents.filter((student: any) => {

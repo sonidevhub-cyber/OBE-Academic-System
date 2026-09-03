@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from .models import Student
 from .serializers import StudentSerializer
@@ -18,15 +19,38 @@ class StandardResultsSetPagination(PageNumberPagination):
 class StudentViewSet(viewsets.ModelViewSet):
     serializer_class = StudentSerializer
     pagination_class = StandardResultsSetPagination
-    
+
+    def _resolve_enrolled_ids_via_course(self, batch_id, course_id, semester_id):
+        from core.models.course import Course
+        from electives.models import StudentElectiveEnrollment
+
+        try:
+            course = Course.objects.get(id=course_id, is_active=True)
+        except Course.DoesNotExist:
+            return None
+
+        offering_type = getattr(course, 'offering_type', Course.OFFERING_COMPULSORY)
+        if offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            return ('keep-all', set())
+
+        enrolled_ids = set(
+            StudentElectiveEnrollment.objects.filter(
+                course_id=course_id,
+                batch_id=batch_id,
+                semester_id=semester_id,
+                is_active=True,
+            ).values_list('student_id', flat=True)
+        )
+        return ('filter', enrolled_ids)
+
     def get_queryset(self):
         from django.db.models import Prefetch
         from curriculum.models import CurriculumVersionCourse
-        
+
         queryset = Student.objects.all().select_related(
-            'user', 
-            'user__batch', 
-            'user__batch__program', 
+            'user',
+            'user__batch',
+            'user__batch__program',
             'user__batch__curriculum_version',
             'department',
             'batch',
@@ -37,16 +61,82 @@ class StudentViewSet(viewsets.ModelViewSet):
                 queryset=CurriculumVersionCourse.objects.select_related('course').all()
             )
         )
-        
-        batch_id = self.request.query_params.get('batch')
-        role = self.request.query_params.get('role')
-        
+
+        request = self.request
+        batch_id = request.query_params.get('batch')
+        role = request.query_params.get('role')
+        course_id = request.query_params.get('course')
+        semester_number = request.query_params.get('semester_number')
+        semester_id_param = request.query_params.get('semester_id')
+
         if batch_id:
-            queryset = queryset.filter(user__batch_id=batch_id)
+            queryset = queryset.filter(
+                Q(user__batch_id=batch_id)
+                | Q(batch_id=batch_id)
+                | Q(original_batch_id=batch_id, is_frozen=True)
+                | Q(retakes__current_batch_id=batch_id, retakes__is_active=True)
+            ).distinct()
         if role:
             queryset = queryset.filter(user__role=role)
-            
+
+        if batch_id and course_id and (semester_number or semester_id_param):
+            resolved_semester_id = None
+            if semester_id_param:
+                resolved_semester_id = semester_id_param
+            elif semester_number:
+                from core.models import Semester
+                try:
+                    batch_obj = Batch.objects.get(id=batch_id)
+                    sem = Semester.objects.get(
+                        number=int(semester_number),
+                        program=batch_obj.program,
+                    )
+                    resolved_semester_id = str(sem.id)
+                except (Batch.DoesNotExist, Semester.DoesNotExist, ValueError, TypeError):
+                    resolved_semester_id = None
+
+            if resolved_semester_id:
+                result = self._resolve_enrolled_ids_via_course(
+                    batch_id, course_id, resolved_semester_id
+                )
+                if result is None:
+                    pass
+                else:
+                    mode, enrolled_ids = result
+                    if mode == 'keep-all':
+                        request._enrollment_filtered = True
+                    elif mode == 'filter':
+                        if enrolled_ids:
+                            queryset = queryset.filter(student_id__in=enrolled_ids).distinct()
+                        else:
+                            queryset = queryset.none()
+                        request._enrollment_filtered = True
+
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = self.get_paginated_response(serializer.data).data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data = {
+                'count': len(serializer.data),
+                'next': None,
+                'previous': None,
+                'results': serializer.data,
+            }
+
+        was_enrollment_filtered = getattr(request, '_enrollment_filtered', False)
+        if was_enrollment_filtered:
+            data['was_enrollment_filtered'] = True
+        else:
+            data['was_enrollment_filtered'] = False
+
+        return Response(data)
     
     def get_permissions(self):
         if self.action == 'profile':

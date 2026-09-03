@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from django.db.models import Q
 from django.http import HttpResponse
 from rest_framework import viewsets
@@ -29,6 +31,12 @@ def get_clo_master_report(request, program_id, semester_id):
     Optional batch_id query param.
     Optional format=xlsx for Excel export.
     """
+    # OPT-9: Clear per-batch scored_ids memo so this report load picks up
+    # any marks / roster changes since the last request (no cross-request
+    # staleness), while still sharing the sub-query within this request.
+    from obe.services import clear_student_batch_caches
+    clear_student_batch_caches()
+
     batch_id = request.query_params.get("batch_id")
     force_refresh = request.query_params.get("refresh") == "1"
 
@@ -164,7 +172,84 @@ def get_clo_master_report(request, program_id, semester_id):
     else:
         students = Student.objects.none()
 
-    # Get all active course entries from cache.
+    from core.models.course import Course
+    from obe.models import CLO as _CLOModel
+
+    all_catalog_course_ids = [item["course"].id for item in course_catalog] if course_catalog else []
+    curriculum_version_id = batch.curriculum_version_id if (batch and batch.curriculum_version) else None
+
+    # --- OPT-1: Single batch-fetch of ALL CLOs for every catalog course
+    # (replaces N per-course queries).  Curriculum-version filter for
+    # compulsory applied in-memory below; electives skip it.
+    all_clos_qs = _CLOModel.objects.filter(is_active=True)
+    if all_catalog_course_ids:
+        all_clos_qs = all_clos_qs.filter(course_id__in=all_catalog_course_ids)
+    all_clos_raw = list(
+        all_clos_qs.order_by("course_id", "order_number", "id")
+    )
+    clos_by_course_id = defaultdict(list)
+    for clo in all_clos_raw:
+        clos_by_course_id[clo.course_id].append(clo)
+
+    # --- OPT-2/4: Batch-resolve enrolled student ids in ONE pass.
+    # Compulsory -> reuse single get_students_for_batch result;
+    # Elective/Selective -> ONE StudentElectiveEnrollment query over all
+    # (course, batch, semester), then group by course_id.
+    from obe.services import _get_enrolled_student_ids_for_course_session
+    from electives.models import StudentElectiveEnrollment as _SEE
+    from collections import defaultdict as _dd
+
+    compulsory_student_str_ids = None
+    if batch_id and batch:
+        # Compute compulsory student UUID set once for entire request.
+        # _get_enrolled_student_ids_for_course_session for a compulsory
+        # session just returns get_students_for_batch; so precompute and
+        # share across every compulsory course column + kpi denominator.
+        _comp_ids = _get_enrolled_student_ids_for_course_session(
+            # Use a fake "compulsory-shaped" session; the function only
+            # reads .course.offering_type and .batch.  Since we already
+            # confirmed it's a compulsory shape by using a non-elective
+            # course id, shortcut directly.
+            type(
+                "_Sesh",
+                (),
+                {
+                    "course": type(
+                        "_C", (), {"offering_type": Course.OFFERING_COMPULSORY, "id": None}
+                    )(),
+                    "batch": batch,
+                },
+            )()
+        )
+        compulsory_student_str_ids = {str(sid) for sid in _comp_ids}
+
+    elective_course_id_set = set()
+    for course_item in course_catalog:
+        _c = course_item["course"]
+        if _c.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            elective_course_id_set.add(_c.id)
+
+    elective_enrolled_by_course = {}  # course_id -> set(str_student_id)
+    if elective_course_id_set and batch_id and batch:
+        see_rows = _SEE.objects.filter(
+            course_id__in=elective_course_id_set,
+            batch=batch,
+            semester=semester,
+            is_active=True,
+        ).values_list("course_id", "student_id")
+        elective_enrolled_by_course = _dd(set)
+        for cid, sid in see_rows:
+            elective_enrolled_by_course[cid].add(str(sid))
+
+    def _enrolled_ids_for_course(course_id, course):
+        """Return enrolled str(student_id) set for the course, or None for compulsory/full-batch."""
+        if course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
+            return elective_enrolled_by_course.get(course_id, set())
+        return None
+
+    # Get all active course entries from cache (materialize ONCE as a list
+    # so we can compute finalized_count and the lookup loops from the
+    # same data without re-running a query).
     course_entries = []
     if master_cache:
         course_entries_query = CourseCLOMasterEntry.objects.filter(
@@ -173,23 +258,38 @@ def get_clo_master_report(request, program_id, semester_id):
         ).select_related("student", "clo", "clo__course", "course_session")
         if valid_course_ids:
             course_entries_query = course_entries_query.filter(course__id__in=valid_course_ids)
-        course_entries = course_entries_query
+        course_entries = list(course_entries_query)
+
+    # --- OPT-3: Compute finalized_count DIRECTLY from the already-loaded
+    # course_entries (avoids a redundant duplicate CourseCLOMasterEntry query
+    # with values_list + distinct + count below).
+    finalized_count = 0
+    if master_cache and course_entries:
+        _finalized_session_ids = set()
+        for entry in course_entries:
+            if entry.course_session_id:
+                _finalized_session_ids.add(entry.course_session_id)
+        finalized_count = len(_finalized_session_ids)
+
+    # Build both enrollment maps in one pass:
+    #   course_enrolled_ids_for_kpi  (for the cache-entry loop below)
+    #   course_enrolled_student_ids  (for sorted_courses rendering)
+    course_enrolled_ids_for_kpi = {}
+    course_enrolled_student_ids = {}
+
+    # First, seed course_enrolled_ids_for_kpi from sessions_by_course_id
+    # entries that are elective/selective (mirrors prior semantics, but now
+    # uses the batched elective_enrolled_by_course map).
+    for session in all_course_sessions.select_related("course"):
+        _c = session.course
+        _ids = _enrolled_ids_for_course(_c.id, _c)
+        if _ids is not None:
+            course_enrolled_ids_for_kpi[_c.id] = _ids
 
     # Precompute lookups for O(1) access.
     course_entry_lookup = {}
     kpi_achieved_lookup = {}
     kpi_total_lookup = {}  # Count total students per CLO (from cache entries)
-
-    from core.models.course import Course
-    from obe.services import _get_enrolled_student_ids_for_course_session
-
-    course_enrolled_ids_for_kpi = {}
-    for session in all_course_sessions.select_related("course"):
-        course = session.course
-        if course.offering_type in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE):
-            course_enrolled_ids_for_kpi[course.id] = {
-                str(sid) for sid in _get_enrolled_student_ids_for_course_session(session)
-            }
 
     for entry in course_entries:
         student_id = entry.student.student_id
@@ -225,7 +325,6 @@ def get_clo_master_report(request, program_id, semester_id):
 
     # Build course -> CLO catalog from the curriculum so planned but not yet
     # finalized courses still render.
-    from obe.models import CLO
     if not course_catalog and course_entries:
         # Fallback for legacy batches without a curriculum mapping.
         distinct_courses = {}
@@ -235,49 +334,50 @@ def get_clo_master_report(request, program_id, semester_id):
             {"course": course, "semester_no": semester.number}
             for course in sorted(distinct_courses.values(), key=lambda c: c.code)
         ]
+        # Re-run OPT-1/2 setup since course_catalog changed.
+        all_catalog_course_ids = [item["course"].id for item in course_catalog]
+        if all_catalog_course_ids and not all_clos_raw:
+            all_clos_raw = list(
+                _CLOModel.objects.filter(
+                    is_active=True, course_id__in=all_catalog_course_ids
+                ).order_by("course_id", "order_number", "id")
+            )
+            clos_by_course_id = defaultdict(list)
+            for clo in all_clos_raw:
+                clos_by_course_id[clo.course_id].append(clo)
 
     sorted_courses = []
     for course_item in course_catalog:
         course = course_item["course"]
-        clos_query = CLO.objects.filter(course=course, is_active=True)
-        # Elective/Selective courses are registered dynamically outside the
-        # formal CurriculumVersionCourse mapping; their CLO rows may carry
-        # a different curriculum_version or NULL. Skip the curriculum
-        # whitelist filter for those offering types otherwise CS-2001 AI
-        # elective cells show zero CLOs on coordinator side.
-        if (
-            batch
-            and batch.curriculum_version
+        course_id = course.id
+
+        # OPT-1: Use pre-fetched CLO list filtered + ordered in memory.
+        raw_clos = clos_by_course_id.get(course_id, [])
+        use_curriculum_filter = bool(
+            curriculum_version_id
             and course.offering_type not in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
-        ):
-            clos_query = clos_query.filter(curriculum_version=batch.curriculum_version)
-        course_clos = list(clos_query.order_by("order_number"))
+        )
+        if use_curriculum_filter:
+            filtered_clos = [
+                c for c in raw_clos if c.curriculum_version_id == curriculum_version_id
+            ]
+        else:
+            filtered_clos = list(raw_clos)
+        # filtered_clos already ordered by (order_number, id) from the
+        # master order_by; no extra sort needed.
+
         sorted_courses.append({
             "course": course,
             "semester_no": course_item["semester_no"],
-            "clos": course_clos,
+            "clos": filtered_clos,
         })
 
-    from core.models.course import Course
-    from obe.services import _get_enrolled_student_ids_for_course_session
+        # OPT-2/4: Build course_enrolled_student_ids in the SAME loop
+        # (eliminates second sorted_courses iteration + function calls).
+        _eids = _enrolled_ids_for_course(course_id, course)
+        course_enrolled_student_ids[course_id] = _eids
 
-    course_enrolled_student_ids = {}
-    for course_info in sorted_courses:
-        course = course_info["course"]
-        course_id = course.id
-        session = sessions_by_course_id.get(course_id)
-        if (
-            session
-            and course.offering_type
-            in (Course.OFFERING_ELECTIVE, Course.OFFERING_SELECTIVE)
-        ):
-            course_enrolled_student_ids[course_id] = set(
-                _get_enrolled_student_ids_for_course_session(session)
-            )
-        else:
-            course_enrolled_student_ids[course_id] = None
-
-    total_students = students.count()
+    total_students = len(compulsory_student_str_ids) if (compulsory_student_str_ids is not None) else students.count()
     course_cohort_totals = {}
     for course_info in sorted_courses:
         course_id = course_info["course"].id
@@ -356,17 +456,6 @@ def get_clo_master_report(request, program_id, semester_id):
             }
         )
 
-    # Calculate finalized count from valid course entries (not just cache)
-    finalized_count = 0
-    if master_cache:
-        finalized_entries_query = CourseCLOMasterEntry.objects.filter(
-            master_cache=master_cache,
-            is_active=True
-        )
-        if valid_course_ids:
-            finalized_entries_query = finalized_entries_query.filter(course__id__in=valid_course_ids)
-        finalized_course_sessions = finalized_entries_query.values_list('course_session_id', flat=True).distinct()
-        finalized_count = finalized_course_sessions.count()
     total_count = len(sorted_courses) if sorted_courses else all_course_sessions.count()
     is_fully_compiled = finalized_count >= total_count if total_count else False
 
